@@ -40,7 +40,6 @@ contract RadixMatchingEngine {
 
     address private constant _BID_SENTINEL = address(uint160(1));
     address private constant _ASK_SENTINEL = address(uint160(2));
-    bytes32 private constant _SIDE_KEY_DOMAIN = 0x3eda058f30c9f7f93e31a73b9b1dc9dd8d03a3a7cf528e739c45a27fd1681fc2;
     bytes32 private constant _REENTRANCY_GUARD_SLOT =
         0xc55a21be1c6e869c49c7a5860f6c3a83187eb30a12bcd0421f3cf4f5871dccff;
 
@@ -57,7 +56,7 @@ contract RadixMatchingEngine {
     error ReentrantCall();
     error TokenBalanceQueryFailed();
     error InexactTokenTransfer();
-    error NodeCollision();
+    error BranchAddressAlreadyUsed();
 
     modifier nonReentrant() {
         _enter();
@@ -160,7 +159,6 @@ contract RadixMatchingEngine {
 
         restingOrder = _pack(_price(order), quantity, nonce);
         if (ownerOfOrder[restingOrder] != address(0)) revert DuplicateOrder();
-        if (_isBranch(restingOrder)) revert NodeCollision();
 
         ownerOfOrder[restingOrder] = msg.sender;
         ownerOfOrder[_sideKey(restingOrder)] = isBid ? _BID_SENTINEL : _ASK_SENTINEL;
@@ -326,9 +324,8 @@ contract RadixMatchingEngine {
         }
 
         branchNode = _branchNodeForChildren(a, b);
-        if (branchNode == a || branchNode == b) revert NodeCollision();
-        if (ownerOfOrder[branchNode] != address(0)) revert NodeCollision();
-        if (branchNode != oldBranch && _isBranch(branchNode)) revert NodeCollision();
+        if (branchNode == a || branchNode == b) revert BranchAddressAlreadyUsed();
+        if (branchNode != oldBranch && _isBranch(branchNode)) revert BranchAddressAlreadyUsed();
         tree[branchNode] = Branch({leftNode: leftNode, rightNode: rightNode});
     }
 
@@ -411,13 +408,7 @@ contract RadixMatchingEngine {
     }
 
     function _sideKey(bytes32 order) private pure returns (bytes32) {
-        /// @solidity memory-safe-assembly
-        assembly {
-            mstore(0x00, _SIDE_KEY_DOMAIN)
-            mstore(0x20, order)
-            order := keccak256(0x00, 0x40)
-        }
-        return order;
+        return _pack(_price(order), 0, _nonce(order));
     }
 
     function _quoteValue(uint24 price, uint192 quantity) private pure returns (uint256) {

@@ -181,6 +181,30 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(root), address(0));
     }
 
+    function test_SideMetadataUsesZeroQuantityNamespace() public {
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
+
+        bytes32 bidSideKey = _order(100, 0, _nonce(restingBid));
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(101, 7, 0), false);
+
+        bytes32 askSideKey = _order(101, 0, _nonce(restingAsk));
+        assertEq(engine.ownerOfOrder(restingAsk), bob);
+        assertEq(engine.ownerOfOrder(askSideKey), address(2));
+
+        vm.prank(alice);
+        engine.cancel(restingBid);
+        vm.prank(bob);
+        engine.cancel(restingAsk);
+
+        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
+        assertEq(engine.ownerOfOrder(askSideKey), address(0));
+    }
+
     function test_BidAndAskBranchesCoexistInSingleMapping() public {
         vm.prank(alice);
         engine.fill(_order(100, 1, 0), true);
@@ -340,6 +364,58 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(secondBase, 1);
         assertEq(secondQuote, 0);
+        assertEq(engine.askRoot(), bytes32(0));
+    }
+
+    function test_ManySamePriceOrdersPreserveTimePriority() public {
+        uint256 orderCount = 32;
+        uint192 fillQuantity = 16;
+        uint256 fillCount = fillQuantity;
+        uint24 price = 77;
+
+        bytes32[] memory asks = new bytes32[](orderCount);
+        address[] memory makers = new address[](orderCount);
+
+        for (uint256 i; i < orderCount; ++i) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            makers[i] = address(uint160(0x1000 + i));
+            _fundAndApprove(makers[i]);
+
+            vm.prank(makers[i]);
+            asks[i] = engine.fill(_order(price, 1, 0), false);
+
+            assertEq(uint256(_nonce(asks[i])), uint256(MAX_ORDER_NONCE) - i);
+            assertEq(engine.ownerOfOrder(asks[i]), makers[i]);
+        }
+
+        address taker = address(0xB1D);
+        _fundAndApprove(taker);
+
+        vm.prank(taker);
+        bytes32 restingBid = engine.fill(_order(price, fillQuantity, 0), true);
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(base.balanceOf(taker), 1_000_000 + fillCount);
+        assertEq(quote.balanceOf(taker), 1_000_000 - price * fillCount);
+
+        for (uint256 i; i < fillCount; ++i) {
+            vm.prank(makers[i]);
+            (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(asks[i]);
+
+            assertEq(baseAmount, 0);
+            assertEq(quoteAmount, price);
+            assertEq(engine.ownerOfOrder(asks[i]), address(0));
+        }
+
+        for (uint256 i = fillCount; i < orderCount; ++i) {
+            vm.prank(makers[i]);
+            (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(asks[i]);
+
+            assertEq(baseAmount, 1);
+            assertEq(quoteAmount, 0);
+            assertEq(engine.ownerOfOrder(asks[i]), address(0));
+        }
+
         assertEq(engine.askRoot(), bytes32(0));
     }
 
