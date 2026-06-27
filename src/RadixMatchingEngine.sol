@@ -24,7 +24,8 @@ contract RadixMatchingEngine {
     bytes32 public askRoot;
 
     /// @notice Decrementing nonce. Higher nonce means earlier time priority at the same price.
-    uint40 public nextNonce = type(uint40).max;
+    /// @dev The two high nonce bits are reserved for internal namespaces.
+    uint40 public nextNonce = _MAX_ORDER_NONCE;
 
     address public immutable BASE_TOKEN;
     address public immutable QUOTE_TOKEN;
@@ -33,12 +34,17 @@ contract RadixMatchingEngine {
     uint256 private constant _QUANTITY_SHIFT = 40;
     uint256 private constant _QUANTITY_MASK = (uint256(1) << 192) - 1;
     uint256 private constant _NONCE_MASK = (uint256(1) << 40) - 1;
-    uint64 private constant _KEY_NONCE_MASK = 0x000000ffffffffff;
+    uint8 private constant _KEY_BITS = 62;
+    uint40 private constant _MAX_ORDER_NONCE = (uint40(1) << 38) - 1;
+    uint40 private constant _SIDE_NONCE_FLAG = uint40(1) << 38;
+    uint40 private constant _BID_BRANCH_NONCE_FLAG = uint40(1) << 39;
+    uint40 private constant _ASK_BRANCH_NONCE_FLAG = _BID_BRANCH_NONCE_FLAG | _SIDE_NONCE_FLAG;
     uint24 private constant _MAX_PRICE = type(uint24).max;
 
     address private constant _BID_SENTINEL = address(uint160(1));
     address private constant _ASK_SENTINEL = address(uint160(2));
-    bytes32 private constant _SIDE_KEY_DOMAIN = 0x3eda058f30c9f7f93e31a73b9b1dc9dd8d03a3a7cf528e739c45a27fd1681fc2;
+    bytes32 private constant _REENTRANCY_GUARD_SLOT =
+        0xc55a21be1c6e869c49c7a5860f6c3a83187eb30a12bcd0421f3cf4f5871dccff;
 
     event OrderRested(bytes32 indexed order, address indexed owner, bool indexed isBid);
     event OrderMatched(bytes32 indexed restingOrder, bool indexed restingIsBid, uint192 quantity, uint256 quoteAmount);
@@ -50,16 +56,28 @@ contract RadixMatchingEngine {
     error DuplicateOrder();
     error NotOrderOwner();
     error OrderNotFound();
+    error ReentrantCall();
+    error TokenBalanceQueryFailed();
+    error InexactTokenTransfer();
+    error NodeCollision();
+
+    modifier nonReentrant() {
+        _enter();
+        _;
+        _exit();
+    }
 
     constructor(address baseToken_, address quoteToken_) {
-        if (baseToken_ == address(0) || quoteToken_ == address(0)) revert InvalidToken();
+        if (baseToken_ == address(0) || quoteToken_ == address(0) || baseToken_ == quoteToken_) {
+            revert InvalidToken();
+        }
         BASE_TOKEN = baseToken_;
         QUOTE_TOKEN = quoteToken_;
     }
 
     /// @notice Submit a bid or ask. Any unfilled quantity rests on that side of the book.
     /// @dev Incoming orders must leave the low 40 nonce bits empty; the contract assigns time priority.
-    function fill(bytes32 order, bool isBid) external returns (bytes32 restingOrder) {
+    function fill(bytes32 order, bool isBid) external nonReentrant returns (bytes32 restingOrder) {
         uint24 limitPrice = _price(order);
         uint192 quantity = _quantity(order);
         if (limitPrice == 0 || quantity == 0 || _nonce(order) != 0) revert InvalidOrder();
@@ -71,28 +89,28 @@ contract RadixMatchingEngine {
         if (isBid) {
             (askRoot, remaining, baseFilled, quoteAmount) = _match(askRoot, limitPrice, remaining, false);
 
-            if (quoteAmount != 0) QUOTE_TOKEN.safeTransferFrom(msg.sender, address(this), quoteAmount);
-            if (baseFilled != 0) BASE_TOKEN.safeTransfer(msg.sender, baseFilled);
+            if (quoteAmount != 0) _safeTransferFromExact(QUOTE_TOKEN, msg.sender, address(this), quoteAmount);
+            if (baseFilled != 0) _safeTransferExact(BASE_TOKEN, msg.sender, baseFilled);
 
             if (remaining != 0) {
                 restingOrder = _rest(order, remaining, true);
-                QUOTE_TOKEN.safeTransferFrom(msg.sender, address(this), _quoteValue(limitPrice, remaining));
+                _safeTransferFromExact(QUOTE_TOKEN, msg.sender, address(this), _quoteValue(limitPrice, remaining));
             }
         } else {
             (bidRoot, remaining, baseFilled, quoteAmount) = _match(bidRoot, limitPrice, remaining, true);
 
-            if (baseFilled != 0) BASE_TOKEN.safeTransferFrom(msg.sender, address(this), baseFilled);
-            if (quoteAmount != 0) QUOTE_TOKEN.safeTransfer(msg.sender, quoteAmount);
+            if (baseFilled != 0) _safeTransferFromExact(BASE_TOKEN, msg.sender, address(this), baseFilled);
+            if (quoteAmount != 0) _safeTransferExact(QUOTE_TOKEN, msg.sender, quoteAmount);
 
             if (remaining != 0) {
                 restingOrder = _rest(order, remaining, false);
-                BASE_TOKEN.safeTransferFrom(msg.sender, address(this), remaining);
+                _safeTransferFromExact(BASE_TOKEN, msg.sender, address(this), remaining);
             }
         }
     }
 
     /// @notice Cancel an open order or claim a filled order.
-    function cancel(bytes32 order) external returns (uint256 baseAmount, uint256 quoteAmount) {
+    function cancel(bytes32 order) external nonReentrant returns (uint256 baseAmount, uint256 quoteAmount) {
         address owner = ownerOfOrder[order];
         if (owner != msg.sender) revert NotOrderOwner();
 
@@ -129,8 +147,8 @@ contract RadixMatchingEngine {
         delete ownerOfOrder[order];
         delete ownerOfOrder[_sideKey(order)];
 
-        if (baseAmount != 0) BASE_TOKEN.safeTransfer(owner, baseAmount);
-        if (quoteAmount != 0) QUOTE_TOKEN.safeTransfer(owner, quoteAmount);
+        if (baseAmount != 0) _safeTransferExact(BASE_TOKEN, owner, baseAmount);
+        if (quoteAmount != 0) _safeTransferExact(QUOTE_TOKEN, owner, quoteAmount);
 
         emit OrderCancelled(order, owner, baseAmount, quoteAmount);
     }
@@ -144,6 +162,7 @@ contract RadixMatchingEngine {
 
         restingOrder = _pack(_price(order), quantity, nonce);
         if (ownerOfOrder[restingOrder] != address(0)) revert DuplicateOrder();
+        if (_isBranch(restingOrder)) revert NodeCollision();
 
         ownerOfOrder[restingOrder] = msg.sender;
         ownerOfOrder[_sideKey(restingOrder)] = isBid ? _BID_SENTINEL : _ASK_SENTINEL;
@@ -223,12 +242,12 @@ contract RadixMatchingEngine {
     function _insert(bytes32 root, bytes32 node, bool isBidTree) private returns (bytes32) {
         if (root == bytes32(0)) return node;
 
-        if (!_isBranch(root)) return _storeBranch(root, node, isBidTree);
+        if (!_isBranch(root)) return _storeBranch(root, node, isBidTree, bytes32(0));
 
         uint64 nodeKey = _nodeKey(node, isBidTree);
         uint8 branchDepth = _branchDepth(root, isBidTree);
         if (_commonPrefix(nodeKey, _nodeKey(root, isBidTree)) < branchDepth) {
-            return _storeBranch(root, node, isBidTree);
+            return _storeBranch(root, node, isBidTree, bytes32(0));
         }
 
         Branch memory branch = tree[root];
@@ -284,12 +303,15 @@ contract RadixMatchingEngine {
         private
         returns (bytes32)
     {
-        bytes32 newBranch = _storeBranch(leftNode, rightNode, isBidTree);
+        bytes32 newBranch = _storeBranch(leftNode, rightNode, isBidTree, oldBranch);
         if (newBranch != oldBranch) delete tree[oldBranch];
         return newBranch;
     }
 
-    function _storeBranch(bytes32 a, bytes32 b, bool isBidTree) private returns (bytes32 branchNode) {
+    function _storeBranch(bytes32 a, bytes32 b, bool isBidTree, bytes32 oldBranch)
+        private
+        returns (bytes32 branchNode)
+    {
         if (a == bytes32(0)) return b;
         if (b == bytes32(0)) return a;
 
@@ -305,18 +327,32 @@ contract RadixMatchingEngine {
             rightNode = a;
         }
 
-        uint64 prefix = _prefix(aKey, branchDepth);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint24 prefixPrice = uint24(prefix >> 40);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint40 prefixNonce = uint40(prefix & _KEY_NONCE_MASK);
-        branchNode = _pack(prefixPrice, _nodeQuantity(a) + _nodeQuantity(b), prefixNonce);
+        branchNode = _branchNode(aKey, branchDepth, _nodeQuantity(a) + _nodeQuantity(b), isBidTree);
+        if (branchNode == a || branchNode == b) revert NodeCollision();
+        if (ownerOfOrder[branchNode] != address(0)) revert NodeCollision();
+        if (branchNode != oldBranch && _isBranch(branchNode)) revert NodeCollision();
         tree[branchNode] = Branch({leftNode: leftNode, rightNode: rightNode});
     }
 
     function _canMatch(bytes32 restingOrder, uint24 limitPrice, bool restingIsBid) private pure returns (bool) {
         uint24 restingPrice = _price(restingOrder);
         return restingIsBid ? restingPrice >= limitPrice : restingPrice <= limitPrice;
+    }
+
+    function _branchNode(uint64 key, uint8 depth, uint192 quantity, bool isBidTree) private pure returns (bytes32) {
+        uint64 branchCode = _branchCode(key, depth);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint24 prefixPrice = uint24(branchCode >> 38);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint40 prefixNonce = uint40(branchCode & uint64(_MAX_ORDER_NONCE));
+        uint40 branchFlag = isBidTree ? _BID_BRANCH_NONCE_FLAG : _ASK_BRANCH_NONCE_FLAG;
+        return _pack(prefixPrice, quantity, branchFlag | prefixNonce);
+    }
+
+    function _branchCode(uint64 key, uint8 depth) private pure returns (uint64) {
+        // Heap-index the prefix so both prefix bits and prefix length are part of the branch address.
+        uint64 prefixBits = depth == 0 ? 0 : key >> (_KEY_BITS - depth);
+        return ((uint64(1) << depth) - 1) + prefixBits;
     }
 
     function _isBranch(bytes32 node) private view returns (bool) {
@@ -329,37 +365,30 @@ contract RadixMatchingEngine {
     }
 
     function _nodeKey(bytes32 node, bool isBidTree) private view returns (uint64) {
-        return _isBranch(node) ? _pathKey(node) : _sortKey(node, isBidTree);
+        if (!_isBranch(node)) return _sortKey(node, isBidTree);
+        Branch memory branch = tree[node];
+        return _nodeKey(branch.leftNode != bytes32(0) ? branch.leftNode : branch.rightNode, isBidTree);
     }
 
     function _nodeQuantity(bytes32 node) private pure returns (uint192) {
         return _quantity(node);
     }
 
-    function _pathKey(bytes32 node) private pure returns (uint64) {
-        return (uint64(_price(node)) << 40) | uint64(_nonce(node));
-    }
-
     function _sortKey(bytes32 order, bool isBidTree) private pure returns (uint64) {
         uint24 price = _price(order);
         uint40 nonce = _nonce(order);
         uint24 sortablePrice = isBidTree ? price : _MAX_PRICE - price;
-        return (uint64(sortablePrice) << 40) | uint64(nonce);
+        return (uint64(sortablePrice) << 38) | uint64(nonce);
     }
 
     function _commonPrefix(uint64 a, uint64 b) private pure returns (uint8 prefixLength) {
-        for (; prefixLength < 64; ++prefixLength) {
+        for (; prefixLength < _KEY_BITS; ++prefixLength) {
             if (_bit(a, prefixLength) != _bit(b, prefixLength)) return prefixLength;
         }
     }
 
     function _bit(uint64 key, uint8 depth) private pure returns (bool) {
-        return ((key >> (63 - depth)) & 1) == 1;
-    }
-
-    function _prefix(uint64 key, uint8 depth) private pure returns (uint64) {
-        if (depth == 0) return 0;
-        return key & (type(uint64).max << (64 - depth));
+        return ((key >> (_KEY_BITS - 1 - depth)) & 1) == 1;
     }
 
     function _orderIsBid(bytes32 order) private view returns (bool) {
@@ -370,17 +399,59 @@ contract RadixMatchingEngine {
     }
 
     function _sideKey(bytes32 order) private pure returns (bytes32) {
-        /// @solidity memory-safe-assembly
-        assembly {
-            mstore(0x00, _SIDE_KEY_DOMAIN)
-            mstore(0x20, order)
-            order := keccak256(0x00, 0x40)
-        }
-        return order;
+        // Side metadata uses the 01 nonce tag; live orders use 00 and branches use 10/11.
+        return _pack(_price(order), _quantity(order), _SIDE_NONCE_FLAG | (_nonce(order) & _MAX_ORDER_NONCE));
     }
 
     function _quoteValue(uint24 price, uint192 quantity) private pure returns (uint256) {
         return uint256(price) * uint256(quantity);
+    }
+
+    function _safeTransferFromExact(address token, address from, address to, uint256 amount) private {
+        uint256 balanceBefore = _balanceOf(token, to);
+        token.safeTransferFrom(from, to, amount);
+        if (_balanceOf(token, to) != balanceBefore + amount) revert InexactTokenTransfer();
+    }
+
+    function _safeTransferExact(address token, address to, uint256 amount) private {
+        uint256 balanceBefore = _balanceOf(token, to);
+        token.safeTransfer(to, amount);
+        if (_balanceOf(token, to) != balanceBefore + amount) revert InexactTokenTransfer();
+    }
+
+    function _balanceOf(address token, address account) private view returns (uint256 result) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            mstore(0x00, 0x70a0823100000000000000000000000000000000000000000000000000000000)
+            mstore(0x04, account)
+            if iszero(staticcall(gas(), token, 0x00, 0x24, 0x00, 0x20)) {
+                mstore(0x00, 0xa8b0ccad) // `TokenBalanceQueryFailed()`.
+                revert(0x1c, 0x04)
+            }
+            if lt(returndatasize(), 0x20) {
+                mstore(0x00, 0xa8b0ccad) // `TokenBalanceQueryFailed()`.
+                revert(0x1c, 0x04)
+            }
+            result := mload(0x00)
+        }
+    }
+
+    function _enter() private {
+        /// @solidity memory-safe-assembly
+        assembly {
+            if tload(_REENTRANCY_GUARD_SLOT) {
+                mstore(0x00, 0x37ed32e8) // `ReentrantCall()`.
+                revert(0x1c, 0x04)
+            }
+            tstore(_REENTRANCY_GUARD_SLOT, 1)
+        }
+    }
+
+    function _exit() private {
+        /// @solidity memory-safe-assembly
+        assembly {
+            tstore(_REENTRANCY_GUARD_SLOT, 0)
+        }
     }
 
     function _withQuantity(bytes32 order, uint192 quantity) private pure returns (bytes32) {
