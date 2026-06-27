@@ -65,10 +65,8 @@ contract ReentrantERC20 is TestERC20 {
 }
 
 contract RadixMatchingEngineTest is Test {
-    uint40 internal constant MAX_ORDER_NONCE = (uint40(1) << 38) - 1;
-    uint40 internal constant SIDE_NONCE_FLAG = uint40(1) << 38;
-    uint40 internal constant BID_BRANCH_NONCE_FLAG = uint40(1) << 39;
-    uint40 internal constant ASK_BRANCH_NONCE_FLAG = BID_BRANCH_NONCE_FLAG | SIDE_NONCE_FLAG;
+    uint40 internal constant BRANCH_NONCE = type(uint40).max;
+    uint40 internal constant MAX_ORDER_NONCE = BRANCH_NONCE - 1;
 
     TestERC20 internal base;
     TestERC20 internal quote;
@@ -120,7 +118,7 @@ contract RadixMatchingEngineTest is Test {
         new RadixMatchingEngine(address(base), address(base));
     }
 
-    function test_InternalNodesUseReservedNonceTags() public {
+    function test_BranchesUseMaxNonceAndOrdersDecrementBelowIt() public {
         vm.prank(alice);
         bytes32 firstBid = engine.fill(_order(100, 1, 0), true);
 
@@ -132,8 +130,7 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 root = engine.bidRoot();
         assertEq(_nonce(secondBid), MAX_ORDER_NONCE - 1);
-        assertEq(_nonce(root) & BID_BRANCH_NONCE_FLAG, BID_BRANCH_NONCE_FLAG);
-        assertEq(_nonce(root) & SIDE_NONCE_FLAG, 0);
+        assertEq(_nonce(root), BRANCH_NONCE);
         assertEq(engine.ownerOfOrder(root), address(0));
     }
 
@@ -155,9 +152,8 @@ contract RadixMatchingEngineTest is Test {
         assertTrue(bidRoot != bytes32(0));
         assertTrue(askRoot != bytes32(0));
         assertTrue(bidRoot != askRoot);
-        assertEq(_nonce(bidRoot) & BID_BRANCH_NONCE_FLAG, BID_BRANCH_NONCE_FLAG);
-        assertEq(_nonce(bidRoot) & SIDE_NONCE_FLAG, 0);
-        assertEq(_nonce(askRoot) & ASK_BRANCH_NONCE_FLAG, ASK_BRANCH_NONCE_FLAG);
+        assertEq(_nonce(bidRoot), BRANCH_NONCE);
+        assertEq(_nonce(askRoot), BRANCH_NONCE);
     }
 
     function test_MultipleSamePriceBranchesDoNotAlias() public {

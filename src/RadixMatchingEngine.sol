@@ -24,7 +24,7 @@ contract RadixMatchingEngine {
     bytes32 public askRoot;
 
     /// @notice Decrementing nonce. Higher nonce means earlier time priority at the same price.
-    /// @dev The two high nonce bits are reserved for internal namespaces.
+    /// @dev The maximum nonce value is reserved for branch nodes.
     uint40 public nextNonce = _MAX_ORDER_NONCE;
 
     address public immutable BASE_TOKEN;
@@ -34,15 +34,13 @@ contract RadixMatchingEngine {
     uint256 private constant _QUANTITY_SHIFT = 40;
     uint256 private constant _QUANTITY_MASK = (uint256(1) << 192) - 1;
     uint256 private constant _NONCE_MASK = (uint256(1) << 40) - 1;
-    uint8 private constant _KEY_BITS = 62;
-    uint40 private constant _MAX_ORDER_NONCE = (uint40(1) << 38) - 1;
-    uint40 private constant _SIDE_NONCE_FLAG = uint40(1) << 38;
-    uint40 private constant _BID_BRANCH_NONCE_FLAG = uint40(1) << 39;
-    uint40 private constant _ASK_BRANCH_NONCE_FLAG = _BID_BRANCH_NONCE_FLAG | _SIDE_NONCE_FLAG;
+    uint40 private constant _BRANCH_NONCE = type(uint40).max;
+    uint40 private constant _MAX_ORDER_NONCE = _BRANCH_NONCE - 1;
     uint24 private constant _MAX_PRICE = type(uint24).max;
 
     address private constant _BID_SENTINEL = address(uint160(1));
     address private constant _ASK_SENTINEL = address(uint160(2));
+    bytes32 private constant _SIDE_KEY_DOMAIN = 0x3eda058f30c9f7f93e31a73b9b1dc9dd8d03a3a7cf528e739c45a27fd1681fc2;
     bytes32 private constant _REENTRANCY_GUARD_SLOT =
         0xc55a21be1c6e869c49c7a5860f6c3a83187eb30a12bcd0421f3cf4f5871dccff;
 
@@ -327,7 +325,7 @@ contract RadixMatchingEngine {
             rightNode = a;
         }
 
-        branchNode = _branchNode(aKey, branchDepth, _nodeQuantity(a) + _nodeQuantity(b), isBidTree);
+        branchNode = _branchNodeForChildren(a, b);
         if (branchNode == a || branchNode == b) revert NodeCollision();
         if (ownerOfOrder[branchNode] != address(0)) revert NodeCollision();
         if (branchNode != oldBranch && _isBranch(branchNode)) revert NodeCollision();
@@ -339,19 +337,23 @@ contract RadixMatchingEngine {
         return restingIsBid ? restingPrice >= limitPrice : restingPrice <= limitPrice;
     }
 
-    function _branchNode(uint64 key, uint8 depth, uint192 quantity, bool isBidTree) private pure returns (bytes32) {
-        uint64 branchCode = _branchCode(key, depth);
+    function _branchNodeForChildren(bytes32 a, bytes32 b) private view returns (bytes32) {
+        uint64 aAddressKey = _nodeAddressKey(a);
+        uint64 bAddressKey = _nodeAddressKey(b);
+        uint8 addressDepth = _commonPrefix(aAddressKey, bAddressKey);
+        if (addressDepth == 64) revert DuplicateOrder();
+        return _branchNode(aAddressKey, addressDepth, _nodeQuantity(a) + _nodeQuantity(b));
+    }
+
+    function _branchNode(uint64 key, uint8 depth, uint192 quantity) private pure returns (bytes32) {
+        uint64 prefix = _branchCode(key, depth);
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint24 prefixPrice = uint24(branchCode >> 38);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint40 prefixNonce = uint40(branchCode & uint64(_MAX_ORDER_NONCE));
-        uint40 branchFlag = isBidTree ? _BID_BRANCH_NONCE_FLAG : _ASK_BRANCH_NONCE_FLAG;
-        return _pack(prefixPrice, quantity, branchFlag | prefixNonce);
+        uint24 prefixPrice = uint24(prefix);
+        return _pack(prefixPrice, quantity, _BRANCH_NONCE);
     }
 
     function _branchCode(uint64 key, uint8 depth) private pure returns (uint64) {
-        // Heap-index the prefix so both prefix bits and prefix length are part of the branch address.
-        uint64 prefixBits = depth == 0 ? 0 : key >> (_KEY_BITS - depth);
+        uint64 prefixBits = depth == 0 ? 0 : key >> (64 - depth);
         return ((uint64(1) << depth) - 1) + prefixBits;
     }
 
@@ -370,6 +372,12 @@ contract RadixMatchingEngine {
         return _nodeKey(branch.leftNode != bytes32(0) ? branch.leftNode : branch.rightNode, isBidTree);
     }
 
+    function _nodeAddressKey(bytes32 node) private view returns (uint64) {
+        if (!_isBranch(node)) return _pathKey(node);
+        Branch memory branch = tree[node];
+        return _nodeAddressKey(branch.leftNode != bytes32(0) ? branch.leftNode : branch.rightNode);
+    }
+
     function _nodeQuantity(bytes32 node) private pure returns (uint192) {
         return _quantity(node);
     }
@@ -378,17 +386,21 @@ contract RadixMatchingEngine {
         uint24 price = _price(order);
         uint40 nonce = _nonce(order);
         uint24 sortablePrice = isBidTree ? price : _MAX_PRICE - price;
-        return (uint64(sortablePrice) << 38) | uint64(nonce);
+        return (uint64(sortablePrice) << 40) | uint64(nonce);
+    }
+
+    function _pathKey(bytes32 order) private pure returns (uint64) {
+        return (uint64(_price(order)) << 40) | uint64(_nonce(order));
     }
 
     function _commonPrefix(uint64 a, uint64 b) private pure returns (uint8 prefixLength) {
-        for (; prefixLength < _KEY_BITS; ++prefixLength) {
+        for (; prefixLength < 64; ++prefixLength) {
             if (_bit(a, prefixLength) != _bit(b, prefixLength)) return prefixLength;
         }
     }
 
     function _bit(uint64 key, uint8 depth) private pure returns (bool) {
-        return ((key >> (_KEY_BITS - 1 - depth)) & 1) == 1;
+        return ((key >> (63 - depth)) & 1) == 1;
     }
 
     function _orderIsBid(bytes32 order) private view returns (bool) {
@@ -399,8 +411,13 @@ contract RadixMatchingEngine {
     }
 
     function _sideKey(bytes32 order) private pure returns (bytes32) {
-        // Side metadata uses the 01 nonce tag; live orders use 00 and branches use 10/11.
-        return _pack(_price(order), _quantity(order), _SIDE_NONCE_FLAG | (_nonce(order) & _MAX_ORDER_NONCE));
+        /// @solidity memory-safe-assembly
+        assembly {
+            mstore(0x00, _SIDE_KEY_DOMAIN)
+            mstore(0x20, order)
+            order := keccak256(0x00, 0x40)
+        }
+        return order;
     }
 
     function _quoteValue(uint24 price, uint192 quantity) private pure returns (uint256) {

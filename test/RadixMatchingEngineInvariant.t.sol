@@ -100,7 +100,6 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     uint256 private constant _PRICE_SHIFT = 232;
     uint256 private constant _QUANTITY_SHIFT = 40;
     uint256 private constant _QUANTITY_MASK = (uint256(1) << 192) - 1;
-    uint8 private constant _KEY_BITS = 62;
     uint24 private constant _MAX_PRICE = type(uint24).max;
 
     function setUp() public {
@@ -179,17 +178,17 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         uint24 price = _price(order);
         uint40 nonce = _nonce(order);
         uint24 sortablePrice = isBidTree ? price : _MAX_PRICE - price;
-        return (uint64(sortablePrice) << 38) | uint64(nonce);
+        return (uint64(sortablePrice) << 40) | uint64(nonce);
     }
 
     function _commonPrefix(uint64 a, uint64 b) private pure returns (uint8 prefixLength) {
-        for (; prefixLength < _KEY_BITS; ++prefixLength) {
+        for (; prefixLength < 64; ++prefixLength) {
             if (_bit(a, prefixLength) != _bit(b, prefixLength)) return prefixLength;
         }
     }
 
     function _bit(uint64 key, uint8 depth) private pure returns (bool) {
-        return ((key >> (_KEY_BITS - 1 - depth)) & 1) == 1;
+        return ((key >> (63 - depth)) & 1) == 1;
     }
 
     function _quoteValue(uint24 price, uint192 quantity) private pure returns (uint256) {
