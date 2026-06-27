@@ -263,6 +263,22 @@ contract RadixMatchingEngineTest is Test {
         vm.stopPrank();
     }
 
+    function test_FeeOnTransferQuoteTokenReverts() public {
+        TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
+        FeeERC20 feeQuote = new FeeERC20();
+        RadixMatchingEngine feeEngine = new RadixMatchingEngine(address(plainBase), address(feeQuote));
+
+        plainBase.mint(alice, 1_000);
+        feeQuote.mint(alice, 1_000);
+
+        vm.startPrank(alice);
+        plainBase.approve(address(feeEngine), type(uint256).max);
+        feeQuote.approve(address(feeEngine), type(uint256).max);
+        vm.expectRevert(RadixMatchingEngine.InexactTokenTransfer.selector);
+        feeEngine.fill(_order(10, 2, 0), true);
+        vm.stopPrank();
+    }
+
     function test_ReentrantTokenPayoutReverts() public {
         ReentrantERC20 reentrantBase = new ReentrantERC20();
         TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
@@ -294,6 +310,37 @@ contract RadixMatchingEngineTest is Test {
         assertEq(reentrantBase.balanceOf(bob), 1_001);
     }
 
+    function test_ReentrantQuotePayoutReverts() public {
+        TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
+        ReentrantERC20 reentrantQuote = new ReentrantERC20();
+        RadixMatchingEngine reentrantEngine = new RadixMatchingEngine(address(plainBase), address(reentrantQuote));
+
+        plainBase.mint(alice, 1_000);
+        plainBase.mint(bob, 1_000);
+        reentrantQuote.mint(alice, 1_000);
+        reentrantQuote.mint(bob, 1_000);
+
+        vm.startPrank(alice);
+        plainBase.approve(address(reentrantEngine), type(uint256).max);
+        reentrantQuote.approve(address(reentrantEngine), type(uint256).max);
+        bytes32 restingBid = reentrantEngine.fill(_order(10, 1, 0), true);
+        vm.stopPrank();
+
+        vm.startPrank(bob);
+        plainBase.approve(address(reentrantEngine), type(uint256).max);
+        reentrantQuote.approve(address(reentrantEngine), type(uint256).max);
+        vm.stopPrank();
+
+        reentrantQuote.arm(reentrantEngine, restingBid);
+
+        vm.prank(bob);
+        reentrantEngine.fill(_order(10, 1, 0), false);
+
+        assertFalse(reentrantQuote.reentrySucceeded());
+        assertEq(reentrantQuote.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantQuote.balanceOf(bob), 1_010);
+    }
+
     function test_BidConsumesAskAndRestsRemainder() public {
         vm.prank(bob);
         bytes32 restingAsk = engine.fill(_order(90, 3, 0), false);
@@ -319,6 +366,46 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(aliceBase, 0);
         assertEq(aliceQuote, 200);
+        assertEq(engine.bidRoot(), bytes32(0));
+    }
+
+    function test_BidPartiallyFillsBestAsk() public {
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(80, 5, 0), false);
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(base.balanceOf(alice), 1_000_002);
+        assertEq(quote.balanceOf(alice), 1_000_000 - 160);
+        assertEq(engine.askRoot(), _order(80, 3, MAX_ORDER_NONCE));
+
+        vm.prank(bob);
+        (uint256 bobBase, uint256 bobQuote) = engine.cancel(restingAsk);
+
+        assertEq(bobBase, 3);
+        assertEq(bobQuote, 160);
+        assertEq(engine.askRoot(), bytes32(0));
+    }
+
+    function test_FullyFilledBidClaimPaysBase() public {
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
+
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(base.balanceOf(bob), 1_000_000 - 2);
+        assertEq(quote.balanceOf(bob), 1_000_200);
+
+        vm.prank(alice);
+        (uint256 aliceBase, uint256 aliceQuote) = engine.cancel(restingBid);
+
+        assertEq(aliceBase, 2);
+        assertEq(aliceQuote, 0);
+        assertEq(base.balanceOf(alice), 1_000_002);
         assertEq(engine.bidRoot(), bytes32(0));
     }
 
