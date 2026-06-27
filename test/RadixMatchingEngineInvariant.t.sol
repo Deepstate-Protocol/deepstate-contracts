@@ -23,6 +23,11 @@ contract RadixMatchingEngineHandler is Test {
     address[] internal actors;
     TrackedOrder[] internal trackedOrders;
 
+    uint256 public unexpectedFillReverts;
+    uint256 public unexpectedCancelReverts;
+    bytes4 public lastFillRevertSelector;
+    bytes4 public lastCancelRevertSelector;
+
     constructor(TestERC20 base_, TestERC20 quote_, RadixMatchingEngine engine_) {
         BASE = base_;
         QUOTE = quote_;
@@ -62,7 +67,13 @@ contract RadixMatchingEngineHandler is Test {
         vm.prank(tracked.owner);
         try ENGINE.cancel(tracked.order) {
             tracked.active = false;
-        } catch {}
+        } catch (bytes memory reason) {
+            ++unexpectedCancelReverts;
+            if (reason.length >= 4) {
+                // forge-lint: disable-next-line(unsafe-typecast)
+                lastCancelRevertSelector = bytes4(reason);
+            }
+        }
     }
 
     function orderCount() external view returns (uint256) {
@@ -87,7 +98,13 @@ contract RadixMatchingEngineHandler is Test {
             if (restingOrder != bytes32(0)) {
                 trackedOrders.push(TrackedOrder({order: restingOrder, owner: actor, isBid: isBid, active: true}));
             }
-        } catch {}
+        } catch (bytes memory reason) {
+            ++unexpectedFillReverts;
+            if (reason.length >= 4) {
+                // forge-lint: disable-next-line(unsafe-typecast)
+                lastFillRevertSelector = bytes4(reason);
+            }
+        }
     }
 }
 
@@ -100,6 +117,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     uint256 private constant _PRICE_SHIFT = 232;
     uint256 private constant _QUANTITY_SHIFT = 40;
     uint256 private constant _QUANTITY_MASK = (uint256(1) << 192) - 1;
+    uint40 private constant _BRANCH_NONCE = type(uint40).max;
     uint24 private constant _MAX_PRICE = type(uint24).max;
 
     function setUp() public {
@@ -138,10 +156,43 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         assertEq(quote.balanceOf(address(engine)), expectedQuote, "quote collateral");
     }
 
+    function invariant_NoUnexpectedHandlerReverts() public view {
+        assertEq(handler.unexpectedFillReverts(), 0, "unexpected fill revert");
+        assertEq(handler.unexpectedCancelReverts(), 0, "unexpected cancel revert");
+    }
+
+    function invariant_TreeAggregatesAndBranchShape() public view {
+        _assertSubtree(engine.bidRoot(), 0);
+        _assertSubtree(engine.askRoot(), 0);
+    }
+
     function _remainingQuantity(bytes32 order, bool isBid) private view returns (uint192) {
         bytes32 root = isBid ? engine.bidRoot() : engine.askRoot();
         bytes32 current = _find(root, order, isBid);
         return current == bytes32(0) ? 0 : _quantity(current);
+    }
+
+    function _assertSubtree(bytes32 node, uint256 depth) private view returns (uint192 quantity) {
+        if (node == bytes32(0)) return 0;
+        assertLe(depth, 64, "radix depth");
+
+        if (!_isBranch(node)) {
+            assertGt(_quantity(node), 0, "leaf quantity");
+            assertLt(_nonce(node), _BRANCH_NONCE, "leaf nonce");
+            return _quantity(node);
+        }
+
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+        assertTrue(leftNode != bytes32(0), "left child");
+        assertTrue(rightNode != bytes32(0), "right child");
+        assertEq(_nonce(node), _BRANCH_NONCE, "branch nonce");
+        assertEq(engine.ownerOfOrder(node), address(0), "branch owner");
+        assertEq(node, _branchNodeForChildren(leftNode, rightNode), "branch address");
+
+        uint192 leftQuantity = _assertSubtree(leftNode, depth + 1);
+        uint192 rightQuantity = _assertSubtree(rightNode, depth + 1);
+        quantity = leftQuantity + rightQuantity;
+        assertEq(_quantity(node), quantity, "branch quantity");
     }
 
     function _find(bytes32 root, bytes32 order, bool isBidTree) private view returns (bytes32) {
@@ -174,11 +225,36 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         return _nodeKey(leftNode != bytes32(0) ? leftNode : rightNode, isBidTree);
     }
 
+    function _branchNodeForChildren(bytes32 leftNode, bytes32 rightNode) private view returns (bytes32) {
+        uint64 leftAddressKey = _nodeAddressKey(leftNode);
+        uint64 rightAddressKey = _nodeAddressKey(rightNode);
+        uint8 addressDepth = _commonPrefix(leftAddressKey, rightAddressKey);
+        assertLt(addressDepth, 64, "branch address depth");
+        return _pack(
+            uint24(_branchCode(leftAddressKey, addressDepth)), _quantity(leftNode) + _quantity(rightNode), _BRANCH_NONCE
+        );
+    }
+
+    function _nodeAddressKey(bytes32 node) private view returns (uint64) {
+        if (!_isBranch(node)) return _pathKey(node);
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+        return _nodeAddressKey(leftNode != bytes32(0) ? leftNode : rightNode);
+    }
+
     function _sortKey(bytes32 order, bool isBidTree) private pure returns (uint64) {
         uint24 price = _price(order);
         uint40 nonce = _nonce(order);
         uint24 sortablePrice = isBidTree ? price : _MAX_PRICE - price;
         return (uint64(sortablePrice) << 40) | uint64(nonce);
+    }
+
+    function _pathKey(bytes32 order) private pure returns (uint64) {
+        return (uint64(_price(order)) << 40) | uint64(_nonce(order));
+    }
+
+    function _branchCode(uint64 key, uint8 depth) private pure returns (uint64) {
+        uint64 prefixBits = depth == 0 ? 0 : key >> (64 - depth);
+        return ((uint64(1) << depth) - 1) + prefixBits;
     }
 
     function _commonPrefix(uint64 a, uint64 b) private pure returns (uint8 prefixLength) {
@@ -193,6 +269,10 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
     function _quoteValue(uint24 price, uint192 quantity) private pure returns (uint256) {
         return uint256(price) * uint256(quantity);
+    }
+
+    function _pack(uint24 price, uint192 quantity, uint40 nonce) private pure returns (bytes32) {
+        return bytes32((uint256(price) << _PRICE_SHIFT) | (uint256(quantity) << _QUANTITY_SHIFT) | uint256(nonce));
     }
 
     function _price(bytes32 order) private pure returns (uint24) {
