@@ -118,6 +118,53 @@ contract RadixMatchingEngineTest is Test {
         new RadixMatchingEngine(address(base), address(base));
     }
 
+    function test_InvalidOrdersRevert() public {
+        vm.startPrank(alice);
+
+        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        engine.fill(_order(0, 1, 0), true);
+
+        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        engine.fill(_order(1, 0, 0), true);
+
+        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        engine.fill(_order(1, 1, 1), true);
+
+        vm.stopPrank();
+    }
+
+    function test_OnlyOwnerCanCancel() public {
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
+
+        vm.prank(bob);
+        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        engine.cancel(restingBid);
+
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertEq(engine.bidRoot(), restingBid);
+        assertEq(quote.balanceOf(address(engine)), 200);
+    }
+
+    function test_FilledOrderClaimCanOnlyHappenOnce() public {
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
+
+        vm.prank(alice);
+        engine.fill(_order(100, 2, 0), true);
+
+        vm.prank(bob);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(restingAsk);
+
+        assertEq(baseAmount, 0);
+        assertEq(quoteAmount, 180);
+        assertEq(engine.ownerOfOrder(restingAsk), address(0));
+
+        vm.prank(bob);
+        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        engine.cancel(restingAsk);
+    }
+
     function test_BranchesUseMaxNonceAndOrdersDecrementBelowIt() public {
         vm.prank(alice);
         bytes32 firstBid = engine.fill(_order(100, 1, 0), true);

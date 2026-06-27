@@ -166,6 +166,15 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         _assertSubtree(engine.askRoot(), 0);
     }
 
+    function invariant_OwnerMappingMatchesTrackedOrders() public view {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order, address owner,, bool active) = handler.orderAt(i);
+            assertEq(engine.ownerOfOrder(order), active ? owner : address(0), "tracked owner");
+        }
+    }
+
     function _remainingQuantity(bytes32 order, bool isBid) private view returns (uint192) {
         bytes32 root = isBid ? engine.bidRoot() : engine.askRoot();
         bytes32 current = _find(root, order, isBid);
