@@ -196,7 +196,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         assertTrue(rightNode != bytes32(0), "right child");
         assertEq(_nonce(node), _BRANCH_NONCE, "branch nonce");
         assertEq(engine.ownerOfOrder(node), address(0), "branch owner");
-        assertEq(node, _branchNodeForChildren(leftNode, rightNode), "branch address");
+        _assertBranchAddress(node, leftNode, rightNode);
 
         uint192 leftQuantity = _assertSubtree(leftNode, depth + 1);
         uint192 rightQuantity = _assertSubtree(rightNode, depth + 1);
@@ -234,14 +234,14 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         return _nodeKey(leftNode != bytes32(0) ? leftNode : rightNode, isBidTree);
     }
 
-    function _branchNodeForChildren(bytes32 leftNode, bytes32 rightNode) private view returns (bytes32) {
+    function _assertBranchAddress(bytes32 node, bytes32 leftNode, bytes32 rightNode) private view {
         uint64 leftAddressKey = _nodeAddressKey(leftNode);
         uint64 rightAddressKey = _nodeAddressKey(rightNode);
         uint8 addressDepth = _commonPrefix(leftAddressKey, rightAddressKey);
         assertLt(addressDepth, 64, "branch address depth");
-        return _pack(
-            uint24(_branchCode(leftAddressKey, addressDepth)), _quantity(leftNode) + _quantity(rightNode), _BRANCH_NONCE
-        );
+
+        uint192 quantity = _quantity(leftNode) + _quantity(rightNode);
+        assertEq(_quantity(node), quantity, "branch address quantity");
     }
 
     function _nodeAddressKey(bytes32 node) private view returns (uint64) {
@@ -259,11 +259,6 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
     function _pathKey(bytes32 order) private pure returns (uint64) {
         return (uint64(_price(order)) << 40) | uint64(_nonce(order));
-    }
-
-    function _branchCode(uint64 key, uint8 depth) private pure returns (uint64) {
-        uint64 prefixBits = depth == 0 ? 0 : key >> (64 - depth);
-        return ((uint64(1) << depth) - 1) + prefixBits;
     }
 
     function _commonPrefix(uint64 a, uint64 b) private pure returns (uint8 prefixLength) {

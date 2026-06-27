@@ -56,7 +56,7 @@ contract RadixMatchingEngine {
     error ReentrantCall();
     error TokenBalanceQueryFailed();
     error InexactTokenTransfer();
-    error BranchAddressAlreadyUsed();
+    error BranchAddressSpaceExhausted();
 
     modifier nonReentrant() {
         _enter();
@@ -323,9 +323,7 @@ contract RadixMatchingEngine {
             rightNode = a;
         }
 
-        branchNode = _branchNodeForChildren(a, b);
-        if (branchNode == a || branchNode == b) revert BranchAddressAlreadyUsed();
-        if (branchNode != oldBranch && _isBranch(branchNode)) revert BranchAddressAlreadyUsed();
+        branchNode = _branchNodeForChildren(a, b, oldBranch);
         tree[branchNode] = Branch({leftNode: leftNode, rightNode: rightNode});
     }
 
@@ -334,19 +332,33 @@ contract RadixMatchingEngine {
         return restingIsBid ? restingPrice >= limitPrice : restingPrice <= limitPrice;
     }
 
-    function _branchNodeForChildren(bytes32 a, bytes32 b) private view returns (bytes32) {
+    function _branchNodeForChildren(bytes32 a, bytes32 b, bytes32 oldBranch) private view returns (bytes32) {
         uint64 aAddressKey = _nodeAddressKey(a);
         uint64 bAddressKey = _nodeAddressKey(b);
         uint8 addressDepth = _commonPrefix(aAddressKey, bAddressKey);
         if (addressDepth == 64) revert DuplicateOrder();
-        return _branchNode(aAddressKey, addressDepth, _nodeQuantity(a) + _nodeQuantity(b));
+        return
+            _resolveBranchNode(_branchCode(aAddressKey, addressDepth), _nodeQuantity(a) + _nodeQuantity(b), oldBranch);
     }
 
-    function _branchNode(uint64 key, uint8 depth, uint192 quantity) private pure returns (bytes32) {
-        uint64 prefix = _branchCode(key, depth);
+    function _resolveBranchNode(uint64 branchCode, uint192 quantity, bytes32 oldBranch)
+        private
+        view
+        returns (bytes32 branchNode)
+    {
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint24 prefixPrice = uint24(prefix);
-        return _pack(prefixPrice, quantity, _BRANCH_NONCE);
+        uint24 startPrice = uint24(branchCode);
+        uint24 branchPrice = startPrice;
+
+        while (true) {
+            branchNode = _pack(branchPrice, quantity, _BRANCH_NONCE);
+            if (branchNode == oldBranch || !_isBranch(branchNode)) return branchNode;
+
+            unchecked {
+                ++branchPrice;
+            }
+            if (branchPrice == startPrice) revert BranchAddressSpaceExhausted();
+        }
     }
 
     function _branchCode(uint64 key, uint8 depth) private pure returns (uint64) {

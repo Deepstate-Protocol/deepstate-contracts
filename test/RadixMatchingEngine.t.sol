@@ -247,6 +247,80 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(fourthAsk), address(0xD00D));
     }
 
+    function test_BranchAddressProbeHandlesAliasSequence() public {
+        uint24[40] memory prices = [
+            uint24(549),
+            uint24(308),
+            uint24(394),
+            uint24(742),
+            uint24(69),
+            uint24(591),
+            uint24(261),
+            uint24(806),
+            uint24(179),
+            uint24(494),
+            uint24(247),
+            uint24(605),
+            uint24(906),
+            uint24(801),
+            uint24(69),
+            uint24(626),
+            uint24(781),
+            uint24(992),
+            uint24(666),
+            uint24(731),
+            uint24(256),
+            uint24(716),
+            uint24(853),
+            uint24(822),
+            uint24(339),
+            uint24(658),
+            uint24(10),
+            uint24(746),
+            uint24(244),
+            uint24(938),
+            uint24(216),
+            uint24(77),
+            uint24(417),
+            uint24(851),
+            uint24(990),
+            uint24(166),
+            uint24(573),
+            uint24(717),
+            uint24(634),
+            uint24(179)
+        ];
+
+        bytes32[] memory orders = new bytes32[](prices.length);
+        uint256 quoteSpent;
+
+        for (uint256 i; i < prices.length; ++i) {
+            vm.prank(alice);
+            orders[i] = engine.fill(_order(prices[i], 1, 0), true);
+
+            assertEq(engine.ownerOfOrder(orders[i]), alice);
+            quoteSpent += prices[i];
+        }
+
+        assertEq(quote.balanceOf(address(engine)), quoteSpent);
+
+        (bytes32 baseLeft, bytes32 baseRight) = engine.tree(_order(type(uint24).max - 1, 2, BRANCH_NONCE));
+        (bytes32 probeLeft, bytes32 probeRight) = engine.tree(_order(type(uint24).max, 2, BRANCH_NONCE));
+        assertTrue(baseLeft != bytes32(0) && baseRight != bytes32(0));
+        assertTrue(probeLeft != bytes32(0) && probeRight != bytes32(0));
+
+        for (uint256 i; i < orders.length; ++i) {
+            vm.prank(alice);
+            (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(orders[i]);
+
+            assertEq(baseAmount, 0);
+            assertEq(quoteAmount, prices[i]);
+        }
+
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(quote.balanceOf(alice), 1_000_000);
+    }
+
     function test_FeeOnTransferTokenReverts() public {
         FeeERC20 feeBase = new FeeERC20();
         TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
