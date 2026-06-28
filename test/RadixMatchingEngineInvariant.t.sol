@@ -25,8 +25,14 @@ contract RadixMatchingEngineHandler is Test {
 
     uint256 public unexpectedFillReverts;
     uint256 public unexpectedCancelReverts;
+    uint256 public unexpectedInvalidFillSuccesses;
+    uint256 public unexpectedInvalidCancelSuccesses;
+    uint256 public unexpectedInvalidFillReverts;
+    uint256 public unexpectedInvalidCancelReverts;
     bytes4 public lastFillRevertSelector;
     bytes4 public lastCancelRevertSelector;
+    bytes4 public lastInvalidFillRevertSelector;
+    bytes4 public lastInvalidCancelRevertSelector;
 
     constructor(TestERC20 base_, TestERC20 quote_, RadixMatchingEngine engine_) {
         BASE = base_;
@@ -76,6 +82,70 @@ contract RadixMatchingEngineHandler is Test {
         }
     }
 
+    function invalidFill(uint256 actorSeed, uint24 priceSeed, uint192 quantitySeed, uint40 nonceSeed, bool isBid)
+        external
+    {
+        address actor = actors[bound(actorSeed, 0, actors.length - 1)];
+        uint256 mode = uint256(nonceSeed) % 3;
+        uint24 price = uint24(bound(priceSeed, 1, type(uint24).max));
+        uint192 quantity = uint192(bound(quantitySeed, 1, 100));
+        uint40 nonce;
+
+        if (mode == 0) {
+            price = 0;
+        } else if (mode == 1) {
+            quantity = 0;
+        } else {
+            nonce = uint40(bound(nonceSeed, 1, type(uint40).max));
+        }
+
+        vm.prank(actor);
+        try ENGINE.fill(_pack(price, quantity, nonce), isBid) {
+            ++unexpectedInvalidFillSuccesses;
+        } catch (bytes memory reason) {
+            bytes4 selector;
+            if (reason.length >= 4) {
+                // forge-lint: disable-next-line(unsafe-typecast)
+                selector = bytes4(reason);
+            }
+
+            if (selector != RadixMatchingEngine.InvalidOrder.selector) {
+                ++unexpectedInvalidFillReverts;
+                if (reason.length >= 4) {
+                    lastInvalidFillRevertSelector = selector;
+                }
+            }
+        }
+    }
+
+    function invalidCancel(uint256 actorSeed, uint24 priceSeed, uint192 quantitySeed, uint256 orderSeed) external {
+        address actor = actors[bound(actorSeed, 0, actors.length - 1)];
+        bytes32 order;
+
+        if (trackedOrders.length != 0 && orderSeed % 2 == 0) {
+            uint256 index = bound(orderSeed, 0, trackedOrders.length - 1);
+            bytes32 trackedOrder = trackedOrders[index].order;
+            order = _pack(_price(trackedOrder), 0, _nonce(trackedOrder));
+        } else {
+            uint24 price = uint24(bound(priceSeed, 1, type(uint24).max));
+            uint192 quantity = uint192(bound(quantitySeed, 1, 100));
+            order = _pack(price, quantity, 0);
+        }
+
+        vm.prank(actor);
+        try ENGINE.cancel(order) {
+            ++unexpectedInvalidCancelSuccesses;
+        } catch (bytes memory reason) {
+            if (!_isExpectedInvalidCancelRevert(order, reason)) {
+                ++unexpectedInvalidCancelReverts;
+                if (reason.length >= 4) {
+                    // forge-lint: disable-next-line(unsafe-typecast)
+                    lastInvalidCancelRevertSelector = bytes4(reason);
+                }
+            }
+        }
+    }
+
     function orderCount() external view returns (uint256) {
         return trackedOrders.length;
     }
@@ -113,6 +183,35 @@ contract RadixMatchingEngineHandler is Test {
                 lastFillRevertSelector = bytes4(reason);
             }
         }
+    }
+
+    function _isExpectedInvalidCancelRevert(bytes32 order, bytes memory reason) private pure returns (bool) {
+        if (reason.length < 4) return false;
+
+        bytes4 selector;
+        // forge-lint: disable-next-line(unsafe-typecast)
+        selector = bytes4(reason);
+        if (_quantity(order) == 0) return selector == RadixMatchingEngine.InvalidOrder.selector;
+        return selector == RadixMatchingEngine.NotOrderOwner.selector;
+    }
+
+    function _pack(uint24 price, uint192 quantity, uint40 nonce) private pure returns (bytes32) {
+        return bytes32((uint256(price) << 232) | (uint256(quantity) << 40) | uint256(nonce));
+    }
+
+    function _price(bytes32 order) private pure returns (uint24) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint24(uint256(order) >> 232);
+    }
+
+    function _quantity(bytes32 order) private pure returns (uint192) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint192((uint256(order) >> 40) & ((uint256(1) << 192) - 1));
+    }
+
+    function _nonce(bytes32 order) private pure returns (uint40) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint40(uint256(order));
     }
 }
 
@@ -242,6 +341,10 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     function invariant_NoUnexpectedHandlerReverts() public view {
         assertEq(handler.unexpectedFillReverts(), 0, "unexpected fill revert");
         assertEq(handler.unexpectedCancelReverts(), 0, "unexpected cancel revert");
+        assertEq(handler.unexpectedInvalidFillSuccesses(), 0, "invalid fill success");
+        assertEq(handler.unexpectedInvalidCancelSuccesses(), 0, "invalid cancel success");
+        assertEq(handler.unexpectedInvalidFillReverts(), 0, "unexpected invalid fill revert");
+        assertEq(handler.unexpectedInvalidCancelReverts(), 0, "unexpected invalid cancel revert");
     }
 
     function invariant_TreeAggregatesAndBranchShape() public view {
