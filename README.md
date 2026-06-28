@@ -43,8 +43,11 @@ Higher order nonce still means earlier time priority at the same price.
 ## Commands
 
 ```sh
-forge build
-forge test
+forge fmt --check
+forge lint
+forge test --force -vv
+FOUNDRY_INVARIANT_RUNS=2048 FOUNDRY_INVARIANT_DEPTH=64 forge test --force --match-contract '.*RadixMatchingEngineInvariantTest.*' --match-test 'invariant_.*'
+forge build --sizes
 ```
 
 Deploy script:
