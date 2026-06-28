@@ -378,6 +378,78 @@ contract RadixMatchingEngineTest is Test {
         assertEq(quote.balanceOf(address(engine)), 10);
     }
 
+    function test_BidRemainderNonceExhaustionRollsBackMatch() public {
+        bytes32 nextNonceSlot = bytes32(uint256(4));
+        vm.store(address(engine), nextNonceSlot, bytes32(uint256(1)));
+
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(90, 1, 0), false);
+
+        assertEq(restingAsk, _order(90, 1, 1));
+        assertEq(engine.askRoot(), restingAsk);
+        assertEq(engine.nextNonce(), 0);
+
+        bytes32 askRootBefore = engine.askRoot();
+        uint256 engineBaseBefore = base.balanceOf(address(engine));
+        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
+        uint256 aliceBaseBefore = base.balanceOf(alice);
+        uint256 aliceQuoteBefore = quote.balanceOf(alice);
+        uint256 bobBaseBefore = base.balanceOf(bob);
+        uint256 bobQuoteBefore = quote.balanceOf(bob);
+
+        vm.prank(alice);
+        vm.expectRevert(RadixMatchingEngine.NonceExhausted.selector);
+        engine.fill(_order(100, 2, 0), true);
+
+        assertEq(engine.askRoot(), askRootBefore);
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(engine.ownerOfOrder(restingAsk), bob);
+        assertEq(engine.ownerOfOrder(_order(90, 0, 1)), address(2));
+        assertEq(engine.nextNonce(), 0);
+        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
+        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
+        assertEq(base.balanceOf(alice), aliceBaseBefore);
+        assertEq(quote.balanceOf(alice), aliceQuoteBefore);
+        assertEq(base.balanceOf(bob), bobBaseBefore);
+        assertEq(quote.balanceOf(bob), bobQuoteBefore);
+    }
+
+    function test_AskRemainderNonceExhaustionRollsBackMatch() public {
+        bytes32 nextNonceSlot = bytes32(uint256(4));
+        vm.store(address(engine), nextNonceSlot, bytes32(uint256(1)));
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(100, 1, 0), true);
+
+        assertEq(restingBid, _order(100, 1, 1));
+        assertEq(engine.bidRoot(), restingBid);
+        assertEq(engine.nextNonce(), 0);
+
+        bytes32 bidRootBefore = engine.bidRoot();
+        uint256 engineBaseBefore = base.balanceOf(address(engine));
+        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
+        uint256 aliceBaseBefore = base.balanceOf(alice);
+        uint256 aliceQuoteBefore = quote.balanceOf(alice);
+        uint256 bobBaseBefore = base.balanceOf(bob);
+        uint256 bobQuoteBefore = quote.balanceOf(bob);
+
+        vm.prank(bob);
+        vm.expectRevert(RadixMatchingEngine.NonceExhausted.selector);
+        engine.fill(_order(90, 2, 0), false);
+
+        assertEq(engine.bidRoot(), bidRootBefore);
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertEq(engine.ownerOfOrder(_order(100, 0, 1)), address(1));
+        assertEq(engine.nextNonce(), 0);
+        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
+        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
+        assertEq(base.balanceOf(alice), aliceBaseBefore);
+        assertEq(quote.balanceOf(alice), aliceQuoteBefore);
+        assertEq(base.balanceOf(bob), bobBaseBefore);
+        assertEq(quote.balanceOf(bob), bobQuoteBefore);
+    }
+
     function test_MaxPriceAndQuantityBidCancels() public {
         uint24 price = type(uint24).max;
         uint192 quantity = type(uint192).max;
