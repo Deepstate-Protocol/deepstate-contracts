@@ -137,14 +137,18 @@ contract RadixMatchingEngine {
 
         if (isBid) {
             bytes32 root = bidRoot;
-            bytes32 newRoot;
-            (newRoot, removed) = _removeByKey(root, order, true);
-            if (newRoot != root) bidRoot = newRoot;
+            if (root != bytes32(0)) {
+                bytes32 newRoot;
+                (newRoot, removed) = _removeByKey(root, _sortKey(order, true), true);
+                if (newRoot != root) bidRoot = newRoot;
+            }
         } else {
             bytes32 root = askRoot;
-            bytes32 newRoot;
-            (newRoot, removed) = _removeByKey(root, order, false);
-            if (newRoot != root) askRoot = newRoot;
+            if (root != bytes32(0)) {
+                bytes32 newRoot;
+                (newRoot, removed) = _removeByKey(root, _sortKey(order, false), false);
+                if (newRoot != root) askRoot = newRoot;
+            }
         }
 
         if (removed != bytes32(0)) remainingQuantity = _quantity(removed);
@@ -184,9 +188,9 @@ contract RadixMatchingEngine {
         ownerOfOrder[_sideKey(restingOrder)] = isBid ? _BID_SENTINEL : _ASK_SENTINEL;
 
         if (isBid) {
-            bidRoot = _insert(bidRoot, restingOrder, true);
+            bidRoot = _insert(bidRoot, restingOrder, _sortKey(restingOrder, true), true);
         } else {
-            askRoot = _insert(askRoot, restingOrder, false);
+            askRoot = _insert(askRoot, restingOrder, _sortKey(restingOrder, false), false);
         }
 
         emit OrderRested(restingOrder, msg.sender, isBid);
@@ -262,7 +266,7 @@ contract RadixMatchingEngine {
         }
     }
 
-    function _insert(bytes32 root, bytes32 node, bool isBidTree) private returns (bytes32) {
+    function _insert(bytes32 root, bytes32 node, uint64 nodeKey, bool isBidTree) private returns (bytes32) {
         if (root == bytes32(0)) return node;
 
         Branch memory branch = tree[root];
@@ -270,7 +274,6 @@ contract RadixMatchingEngine {
             return _storeBranch(root, node, isBidTree);
         }
 
-        uint64 nodeKey = _nodeKey(node, isBidTree);
         uint64 leftKey = _nodeKey(branch.leftNode, isBidTree);
         uint8 branchDepth = _commonPrefix(leftKey, _nodeKey(branch.rightNode, isBidTree));
         if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
@@ -278,21 +281,20 @@ contract RadixMatchingEngine {
         }
 
         if (_bit(nodeKey, branchDepth)) {
-            branch.rightNode = _insert(branch.rightNode, node, isBidTree);
+            branch.rightNode = _insert(branch.rightNode, node, nodeKey, isBidTree);
         } else {
-            branch.leftNode = _insert(branch.leftNode, node, isBidTree);
+            branch.leftNode = _insert(branch.leftNode, node, nodeKey, isBidTree);
         }
 
         return _replaceBranch(root, branch.leftNode, branch.rightNode, isBidTree);
     }
 
-    function _removeByKey(bytes32 root, bytes32 order, bool isBidTree)
+    function _removeByKey(bytes32 root, uint64 targetKey, bool isBidTree)
         private
         returns (bytes32 newRoot, bytes32 removed)
     {
         if (root == bytes32(0)) return (bytes32(0), bytes32(0));
 
-        uint64 targetKey = _sortKey(order, isBidTree);
         Branch memory branch = tree[root];
         if (branch.leftNode == bytes32(0) && branch.rightNode == bytes32(0)) {
             return _sortKey(root, isBidTree) == targetKey ? (bytes32(0), root) : (root, bytes32(0));
@@ -303,9 +305,9 @@ contract RadixMatchingEngine {
         if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0));
 
         if (_bit(targetKey, branchDepth)) {
-            (branch.rightNode, removed) = _removeByKey(branch.rightNode, order, isBidTree);
+            (branch.rightNode, removed) = _removeByKey(branch.rightNode, targetKey, isBidTree);
         } else {
-            (branch.leftNode, removed) = _removeByKey(branch.leftNode, order, isBidTree);
+            (branch.leftNode, removed) = _removeByKey(branch.leftNode, targetKey, isBidTree);
         }
 
         if (removed == bytes32(0)) return (root, bytes32(0));
