@@ -10,8 +10,10 @@ contract RadixMatchingEngineHandler is Test {
     struct TrackedOrder {
         bytes32 order;
         address owner;
+        uint256 ownerIndex;
         bool isBid;
         bool active;
+        uint192 remainingQuantity;
     }
 
     TestERC20 internal immutable BASE;
@@ -19,9 +21,12 @@ contract RadixMatchingEngineHandler is Test {
     RadixMatchingEngine internal immutable ENGINE;
 
     uint256 internal constant MAX_TRACKED_ORDERS = 96;
+    uint256 internal constant INITIAL_BALANCE = 1e30;
 
     address[] internal actors;
     TrackedOrder[] internal trackedOrders;
+    uint256[] internal expectedBaseBalances;
+    uint256[] internal expectedQuoteBalances;
 
     uint256 public unexpectedFillReverts;
     uint256 public unexpectedCancelReverts;
@@ -47,8 +52,10 @@ contract RadixMatchingEngineHandler is Test {
         actors.push(address(2));
 
         for (uint256 i; i < actors.length; ++i) {
-            BASE.mint(actors[i], 1e30);
-            QUOTE.mint(actors[i], 1e30);
+            BASE.mint(actors[i], INITIAL_BALANCE);
+            QUOTE.mint(actors[i], INITIAL_BALANCE);
+            expectedBaseBalances.push(INITIAL_BALANCE);
+            expectedQuoteBalances.push(INITIAL_BALANCE);
 
             vm.startPrank(actors[i]);
             BASE.approve(address(ENGINE), type(uint256).max);
@@ -74,7 +81,7 @@ contract RadixMatchingEngineHandler is Test {
 
         vm.prank(tracked.owner);
         try ENGINE.cancel(tracked.order) {
-            tracked.active = false;
+            _applyCancel(index);
         } catch (bytes memory reason) {
             ++unexpectedCancelReverts;
             if (reason.length >= 4) {
@@ -160,30 +167,152 @@ contract RadixMatchingEngineHandler is Test {
         return actors[index];
     }
 
+    function expectedBaseBalanceAt(uint256 index) external view returns (uint256) {
+        return expectedBaseBalances[index];
+    }
+
+    function expectedQuoteBalanceAt(uint256 index) external view returns (uint256) {
+        return expectedQuoteBalances[index];
+    }
+
     function orderAt(uint256 index) external view returns (bytes32 order, address owner, bool isBid, bool active) {
         TrackedOrder storage tracked = trackedOrders[index];
         return (tracked.order, tracked.owner, tracked.isBid, tracked.active);
     }
 
+    function remainingQuantityAt(uint256 index) external view returns (uint192) {
+        return trackedOrders[index].remainingQuantity;
+    }
+
     function _place(uint256 actorSeed, uint24 priceSeed, uint192 quantitySeed, bool isBid) private {
         if (trackedOrders.length >= MAX_TRACKED_ORDERS) return;
 
-        address actor = actors[bound(actorSeed, 0, actors.length - 1)];
+        uint256 actorIndex = bound(actorSeed, 0, actors.length - 1);
+        address actor = actors[actorIndex];
         uint24 price = uint24(bound(priceSeed, 1, type(uint24).max));
         uint192 quantity = uint192(bound(quantitySeed, 1, 100));
         bytes32 order = bytes32((uint256(price) << 232) | (uint256(quantity) << 40));
 
         vm.prank(actor);
         try ENGINE.fill(order, isBid) returns (bytes32 restingOrder) {
-            if (restingOrder != bytes32(0)) {
-                trackedOrders.push(TrackedOrder({order: restingOrder, owner: actor, isBid: isBid, active: true}));
-            }
+            _applyFill(actorIndex, price, quantity, isBid, restingOrder);
         } catch (bytes memory reason) {
             ++unexpectedFillReverts;
             if (reason.length >= 4) {
                 // forge-lint: disable-next-line(unsafe-typecast)
                 lastFillRevertSelector = bytes4(reason);
             }
+        }
+    }
+
+    function _applyFill(uint256 actorIndex, uint24 price, uint192 quantity, bool isBid, bytes32 restingOrder) private {
+        uint192 remaining = quantity;
+        uint192 baseFilled;
+        uint256 quoteAmount;
+
+        while (remaining != 0) {
+            (uint256 matchIndex, bool found) = _bestMatchIndex(price, isBid);
+            if (!found) break;
+
+            TrackedOrder storage resting = trackedOrders[matchIndex];
+            uint192 fillQuantity = remaining < resting.remainingQuantity ? remaining : resting.remainingQuantity;
+            uint256 fillQuoteAmount = _quoteValue(_price(resting.order), fillQuantity);
+
+            remaining -= fillQuantity;
+            resting.remainingQuantity -= fillQuantity;
+            baseFilled += fillQuantity;
+            quoteAmount += fillQuoteAmount;
+        }
+
+        if (isBid) {
+            expectedBaseBalances[actorIndex] += baseFilled;
+            expectedQuoteBalances[actorIndex] -= quoteAmount;
+            if (remaining != 0) expectedQuoteBalances[actorIndex] -= _quoteValue(price, remaining);
+        } else {
+            expectedBaseBalances[actorIndex] -= baseFilled;
+            expectedQuoteBalances[actorIndex] += quoteAmount;
+            if (remaining != 0) expectedBaseBalances[actorIndex] -= remaining;
+        }
+
+        if (remaining == 0) {
+            assertEq(restingOrder, bytes32(0), "unexpected resting order");
+            return;
+        }
+
+        uint40 nonce = uint40(uint256(type(uint40).max) - trackedOrders.length);
+        bytes32 expectedRestingOrder = _pack(price, remaining, nonce);
+        assertEq(restingOrder, expectedRestingOrder, "resting order");
+
+        trackedOrders.push(
+            TrackedOrder({
+                order: restingOrder,
+                owner: actors[actorIndex],
+                ownerIndex: actorIndex,
+                isBid: isBid,
+                active: true,
+                remainingQuantity: remaining
+            })
+        );
+    }
+
+    function _applyCancel(uint256 index) private {
+        TrackedOrder storage tracked = trackedOrders[index];
+        uint192 originalQuantity = _quantity(tracked.order);
+        uint192 remainingQuantity = tracked.remainingQuantity;
+        uint192 filledQuantity = originalQuantity - remainingQuantity;
+        uint24 price = _price(tracked.order);
+
+        if (tracked.isBid) {
+            expectedBaseBalances[tracked.ownerIndex] += filledQuantity;
+            expectedQuoteBalances[tracked.ownerIndex] += _quoteValue(price, remainingQuantity);
+        } else {
+            expectedBaseBalances[tracked.ownerIndex] += remainingQuantity;
+            expectedQuoteBalances[tracked.ownerIndex] += _quoteValue(price, filledQuantity);
+        }
+
+        tracked.active = false;
+        tracked.remainingQuantity = 0;
+    }
+
+    function _bestMatchIndex(uint24 limitPrice, bool incomingIsBid)
+        private
+        view
+        returns (uint256 bestIndex, bool found)
+    {
+        uint24 bestPrice;
+        uint40 bestNonce;
+
+        for (uint256 i; i < trackedOrders.length; ++i) {
+            TrackedOrder storage candidate = trackedOrders[i];
+            if (!candidate.active || candidate.isBid == incomingIsBid || candidate.remainingQuantity == 0) continue;
+
+            uint24 candidatePrice = _price(candidate.order);
+            if (incomingIsBid) {
+                if (candidatePrice > limitPrice) continue;
+                if (
+                    found
+                        && (candidatePrice > bestPrice
+                            || candidatePrice == bestPrice
+                            && _nonce(candidate.order) <= bestNonce)
+                ) {
+                    continue;
+                }
+            } else {
+                if (candidatePrice < limitPrice) continue;
+                if (
+                    found
+                        && (candidatePrice < bestPrice
+                            || candidatePrice == bestPrice
+                            && _nonce(candidate.order) <= bestNonce)
+                ) {
+                    continue;
+                }
+            }
+
+            found = true;
+            bestIndex = i;
+            bestPrice = candidatePrice;
+            bestNonce = _nonce(candidate.order);
         }
     }
 
@@ -209,6 +338,10 @@ contract RadixMatchingEngineHandler is Test {
     function _quantity(bytes32 order) private pure returns (uint192) {
         // forge-lint: disable-next-line(unsafe-typecast)
         return uint192((uint256(order) >> 40) & ((uint256(1) << 192) - 1));
+    }
+
+    function _quoteValue(uint24 price, uint192 quantity) private pure returns (uint256) {
+        return uint256(price) * uint256(quantity);
     }
 
     function _nonce(bytes32 order) private pure returns (uint40) {
@@ -317,7 +450,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
             if (!active) continue;
 
             uint192 originalQuantity = _quantity(order);
-            uint192 remainingQuantity = _remainingQuantity(order, isBid);
+            uint192 remainingQuantity = handler.remainingQuantityAt(i);
             assertLe(remainingQuantity, originalQuantity, "remaining over original");
             uint192 filledQuantity = originalQuantity - remainingQuantity;
             uint24 limitPrice = _price(order);
@@ -338,6 +471,16 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     function invariant_TotalTokenSupplyConserved() public view {
         assertEq(_trackedBalanceSum(base), base.totalSupply(), "base supply");
         assertEq(_trackedBalanceSum(quote), quote.totalSupply(), "quote supply");
+    }
+
+    function invariant_ActorBalancesMatchModel() public view {
+        uint256 length = handler.actorCount();
+
+        for (uint256 i; i < length; ++i) {
+            address actor = handler.actorAt(i);
+            assertEq(base.balanceOf(actor), handler.expectedBaseBalanceAt(i), "actor base");
+            assertEq(quote.balanceOf(actor), handler.expectedQuoteBalanceAt(i), "actor quote");
+        }
     }
 
     function invariant_NoUnexpectedHandlerReverts() public view {
@@ -361,6 +504,16 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
         assertEq(bidStats.quantity, expectedBidQuantity, "bid root quantity");
         assertEq(askStats.quantity, expectedAskQuantity, "ask root quantity");
+    }
+
+    function invariant_ModelRemainingQuantitiesMatchBook() public view {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,, bool isBid, bool active) = handler.orderAt(i);
+            uint192 expectedRemaining = active ? handler.remainingQuantityAt(i) : 0;
+            assertEq(_remainingQuantity(order, isBid), expectedRemaining, "model remaining");
+        }
     }
 
     function invariant_NonceAccountingMatchesRestedOrders() public view {
@@ -450,10 +603,10 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         uint256 length = handler.orderCount();
 
         for (uint256 i; i < length; ++i) {
-            (bytes32 order,, bool isBid, bool active) = handler.orderAt(i);
+            (,, bool isBid, bool active) = handler.orderAt(i);
             if (!active) continue;
 
-            uint192 remainingQuantity = _remainingQuantity(order, isBid);
+            uint192 remainingQuantity = handler.remainingQuantityAt(i);
             if (isBid) {
                 expectedBidQuantity += remainingQuantity;
             } else {
@@ -600,6 +753,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
             if (!active || trackedIsBid != isBidTree || _sideKey(order) != leafSideKey) continue;
 
             assertGe(_quantity(order), leafQuantity, "leaf over original quantity");
+            assertEq(handler.remainingQuantityAt(i), leafQuantity, "leaf remaining");
             assertEq(engine.ownerOfOrder(order), owner, "leaf owner");
             ++matches;
         }
