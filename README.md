@@ -21,14 +21,14 @@ Incoming `fill` orders must leave nonce bits empty. Any unfilled remainder recei
 
 The node layout remains one `bytes32`. Branch nodes do not use nonce tags, probes, or a separate namespace.
 
-A branch node is addressed by the shared radix prefix of its children across the full 64-bit path:
+A branch node is addressed with an actual order boundary key from its children:
 
 ```text
 path = price || nonce
-branch_path = shared_prefix || 1 || trailing_zeroes
+branch_path = max(child_a_path, child_b_path)
 ```
 
-The branch path is packed back into the same price and nonce fields, while the quantity field stores the exact sum of the child quantities. The `1` bit terminates the shared prefix, so branch prefixes at different depths do not alias each other and no nonce-tag namespace is needed.
+The branch path is packed back into the same price and nonce fields, while the quantity field stores the exact sum of the child quantities. Because the boundary key is an actual order path, uniqueness comes from the globally decrementing order nonce rather than from a synthetic branch nonce namespace.
 
 Resting orders start at `type(uint40).max - 1` and decrement from there. The maximum nonce value is left unused by order assignment.
 
