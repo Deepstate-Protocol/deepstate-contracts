@@ -559,6 +559,27 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.bidRoot(), bytes32(0));
     }
 
+    function test_MaxPriceAndQuantityAskCancels() public {
+        uint24 price = type(uint24).max;
+        uint192 quantity = type(uint192).max;
+
+        base.mint(alice, quantity);
+
+        vm.prank(alice);
+        bytes32 restingAsk = engine.fill(_order(price, quantity, 0), false);
+
+        assertEq(restingAsk, _order(price, quantity, MAX_ORDER_NONCE));
+        assertEq(engine.askRoot(), restingAsk);
+        assertEq(base.balanceOf(address(engine)), quantity);
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(restingAsk);
+
+        assertEq(baseAmount, quantity);
+        assertEq(quoteAmount, 0);
+        assertEq(engine.askRoot(), bytes32(0));
+    }
+
     function test_BranchQuantityOverflowRevertsWithoutMutatingBook() public {
         quote.mint(alice, type(uint216).max);
 
@@ -576,6 +597,25 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(overflowingBid), address(0));
         assertEq(engine.nextNonce(), MAX_ORDER_NONCE - 1);
         assertEq(quote.balanceOf(address(engine)), type(uint192).max);
+    }
+
+    function test_AskBranchQuantityOverflowRevertsWithoutMutatingBook() public {
+        base.mint(alice, type(uint192).max);
+
+        vm.prank(alice);
+        bytes32 restingAsk = engine.fill(_order(1, type(uint192).max, 0), false);
+
+        bytes32 overflowingAsk = _order(2, 1, MAX_ORDER_NONCE - 1);
+
+        vm.prank(bob);
+        vm.expectRevert();
+        engine.fill(_order(2, 1, 0), false);
+
+        assertEq(engine.askRoot(), restingAsk);
+        assertEq(engine.ownerOfOrder(restingAsk), alice);
+        assertEq(engine.ownerOfOrder(overflowingAsk), address(0));
+        assertEq(engine.nextNonce(), MAX_ORDER_NONCE - 1);
+        assertEq(base.balanceOf(address(engine)), type(uint192).max);
     }
 
     function test_SideMetadataUsesZeroQuantityNamespace() public {
