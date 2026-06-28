@@ -1000,6 +1000,59 @@ contract RadixMatchingEngineTest is Test {
         assertEq(quote.balanceOf(address(engine)), 0);
     }
 
+    function test_AskPricePrefixCombFullyMatchesAndClaims() public {
+        uint256 orderCount = 25;
+        uint192 matchQuantity = 25;
+        uint24 maxPrice = type(uint24).max;
+        bytes32[] memory orders = new bytes32[](orderCount);
+        uint24[] memory prices = new uint24[](orderCount);
+        uint256 quoteTotal;
+
+        prices[0] = 1;
+        prices[1] = 1;
+        for (uint256 i; i < 23; ++i) {
+            prices[i + 2] = _askPricePrefixCombPrice(i);
+        }
+
+        for (uint256 i; i < orderCount; ++i) {
+            address owner = _actorFor(i);
+            vm.prank(owner);
+            orders[i] = engine.fill(_order(prices[i], 1, 0), false);
+
+            assertEq(uint256(_nonce(orders[i])), uint256(MAX_ORDER_NONCE) - i);
+            assertEq(engine.ownerOfOrder(orders[i]), owner);
+            quoteTotal += prices[i];
+        }
+
+        _assertAskPricePrefixCombShape();
+
+        address buyer = address(0xB0DE6A);
+        _fundAndApprove(buyer);
+        quote.mint(buyer, quoteTotal);
+
+        vm.prank(buyer);
+        bytes32 restingBid = engine.fill(_order(maxPrice, matchQuantity, 0), true);
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), quoteTotal);
+        assertEq(base.balanceOf(buyer), 1_000_000 + orderCount);
+        assertEq(quote.balanceOf(buyer), 1_000_000);
+
+        for (uint256 i; i < orderCount; ++i) {
+            vm.prank(_actorFor(i));
+            (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(orders[i]);
+
+            assertEq(baseAmount, 0);
+            assertEq(quoteAmount, prices[i]);
+            assertEq(engine.ownerOfOrder(orders[i]), address(0));
+        }
+
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
     function test_CancelDeletesCollapsedBranchStorage() public {
         uint24 price = 222;
 
@@ -2022,6 +2075,12 @@ contract RadixMatchingEngineTest is Test {
         return type(uint24).max ^ uint24(uint256(1) << (23 - depth));
     }
 
+    function _askPricePrefixCombPrice(uint256 depth) internal pure returns (uint24) {
+        uint24 targetSortPrice = type(uint24).max - 1;
+        uint24 sortPrice = targetSortPrice ^ uint24(uint256(1) << (23 - depth));
+        return type(uint24).max - sortPrice;
+    }
+
     function _assertBidPricePrefixCombShape() internal view {
         bytes32 node = engine.bidRoot();
 
@@ -2039,6 +2098,25 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_commonPrefix(_pathKey(leftFinal), _pathKey(rightFinal)), 63);
         assertEq(_price(leftFinal), type(uint24).max);
         assertEq(_price(rightFinal), type(uint24).max);
+    }
+
+    function _assertAskPricePrefixCombShape() internal view {
+        bytes32 node = engine.askRoot();
+
+        for (uint256 depth; depth < 23; ++depth) {
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+
+            assertTrue(leftNode != bytes32(0));
+            assertTrue(rightNode != bytes32(0));
+            assertEq(_commonPrefix(_askSortKey(leftNode), _askSortKey(rightNode)), depth);
+
+            node = rightNode;
+        }
+
+        (bytes32 leftFinal, bytes32 rightFinal) = engine.tree(node);
+        assertEq(_commonPrefix(_askSortKey(leftFinal), _askSortKey(rightFinal)), 63);
+        assertEq(_price(leftFinal), 1);
+        assertEq(_price(rightFinal), 1);
     }
 
     function _order(uint24 price, uint192 quantity, uint40 nonce) internal pure returns (bytes32) {
@@ -2059,6 +2137,10 @@ contract RadixMatchingEngineTest is Test {
 
     function _pathKey(bytes32 order) internal pure returns (uint64) {
         return (uint64(_price(order)) << 40) | uint64(_nonce(order));
+    }
+
+    function _askSortKey(bytes32 order) internal pure returns (uint64) {
+        return (uint64(type(uint24).max - _price(order)) << 40) | uint64(_nonce(order));
     }
 
     function _commonPrefix(uint64 a, uint64 b) internal pure returns (uint8 prefixLength) {
