@@ -109,6 +109,14 @@ contract RadixMatchingEngineHandler is Test {
 }
 
 contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
+    struct SubtreeStats {
+        uint192 quantity;
+        uint64 minKey;
+        uint64 maxKey;
+        uint24 bestPrice;
+        bool exists;
+    }
+
     TestERC20 internal base;
     TestERC20 internal quote;
     RadixMatchingEngine internal engine;
@@ -119,6 +127,8 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     uint256 private constant _QUANTITY_MASK = (uint256(1) << 192) - 1;
     uint40 private constant _RESERVED_MAX_NONCE = type(uint40).max;
     uint24 private constant _MAX_PRICE = type(uint24).max;
+    address private constant _BID_SENTINEL = address(uint160(1));
+    address private constant _ASK_SENTINEL = address(uint160(2));
 
     function setUp() public {
         base = new TestERC20("Base", "BASE");
@@ -162,8 +172,15 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     }
 
     function invariant_TreeAggregatesAndBranchShape() public view {
-        _assertSubtree(engine.bidRoot(), 0);
-        _assertSubtree(engine.askRoot(), 0);
+        _assertSubtree(engine.bidRoot(), 0, true);
+        _assertSubtree(engine.askRoot(), 0, false);
+    }
+
+    function invariant_BooksAreNotCrossed() public view {
+        SubtreeStats memory bidStats = _assertSubtree(engine.bidRoot(), 0, true);
+        SubtreeStats memory askStats = _assertSubtree(engine.askRoot(), 0, false);
+
+        if (bidStats.exists && askStats.exists) assertLt(bidStats.bestPrice, askStats.bestPrice, "crossed book");
     }
 
     function invariant_OwnerMappingMatchesTrackedOrders() public view {
@@ -175,20 +192,40 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
     }
 
+    function invariant_SideMetadataMatchesTrackedOrders() public view {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,, bool isBid, bool active) = handler.orderAt(i);
+            address expectedMarker = active ? (isBid ? _BID_SENTINEL : _ASK_SENTINEL) : address(0);
+            assertEq(engine.ownerOfOrder(_sideKey(order)), expectedMarker, "side marker");
+        }
+    }
+
     function _remainingQuantity(bytes32 order, bool isBid) private view returns (uint192) {
         bytes32 root = isBid ? engine.bidRoot() : engine.askRoot();
         bytes32 current = _find(root, order, isBid);
         return current == bytes32(0) ? 0 : _quantity(current);
     }
 
-    function _assertSubtree(bytes32 node, uint256 depth) private view returns (uint192 quantity) {
-        if (node == bytes32(0)) return 0;
+    function _assertSubtree(bytes32 node, uint256 depth, bool isBidTree)
+        private
+        view
+        returns (SubtreeStats memory stats)
+    {
+        if (node == bytes32(0)) return stats;
         assertLe(depth, 64, "radix depth");
 
         if (!_isBranch(node)) {
             assertGt(_quantity(node), 0, "leaf quantity");
             assertLt(_nonce(node), _RESERVED_MAX_NONCE, "leaf nonce");
-            return _quantity(node);
+            uint64 key = _sortKey(node, isBidTree);
+            stats.quantity = _quantity(node);
+            stats.minKey = key;
+            stats.maxKey = key;
+            stats.bestPrice = _price(node);
+            stats.exists = true;
+            return stats;
         }
 
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
@@ -197,10 +234,37 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         assertEq(engine.ownerOfOrder(node), address(0), "branch owner");
         assertEq(node, _branchNodeForChildren(leftNode, rightNode), "branch address");
 
-        uint192 leftQuantity = _assertSubtree(leftNode, depth + 1);
-        uint192 rightQuantity = _assertSubtree(rightNode, depth + 1);
-        quantity = leftQuantity + rightQuantity;
-        assertEq(_quantity(node), quantity, "branch quantity");
+        uint8 branchDepth = _branchDepth(node, isBidTree);
+        SubtreeStats memory leftStats = _assertSubtree(leftNode, depth + 1, isBidTree);
+        SubtreeStats memory rightStats = _assertSubtree(rightNode, depth + 1, isBidTree);
+
+        _assertBranchOrder(branchDepth, leftStats, rightStats);
+
+        stats.quantity = leftStats.quantity + rightStats.quantity;
+        stats.minKey = leftStats.minKey;
+        stats.maxKey = rightStats.maxKey;
+        stats.bestPrice = rightStats.bestPrice;
+        stats.exists = true;
+        assertEq(_quantity(node), stats.quantity, "branch quantity");
+    }
+
+    function _assertBranchOrder(uint8 branchDepth, SubtreeStats memory leftStats, SubtreeStats memory rightStats)
+        private
+        pure
+    {
+        assertTrue(leftStats.exists, "left subtree");
+        assertTrue(rightStats.exists, "right subtree");
+        assertLt(leftStats.maxKey, rightStats.minKey, "branch order");
+        assertFalse(_bit(leftStats.minKey, branchDepth), "left min bit");
+        assertFalse(_bit(leftStats.maxKey, branchDepth), "left max bit");
+        assertTrue(_bit(rightStats.minKey, branchDepth), "right min bit");
+        assertTrue(_bit(rightStats.maxKey, branchDepth), "right max bit");
+        if (leftStats.minKey != leftStats.maxKey) {
+            assertGe(_commonPrefix(leftStats.minKey, leftStats.maxKey), branchDepth + 1, "left prefix");
+        }
+        if (rightStats.minKey != rightStats.maxKey) {
+            assertGe(_commonPrefix(rightStats.minKey, rightStats.maxKey), branchDepth + 1, "right prefix");
+        }
     }
 
     function _find(bytes32 root, bytes32 order, bool isBidTree) private view returns (bytes32) {
@@ -282,6 +346,10 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
     function _quoteValue(uint24 price, uint192 quantity) private pure returns (uint256) {
         return uint256(price) * uint256(quantity);
+    }
+
+    function _sideKey(bytes32 order) private pure returns (bytes32) {
+        return _pack(_price(order), 0, _nonce(order));
     }
 
     function _pack(uint24 price, uint192 quantity, uint40 nonce) private pure returns (bytes32) {
