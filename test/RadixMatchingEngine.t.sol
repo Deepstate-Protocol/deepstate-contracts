@@ -2,7 +2,9 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {stdError} from "forge-std/StdError.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
+import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {RadixMatchingEngine} from "../src/RadixMatchingEngine.sol";
 
 contract TestERC20 is ERC20 {
@@ -523,7 +525,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 overflowingBid = _order(2, 1, MAX_ORDER_NONCE - 1);
 
         vm.prank(bob);
-        vm.expectRevert();
+        vm.expectRevert(stdError.arithmeticError);
         engine.fill(_order(2, 1, 0), true);
 
         assertEq(engine.bidRoot(), restingBid);
@@ -542,7 +544,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 overflowingAsk = _order(2, 1, MAX_ORDER_NONCE - 1);
 
         vm.prank(bob);
-        vm.expectRevert();
+        vm.expectRevert(stdError.arithmeticError);
         engine.fill(_order(2, 1, 0), false);
 
         assertEq(engine.askRoot(), restingAsk);
@@ -1035,7 +1037,7 @@ contract RadixMatchingEngineTest is Test {
         assertTrue(askRootBefore != firstAsk && askRootBefore != secondAsk);
 
         vm.prank(poorTaker);
-        vm.expectRevert();
+        vm.expectRevert(SafeTransferLib.TransferFromFailed.selector);
         engine.fill(_order(100, 2, 0), true);
 
         assertEq(engine.askRoot(), askRootBefore);
@@ -1059,7 +1061,7 @@ contract RadixMatchingEngineTest is Test {
         assertTrue(bidRootBefore != firstBid && bidRootBefore != secondBid);
 
         vm.prank(poorTaker);
-        vm.expectRevert();
+        vm.expectRevert(SafeTransferLib.TransferFromFailed.selector);
         engine.fill(_order(80, 2, 0), false);
 
         assertEq(engine.bidRoot(), bidRootBefore);
@@ -1083,7 +1085,7 @@ contract RadixMatchingEngineTest is Test {
 
         vm.startPrank(alice);
         falseQuote.approve(address(falseEngine), type(uint256).max);
-        vm.expectRevert();
+        vm.expectRevert(SafeTransferLib.TransferFromFailed.selector);
         falseEngine.fill(_order(10, 2, 0), true);
         vm.stopPrank();
 
@@ -1106,7 +1108,7 @@ contract RadixMatchingEngineTest is Test {
 
         vm.startPrank(alice);
         falseBase.approve(address(falseEngine), type(uint256).max);
-        vm.expectRevert();
+        vm.expectRevert(SafeTransferLib.TransferFromFailed.selector);
         falseEngine.fill(_order(10, 2, 0), false);
         vm.stopPrank();
 
@@ -1136,7 +1138,7 @@ contract RadixMatchingEngineTest is Test {
 
         vm.startPrank(alice);
         falseQuote.approve(address(falseEngine), type(uint256).max);
-        vm.expectRevert();
+        vm.expectRevert(SafeTransferLib.TransferFromFailed.selector);
         falseEngine.fill(_order(10, 2, 0), true);
         vm.stopPrank();
 
@@ -1168,7 +1170,7 @@ contract RadixMatchingEngineTest is Test {
 
         vm.startPrank(alice);
         falseBase.approve(address(falseEngine), type(uint256).max);
-        vm.expectRevert();
+        vm.expectRevert(SafeTransferLib.TransferFromFailed.selector);
         falseEngine.fill(_order(10, 2, 0), false);
         vm.stopPrank();
 
@@ -1205,7 +1207,7 @@ contract RadixMatchingEngineTest is Test {
         falseBase.setFailTransfer(true);
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(SafeTransferLib.TransferFailed.selector);
         falseEngine.cancel(restingBid);
 
         assertEq(falseEngine.ownerOfOrder(restingBid), alice);
@@ -1237,7 +1239,7 @@ contract RadixMatchingEngineTest is Test {
         falseQuote.setFailTransfer(true);
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(SafeTransferLib.TransferFailed.selector);
         falseEngine.cancel(restingAsk);
 
         assertEq(falseEngine.ownerOfOrder(restingAsk), alice);
@@ -1280,7 +1282,7 @@ contract RadixMatchingEngineTest is Test {
         falseQuote.setFailTransfer(true);
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(SafeTransferLib.TransferFailed.selector);
         falseEngine.cancel(restingBid);
 
         assertEq(falseEngine.bidRoot(), bidRootBefore);
@@ -1326,7 +1328,7 @@ contract RadixMatchingEngineTest is Test {
         falseQuote.setFailTransfer(true);
 
         vm.prank(alice);
-        vm.expectRevert();
+        vm.expectRevert(SafeTransferLib.TransferFailed.selector);
         falseEngine.cancel(restingAsk);
 
         assertEq(falseEngine.askRoot(), askRootBefore);
