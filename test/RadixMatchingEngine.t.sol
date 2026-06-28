@@ -944,6 +944,62 @@ contract RadixMatchingEngineTest is Test {
         assertEq(childRight, firstBid);
     }
 
+    function test_PricePrefixCombFullyMatchesAndClaims() public {
+        uint256 orderCount = 26;
+        uint192 matchQuantity = 26;
+        uint24 maxPrice = type(uint24).max;
+        bytes32[] memory orders = new bytes32[](orderCount);
+        uint24[] memory prices = new uint24[](orderCount);
+        uint256 quoteTotal;
+
+        quote.mint(alice, 1_000_000_000);
+        quote.mint(bob, 1_000_000_000);
+        quote.mint(carol, 1_000_000_000);
+
+        prices[0] = maxPrice;
+        prices[1] = maxPrice;
+        for (uint256 i; i < 24; ++i) {
+            prices[i + 2] = _pricePrefixCombPrice(i);
+        }
+
+        for (uint256 i; i < orderCount; ++i) {
+            address owner = _actorFor(i);
+            vm.prank(owner);
+            orders[i] = engine.fill(_order(prices[i], 1, 0), true);
+
+            assertEq(uint256(_nonce(orders[i])), uint256(MAX_ORDER_NONCE) - i);
+            assertEq(engine.ownerOfOrder(orders[i]), owner);
+            quoteTotal += prices[i];
+        }
+
+        _assertBidPricePrefixCombShape();
+
+        address seller = address(0x5E11E2);
+        _fundAndApprove(seller);
+
+        vm.prank(seller);
+        bytes32 restingAsk = engine.fill(_order(1, matchQuantity, 0), false);
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(base.balanceOf(address(engine)), orderCount);
+        assertEq(quote.balanceOf(address(engine)), 0);
+        assertEq(base.balanceOf(seller), 1_000_000 - orderCount);
+        assertEq(quote.balanceOf(seller), 1_000_000 + quoteTotal);
+
+        for (uint256 i; i < orderCount; ++i) {
+            vm.prank(_actorFor(i));
+            (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(orders[i]);
+
+            assertEq(baseAmount, 1);
+            assertEq(quoteAmount, 0);
+            assertEq(engine.ownerOfOrder(orders[i]), address(0));
+        }
+
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
     function test_CancelDeletesCollapsedBranchStorage() public {
         uint24 price = 222;
 
@@ -1889,6 +1945,36 @@ contract RadixMatchingEngineTest is Test {
         base.approve(address(engine), type(uint256).max);
         quote.approve(address(engine), type(uint256).max);
         vm.stopPrank();
+    }
+
+    function _actorFor(uint256 index) internal view returns (address) {
+        uint256 actorIndex = index % 3;
+        if (actorIndex == 0) return alice;
+        if (actorIndex == 1) return bob;
+        return carol;
+    }
+
+    function _pricePrefixCombPrice(uint256 depth) internal pure returns (uint24) {
+        return type(uint24).max ^ uint24(uint256(1) << (23 - depth));
+    }
+
+    function _assertBidPricePrefixCombShape() internal view {
+        bytes32 node = engine.bidRoot();
+
+        for (uint256 depth; depth < 24; ++depth) {
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+
+            assertTrue(leftNode != bytes32(0));
+            assertTrue(rightNode != bytes32(0));
+            assertEq(_commonPrefix(_pathKey(leftNode), _pathKey(rightNode)), depth);
+
+            node = rightNode;
+        }
+
+        (bytes32 leftFinal, bytes32 rightFinal) = engine.tree(node);
+        assertEq(_commonPrefix(_pathKey(leftFinal), _pathKey(rightFinal)), 63);
+        assertEq(_price(leftFinal), type(uint24).max);
+        assertEq(_price(rightFinal), type(uint24).max);
     }
 
     function _order(uint24 price, uint192 quantity, uint40 nonce) internal pure returns (bytes32) {
