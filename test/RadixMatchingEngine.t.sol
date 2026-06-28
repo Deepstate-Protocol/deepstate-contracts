@@ -432,6 +432,82 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(bidSideKey), address(0));
     }
 
+    function test_SentinelAddressOwnersCanCancelUnfilledOrders() public {
+        address bidOwner = address(1);
+        address askOwner = address(2);
+        _fundAndApprove(bidOwner);
+        _fundAndApprove(askOwner);
+
+        vm.prank(bidOwner);
+        bytes32 restingBid = engine.fill(_order(100, 3, 0), true);
+
+        bytes32 bidSideKey = _order(100, 0, _nonce(restingBid));
+        assertEq(engine.ownerOfOrder(restingBid), bidOwner);
+        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+
+        vm.prank(askOwner);
+        bytes32 restingAsk = engine.fill(_order(101, 4, 0), false);
+
+        bytes32 askSideKey = _order(101, 0, _nonce(restingAsk));
+        assertEq(engine.ownerOfOrder(restingAsk), askOwner);
+        assertEq(engine.ownerOfOrder(askSideKey), address(2));
+
+        vm.prank(bidOwner);
+        (uint256 bidBaseAmount, uint256 bidQuoteAmount) = engine.cancel(restingBid);
+
+        assertEq(bidBaseAmount, 0);
+        assertEq(bidQuoteAmount, 300);
+        assertEq(engine.ownerOfOrder(restingBid), address(0));
+        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
+
+        vm.prank(askOwner);
+        (uint256 askBaseAmount, uint256 askQuoteAmount) = engine.cancel(restingAsk);
+
+        assertEq(askBaseAmount, 4);
+        assertEq(askQuoteAmount, 0);
+        assertEq(engine.ownerOfOrder(restingAsk), address(0));
+        assertEq(engine.ownerOfOrder(askSideKey), address(0));
+    }
+
+    function test_SentinelAddressOwnersCanClaimFilledOrders() public {
+        address bidOwner = address(1);
+        address askOwner = address(2);
+        _fundAndApprove(bidOwner);
+        _fundAndApprove(askOwner);
+
+        vm.prank(bidOwner);
+        bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
+
+        vm.prank(bob);
+        bytes32 crossingAsk = engine.fill(_order(90, 2, 0), false);
+
+        assertEq(crossingAsk, bytes32(0));
+
+        vm.prank(bidOwner);
+        (uint256 bidBaseAmount, uint256 bidQuoteAmount) = engine.cancel(restingBid);
+
+        assertEq(bidBaseAmount, 2);
+        assertEq(bidQuoteAmount, 0);
+        assertEq(engine.ownerOfOrder(restingBid), address(0));
+        assertEq(engine.ownerOfOrder(_order(100, 0, _nonce(restingBid))), address(0));
+
+        vm.prank(askOwner);
+        bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
+
+        vm.prank(alice);
+        bytes32 crossingBid = engine.fill(_order(100, 2, 0), true);
+
+        assertEq(crossingBid, bytes32(0));
+
+        vm.prank(askOwner);
+        (uint256 askBaseAmount, uint256 askQuoteAmount) = engine.cancel(restingAsk);
+
+        assertEq(askBaseAmount, 0);
+        assertEq(askQuoteAmount, 180);
+        assertEq(engine.ownerOfOrder(restingAsk), address(0));
+        assertEq(engine.ownerOfOrder(_order(90, 0, _nonce(restingAsk))), address(0));
+    }
+
     function test_BidAndAskBranchesCoexistInSingleMapping() public {
         vm.prank(alice);
         engine.fill(_order(100, 1, 0), true);
