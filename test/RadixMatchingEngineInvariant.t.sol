@@ -133,6 +133,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     uint256 private constant _PRICE_SHIFT = 232;
     uint256 private constant _QUANTITY_SHIFT = 40;
     uint256 private constant _QUANTITY_MASK = (uint256(1) << 192) - 1;
+    uint40 private constant _MAX_ORDER_NONCE = type(uint40).max;
     uint24 private constant _MAX_PRICE = type(uint24).max;
     address private constant _BID_SENTINEL = address(uint160(1));
     address private constant _ASK_SENTINEL = address(uint160(2));
@@ -248,6 +249,19 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         _assertSubtree(engine.askRoot(), 0, false);
     }
 
+    function invariant_TreeQuantitiesMatchTrackedRemaining() public view {
+        SubtreeStats memory bidStats = _assertSubtree(engine.bidRoot(), 0, true);
+        SubtreeStats memory askStats = _assertSubtree(engine.askRoot(), 0, false);
+        (uint256 expectedBidQuantity, uint256 expectedAskQuantity) = _trackedRemainingQuantities();
+
+        assertEq(bidStats.quantity, expectedBidQuantity, "bid root quantity");
+        assertEq(askStats.quantity, expectedAskQuantity, "ask root quantity");
+    }
+
+    function invariant_NonceAccountingMatchesRestedOrders() public view {
+        assertEq(uint256(engine.nextNonce()), uint256(_MAX_ORDER_NONCE) - handler.orderCount(), "next nonce");
+    }
+
     function invariant_BidAskBranchesDoNotShareStorage() public view {
         _assertNoSharedBranches(engine.bidRoot(), engine.askRoot());
     }
@@ -306,6 +320,26 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         uint256 length = handler.actorCount();
         for (uint256 i; i < length; ++i) {
             sum += token.balanceOf(handler.actorAt(i));
+        }
+    }
+
+    function _trackedRemainingQuantities()
+        private
+        view
+        returns (uint256 expectedBidQuantity, uint256 expectedAskQuantity)
+    {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,, bool isBid, bool active) = handler.orderAt(i);
+            if (!active) continue;
+
+            uint192 remainingQuantity = _remainingQuantity(order, isBid);
+            if (isBid) {
+                expectedBidQuantity += remainingQuantity;
+            } else {
+                expectedAskQuantity += remainingQuantity;
+            }
         }
     }
 

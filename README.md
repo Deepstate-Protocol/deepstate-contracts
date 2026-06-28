@@ -30,7 +30,7 @@ branch_path = max(child_a_path, child_b_path)
 
 The branch path is packed back into the same price and nonce fields, while the quantity field stores the exact sum of the child quantities. Because the boundary key is an actual order path, uniqueness comes from the globally decrementing order nonce rather than from a synthetic branch nonce namespace.
 
-Resting orders start at `type(uint40).max - 1` and decrement from there. The maximum nonce value is left unused by order assignment.
+Resting orders start at `type(uint40).max` and decrement from there.
 
 Higher order nonce still means earlier time priority at the same price.
 
