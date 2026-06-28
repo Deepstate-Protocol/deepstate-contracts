@@ -52,8 +52,6 @@ contract RadixMatchingEngine {
     error NotOrderOwner();
     error OrderNotFound();
     error ReentrantCall();
-    error TokenBalanceQueryFailed();
-    error InexactTokenTransfer();
 
     modifier nonReentrant() {
         _enter();
@@ -98,8 +96,8 @@ contract RadixMatchingEngine {
                 quoteCollateral += quoteAmount;
             }
 
-            if (quoteCollateral != 0) _safeTransferFromExact(QUOTE_TOKEN, msg.sender, address(this), quoteCollateral);
-            if (baseFilled != 0) _safeTransferExact(BASE_TOKEN, msg.sender, baseFilled);
+            if (quoteCollateral != 0) QUOTE_TOKEN.safeTransferFrom(msg.sender, address(this), quoteCollateral);
+            if (baseFilled != 0) BASE_TOKEN.safeTransfer(msg.sender, baseFilled);
         } else {
             bytes32 root = bidRoot;
             bytes32 newRoot;
@@ -110,8 +108,8 @@ contract RadixMatchingEngine {
                 restingOrder = _rest(limitPrice, remaining, false);
             }
 
-            _safeTransferFromExact(BASE_TOKEN, msg.sender, address(this), quantity);
-            if (quoteAmount != 0) _safeTransferExact(QUOTE_TOKEN, msg.sender, quoteAmount);
+            BASE_TOKEN.safeTransferFrom(msg.sender, address(this), quantity);
+            if (quoteAmount != 0) QUOTE_TOKEN.safeTransfer(msg.sender, quoteAmount);
         }
     }
 
@@ -170,8 +168,8 @@ contract RadixMatchingEngine {
         delete ownerOfOrder[order];
         delete ownerOfOrder[sideKey];
 
-        if (baseAmount != 0) _safeTransferExact(BASE_TOKEN, owner, baseAmount);
-        if (quoteAmount != 0) _safeTransferExact(QUOTE_TOKEN, owner, quoteAmount);
+        if (baseAmount != 0) BASE_TOKEN.safeTransfer(owner, baseAmount);
+        if (quoteAmount != 0) QUOTE_TOKEN.safeTransfer(owner, quoteAmount);
 
         emit OrderCancelled(order, owner, baseAmount, quoteAmount);
     }
@@ -444,51 +442,6 @@ contract RadixMatchingEngine {
     function _quoteValue(uint24 price, uint192 quantity) private pure returns (uint256) {
         unchecked {
             return uint256(price) * uint256(quantity);
-        }
-    }
-
-    function _safeTransferFromExact(address token, address from, address to, uint256 amount) private {
-        uint256 fromBalanceBefore = _balanceOf(token, from);
-        uint256 toBalanceBefore = _balanceOf(token, to);
-        token.safeTransferFrom(from, to, amount);
-        uint256 fromBalanceAfter = _balanceOf(token, from);
-        uint256 toBalanceAfter = _balanceOf(token, to);
-        if (
-            fromBalanceAfter > fromBalanceBefore || fromBalanceBefore - fromBalanceAfter != amount
-                || toBalanceAfter < toBalanceBefore || toBalanceAfter - toBalanceBefore != amount
-        ) {
-            revert InexactTokenTransfer();
-        }
-    }
-
-    function _safeTransferExact(address token, address to, uint256 amount) private {
-        uint256 fromBalanceBefore = _balanceOf(token, address(this));
-        uint256 toBalanceBefore = _balanceOf(token, to);
-        token.safeTransfer(to, amount);
-        uint256 fromBalanceAfter = _balanceOf(token, address(this));
-        uint256 toBalanceAfter = _balanceOf(token, to);
-        if (
-            fromBalanceAfter > fromBalanceBefore || fromBalanceBefore - fromBalanceAfter != amount
-                || toBalanceAfter < toBalanceBefore || toBalanceAfter - toBalanceBefore != amount
-        ) {
-            revert InexactTokenTransfer();
-        }
-    }
-
-    function _balanceOf(address token, address account) private view returns (uint256 result) {
-        /// @solidity memory-safe-assembly
-        assembly {
-            mstore(0x00, 0x70a0823100000000000000000000000000000000000000000000000000000000)
-            mstore(0x04, account)
-            if iszero(staticcall(gas(), token, 0x00, 0x24, 0x00, 0x20)) {
-                mstore(0x00, 0xa8b0ccad) // `TokenBalanceQueryFailed()`.
-                revert(0x1c, 0x04)
-            }
-            if lt(returndatasize(), 0x20) {
-                mstore(0x00, 0xa8b0ccad) // `TokenBalanceQueryFailed()`.
-                revert(0x1c, 0x04)
-            }
-            result := mload(0x00)
         }
     }
 
