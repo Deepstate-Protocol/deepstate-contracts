@@ -193,6 +193,12 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         _assertNoSharedBranches(engine.bidRoot(), engine.askRoot());
     }
 
+    function invariant_LiveBookNodesAreUnique() public view {
+        bytes32[] memory seenNodes = new bytes32[](handler.orderCount() * 2 + 2);
+        uint256 seenCount = _assertUniqueLiveNodes(engine.bidRoot(), seenNodes, 0);
+        _assertUniqueLiveNodes(engine.askRoot(), seenNodes, seenCount);
+    }
+
     function invariant_BooksAreNotCrossed() public view {
         SubtreeStats memory bidStats = _assertSubtree(engine.bidRoot(), 0, true);
         SubtreeStats memory askStats = _assertSubtree(engine.askRoot(), 0, false);
@@ -308,6 +314,26 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
         _assertBranchAbsentFromSubtree(targetBranch, leftNode);
         _assertBranchAbsentFromSubtree(targetBranch, rightNode);
+    }
+
+    function _assertUniqueLiveNodes(bytes32 node, bytes32[] memory seenNodes, uint256 seenCount)
+        private
+        view
+        returns (uint256)
+    {
+        if (node == bytes32(0)) return seenCount;
+
+        for (uint256 i; i < seenCount; ++i) {
+            assertTrue(seenNodes[i] != node, "duplicate live node");
+        }
+        assertLt(seenCount, seenNodes.length, "seen node capacity");
+        seenNodes[seenCount++] = node;
+
+        if (!_isBranch(node)) return seenCount;
+
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+        seenCount = _assertUniqueLiveNodes(leftNode, seenNodes, seenCount);
+        return _assertUniqueLiveNodes(rightNode, seenNodes, seenCount);
     }
 
     function _find(bytes32 root, bytes32 order, bool isBidTree) private view returns (bytes32) {
