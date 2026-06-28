@@ -114,23 +114,18 @@ contract RadixMatchingEngine {
         if (owner != msg.sender) revert NotOrderOwner();
 
         bool isBid = _orderIsBid(order);
-        bytes32 currentNode = isBid ? _find(bidRoot, order, true) : _find(askRoot, order, false);
 
         uint192 originalQuantity = _quantity(order);
         uint192 remainingQuantity = 0;
+        bytes32 removed;
 
-        if (currentNode != bytes32(0)) {
-            remainingQuantity = _quantity(currentNode);
-
-            bytes32 removed;
-            if (isBid) {
-                (bidRoot, removed) = _removeByKey(bidRoot, order, true);
-            } else {
-                (askRoot, removed) = _removeByKey(askRoot, order, false);
-            }
-            if (removed == bytes32(0)) revert OrderNotFound();
+        if (isBid) {
+            (bidRoot, removed) = _removeByKey(bidRoot, order, true);
+        } else {
+            (askRoot, removed) = _removeByKey(askRoot, order, false);
         }
 
+        if (removed != bytes32(0)) remainingQuantity = _quantity(removed);
         if (remainingQuantity > originalQuantity) revert InvalidOrder();
         uint192 filledQuantity = originalQuantity - remainingQuantity;
         uint24 limitPrice = _price(order);
@@ -180,19 +175,23 @@ contract RadixMatchingEngine {
     {
         if (root == bytes32(0) || remaining == 0) return (root, remaining, 0, 0);
 
-        if (_isBranch(root)) return _matchBranch(root, limitPrice, remaining, restingIsBid);
+        Branch memory branch = tree[root];
+        if (branch.leftNode != bytes32(0) || branch.rightNode != bytes32(0)) {
+            return _matchBranch(root, branch, limitPrice, remaining, restingIsBid);
+        }
         return _matchLeaf(root, limitPrice, remaining, restingIsBid);
     }
 
-    function _matchBranch(bytes32 root, uint24 limitPrice, uint192 remaining, bool restingIsBid)
+    function _matchBranch(bytes32 root, Branch memory branch, uint24 limitPrice, uint192 remaining, bool restingIsBid)
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
-        Branch memory branch = tree[root];
+        bytes32 oldRightNode = branch.rightNode;
         (branch.rightNode, remaining, baseFilled, quoteAmount) =
             _match(branch.rightNode, limitPrice, remaining, restingIsBid);
 
         if (remaining == 0 || branch.rightNode != bytes32(0)) {
+            if (branch.rightNode == oldRightNode) return (root, remaining, baseFilled, quoteAmount);
             return
                 (
                     _replaceBranch(root, branch.leftNode, branch.rightNode, restingIsBid),
@@ -240,15 +239,18 @@ contract RadixMatchingEngine {
     function _insert(bytes32 root, bytes32 node, bool isBidTree) private returns (bytes32) {
         if (root == bytes32(0)) return node;
 
-        if (!_isBranch(root)) return _storeBranch(root, node, isBidTree);
-
-        uint64 nodeKey = _nodeKey(node, isBidTree);
-        uint8 branchDepth = _branchDepth(root, isBidTree);
-        if (_commonPrefix(nodeKey, _nodeKey(root, isBidTree)) < branchDepth) {
+        Branch memory branch = tree[root];
+        if (branch.leftNode == bytes32(0) && branch.rightNode == bytes32(0)) {
             return _storeBranch(root, node, isBidTree);
         }
 
-        Branch memory branch = tree[root];
+        uint64 nodeKey = _nodeKey(node, isBidTree);
+        uint64 leftKey = _nodeKey(branch.leftNode, isBidTree);
+        uint8 branchDepth = _commonPrefix(leftKey, _nodeKey(branch.rightNode, isBidTree));
+        if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
+            return _storeBranch(root, node, isBidTree);
+        }
+
         if (_bit(nodeKey, branchDepth)) {
             branch.rightNode = _insert(branch.rightNode, node, isBidTree);
         } else {
@@ -258,20 +260,6 @@ contract RadixMatchingEngine {
         return _replaceBranch(root, branch.leftNode, branch.rightNode, isBidTree);
     }
 
-    function _find(bytes32 root, bytes32 order, bool isBidTree) private view returns (bytes32) {
-        uint64 targetKey = _sortKey(order, isBidTree);
-
-        while (root != bytes32(0) && _isBranch(root)) {
-            uint8 branchDepth = _branchDepth(root, isBidTree);
-            if (_commonPrefix(targetKey, _nodeKey(root, isBidTree)) < branchDepth) return bytes32(0);
-
-            Branch memory branch = tree[root];
-            root = _bit(targetKey, branchDepth) ? branch.rightNode : branch.leftNode;
-        }
-
-        return root != bytes32(0) && _sortKey(root, isBidTree) == targetKey ? root : bytes32(0);
-    }
-
     function _removeByKey(bytes32 root, bytes32 order, bool isBidTree)
         private
         returns (bytes32 newRoot, bytes32 removed)
@@ -279,13 +267,14 @@ contract RadixMatchingEngine {
         if (root == bytes32(0)) return (bytes32(0), bytes32(0));
 
         uint64 targetKey = _sortKey(order, isBidTree);
-        if (!_isBranch(root)) {
+        Branch memory branch = tree[root];
+        if (branch.leftNode == bytes32(0) && branch.rightNode == bytes32(0)) {
             return _sortKey(root, isBidTree) == targetKey ? (bytes32(0), root) : (root, bytes32(0));
         }
 
-        Branch memory branch = tree[root];
-        uint8 branchDepth = _branchDepth(root, isBidTree);
-        if (_commonPrefix(targetKey, _nodeKey(root, isBidTree)) < branchDepth) return (root, bytes32(0));
+        uint64 leftKey = _nodeKey(branch.leftNode, isBidTree);
+        uint8 branchDepth = _commonPrefix(leftKey, _nodeKey(branch.rightNode, isBidTree));
+        if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0));
 
         if (_bit(targetKey, branchDepth)) {
             (branch.rightNode, removed) = _removeByKey(branch.rightNode, order, isBidTree);
@@ -302,15 +291,20 @@ contract RadixMatchingEngine {
         returns (bytes32)
     {
         bytes32 newBranch = _storeBranch(leftNode, rightNode, isBidTree);
-        if (newBranch != oldBranch && !_containsBranch(newBranch, oldBranch)) delete tree[oldBranch];
+        if (newBranch != oldBranch && oldBranch != leftNode && oldBranch != rightNode) {
+            if (_quantity(oldBranch) > _quantity(newBranch) || !_containsBranch(newBranch, oldBranch)) {
+                delete tree[oldBranch];
+            }
+        }
         return newBranch;
     }
 
     function _containsBranch(bytes32 root, bytes32 target) private view returns (bool) {
         if (root == target) return true;
-        if (!_isBranch(root)) return false;
 
         Branch memory branch = tree[root];
+        if (branch.leftNode == bytes32(0) && branch.rightNode == bytes32(0)) return false;
+
         return _containsBranch(branch.leftNode, target) || _containsBranch(branch.rightNode, target);
     }
 
@@ -355,18 +349,9 @@ contract RadixMatchingEngine {
         return _pack(prefixPrice, quantity, prefixNonce);
     }
 
-    function _isBranch(bytes32 node) private view returns (bool) {
-        return tree[node].leftNode != bytes32(0) || tree[node].rightNode != bytes32(0);
-    }
-
-    function _branchDepth(bytes32 branchNode, bool isBidTree) private view returns (uint8) {
-        Branch memory branch = tree[branchNode];
-        return _commonPrefix(_nodeKey(branch.leftNode, isBidTree), _nodeKey(branch.rightNode, isBidTree));
-    }
-
     function _nodeKey(bytes32 node, bool isBidTree) private view returns (uint64) {
-        if (!_isBranch(node)) return _sortKey(node, isBidTree);
         Branch memory branch = tree[node];
+        if (branch.leftNode == bytes32(0) && branch.rightNode == bytes32(0)) return _sortKey(node, isBidTree);
         return _nodeKey(branch.leftNode != bytes32(0) ? branch.leftNode : branch.rightNode, isBidTree);
     }
 
