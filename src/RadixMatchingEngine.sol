@@ -107,6 +107,8 @@ contract RadixMatchingEngine {
 
     /// @notice Cancel an open order or claim a filled order.
     function cancel(bytes32 order) external nonReentrant returns (uint256 baseAmount, uint256 quoteAmount) {
+        if (_quantity(order) == 0) revert InvalidOrder();
+
         address owner = ownerOfOrder[order];
         if (owner != msg.sender) revert NotOrderOwner();
 

@@ -311,6 +311,33 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(askSideKey), address(0));
     }
 
+    function test_CancelRejectsSideMetadataKey() public {
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(100, 1, 0), true);
+
+        vm.prank(bob);
+        engine.fill(_order(100, 1, 0), false);
+
+        bytes32 bidSideKey = _order(100, 0, _nonce(restingBid));
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+
+        vm.prank(address(1));
+        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        engine.cancel(bidSideKey);
+
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(restingBid);
+
+        assertEq(baseAmount, 1);
+        assertEq(quoteAmount, 0);
+        assertEq(engine.ownerOfOrder(restingBid), address(0));
+        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
+    }
+
     function test_BidAndAskBranchesCoexistInSingleMapping() public {
         vm.prank(alice);
         engine.fill(_order(100, 1, 0), true);
