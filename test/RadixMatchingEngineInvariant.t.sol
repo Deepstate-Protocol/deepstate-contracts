@@ -21,7 +21,8 @@ contract RadixMatchingEngineHandler is Test {
     RadixMatchingEngine internal immutable ENGINE;
 
     uint256 internal constant MAX_TRACKED_ORDERS = 96;
-    uint256 internal constant INITIAL_BALANCE = 1e30;
+    uint256 internal constant MAX_ORDER_QUANTITY = uint256(type(uint192).max) / MAX_TRACKED_ORDERS;
+    uint256 internal constant INITIAL_BALANCE = type(uint216).max;
 
     address[] internal actors;
     TrackedOrder[] internal trackedOrders;
@@ -100,7 +101,7 @@ contract RadixMatchingEngineHandler is Test {
         address actor = actors[bound(actorSeed, 0, actors.length - 1)];
         uint256 mode = uint256(nonceSeed) % 3;
         uint24 price = uint24(bound(priceSeed, 1, type(uint24).max));
-        uint192 quantity = uint192(bound(quantitySeed, 1, 100));
+        uint192 quantity = uint192(bound(quantitySeed, 1, MAX_ORDER_QUANTITY));
         uint40 nonce;
 
         if (mode == 0) {
@@ -146,7 +147,7 @@ contract RadixMatchingEngineHandler is Test {
             order = tracked.order;
         } else {
             uint24 price = uint24(bound(priceSeed, 1, type(uint24).max));
-            uint192 quantity = uint192(bound(quantitySeed, 1, 100));
+            uint192 quantity = uint192(bound(quantitySeed, 1, MAX_ORDER_QUANTITY));
             order = _pack(price, quantity, 0);
         }
 
@@ -199,7 +200,7 @@ contract RadixMatchingEngineHandler is Test {
         uint256 actorIndex = bound(actorSeed, 0, actors.length - 1);
         address actor = actors[actorIndex];
         uint24 price = uint24(bound(priceSeed, 1, type(uint24).max));
-        uint192 quantity = uint192(bound(quantitySeed, 1, 100));
+        uint192 quantity = uint192(bound(quantitySeed, 1, MAX_ORDER_QUANTITY));
         bytes32 order = bytes32((uint256(price) << 232) | (uint256(quantity) << 40));
 
         vm.prank(actor);
