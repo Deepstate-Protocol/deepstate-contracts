@@ -175,6 +175,75 @@ contract RadixMatchingEngineTest is Test {
         vm.stopPrank();
     }
 
+    function testFuzz_InvalidFillDoesNotMutate(bytes32 order, bool isBid) public {
+        vm.assume(_price(order) == 0 || _quantity(order) == 0 || _nonce(order) != 0);
+
+        bytes32 bidRootBefore = engine.bidRoot();
+        bytes32 askRootBefore = engine.askRoot();
+        uint40 nextNonceBefore = engine.nextNonce();
+        uint256 engineBaseBefore = base.balanceOf(address(engine));
+        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
+        uint256 aliceBaseBefore = base.balanceOf(alice);
+        uint256 aliceQuoteBefore = quote.balanceOf(alice);
+
+        vm.prank(alice);
+        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        engine.fill(order, isBid);
+
+        assertEq(engine.bidRoot(), bidRootBefore);
+        assertEq(engine.askRoot(), askRootBefore);
+        assertEq(engine.nextNonce(), nextNonceBefore);
+        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
+        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
+        assertEq(base.balanceOf(alice), aliceBaseBefore);
+        assertEq(quote.balanceOf(alice), aliceQuoteBefore);
+    }
+
+    function testFuzz_CancelZeroQuantityDoesNotMutate(uint24 price, uint40 nonce, address caller) public {
+        bytes32 order = _order(price, 0, nonce);
+
+        bytes32 bidRootBefore = engine.bidRoot();
+        bytes32 askRootBefore = engine.askRoot();
+        uint40 nextNonceBefore = engine.nextNonce();
+        uint256 engineBaseBefore = base.balanceOf(address(engine));
+        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
+
+        vm.prank(caller);
+        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        engine.cancel(order);
+
+        assertEq(engine.bidRoot(), bidRootBefore);
+        assertEq(engine.askRoot(), askRootBefore);
+        assertEq(engine.nextNonce(), nextNonceBefore);
+        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
+        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
+        assertEq(engine.ownerOfOrder(order), address(0));
+    }
+
+    function testFuzz_CancelUnknownOrderDoesNotMutate(uint24 price, uint192 quantity, uint40 nonce, address caller)
+        public
+    {
+        vm.assume(quantity != 0);
+
+        bytes32 order = _order(price, quantity, nonce);
+        bytes32 bidRootBefore = engine.bidRoot();
+        bytes32 askRootBefore = engine.askRoot();
+        uint40 nextNonceBefore = engine.nextNonce();
+        uint256 engineBaseBefore = base.balanceOf(address(engine));
+        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
+
+        vm.prank(caller);
+        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        engine.cancel(order);
+
+        assertEq(engine.bidRoot(), bidRootBefore);
+        assertEq(engine.askRoot(), askRootBefore);
+        assertEq(engine.nextNonce(), nextNonceBefore);
+        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
+        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
+        assertEq(engine.ownerOfOrder(order), address(0));
+    }
+
     function test_OnlyOwnerCanCancel() public {
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 2, 0), true);

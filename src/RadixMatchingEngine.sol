@@ -110,7 +110,7 @@ contract RadixMatchingEngine {
         if (_quantity(order) == 0) revert InvalidOrder();
 
         address owner = ownerOfOrder[order];
-        if (owner != msg.sender) revert NotOrderOwner();
+        if (owner == address(0) || owner != msg.sender) revert NotOrderOwner();
 
         bool isBid = _orderIsBid(order);
 
