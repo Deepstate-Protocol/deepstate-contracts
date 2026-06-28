@@ -443,15 +443,31 @@ contract RadixMatchingEngine {
     }
 
     function _safeTransferFromExact(address token, address from, address to, uint256 amount) private {
-        uint256 balanceBefore = _balanceOf(token, to);
+        uint256 fromBalanceBefore = _balanceOf(token, from);
+        uint256 toBalanceBefore = _balanceOf(token, to);
         token.safeTransferFrom(from, to, amount);
-        if (_balanceOf(token, to) != balanceBefore + amount) revert InexactTokenTransfer();
+        uint256 fromBalanceAfter = _balanceOf(token, from);
+        uint256 toBalanceAfter = _balanceOf(token, to);
+        if (
+            fromBalanceAfter > fromBalanceBefore || fromBalanceBefore - fromBalanceAfter != amount
+                || toBalanceAfter < toBalanceBefore || toBalanceAfter - toBalanceBefore != amount
+        ) {
+            revert InexactTokenTransfer();
+        }
     }
 
     function _safeTransferExact(address token, address to, uint256 amount) private {
-        uint256 balanceBefore = _balanceOf(token, to);
+        uint256 fromBalanceBefore = _balanceOf(token, address(this));
+        uint256 toBalanceBefore = _balanceOf(token, to);
         token.safeTransfer(to, amount);
-        if (_balanceOf(token, to) != balanceBefore + amount) revert InexactTokenTransfer();
+        uint256 fromBalanceAfter = _balanceOf(token, address(this));
+        uint256 toBalanceAfter = _balanceOf(token, to);
+        if (
+            fromBalanceAfter > fromBalanceBefore || fromBalanceBefore - fromBalanceAfter != amount
+                || toBalanceAfter < toBalanceBefore || toBalanceAfter - toBalanceBefore != amount
+        ) {
+            revert InexactTokenTransfer();
+        }
     }
 
     function _balanceOf(address token, address account) private view returns (uint256 result) {

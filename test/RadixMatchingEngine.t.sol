@@ -47,6 +47,44 @@ contract FeeTransferERC20 is TestERC20 {
     }
 }
 
+contract SenderFeeERC20 is TestERC20 {
+    constructor() TestERC20("SenderFee", "SENDERFEE") {}
+
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        super.transferFrom(from, to, amount);
+        _burn(from, 1);
+        return true;
+    }
+}
+
+contract SenderFeeTransferERC20 is TestERC20 {
+    constructor() TestERC20("SenderFeeTransfer", "SENDERFEEOUT") {}
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        super.transfer(to, amount);
+        _burn(msg.sender, 1);
+        return true;
+    }
+}
+
+contract MintingTransferFromERC20 is TestERC20 {
+    constructor() TestERC20("MintingTransferFrom", "MINTFROM") {}
+
+    function transferFrom(address, address to, uint256 amount) public override returns (bool) {
+        _mint(to, amount);
+        return true;
+    }
+}
+
+contract MintingTransferERC20 is TestERC20 {
+    constructor() TestERC20("MintingTransfer", "MINTOUT") {}
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        _mint(to, amount);
+        return true;
+    }
+}
+
 contract RevertingBalanceERC20 {
     function balanceOf(address) external pure returns (uint256) {
         revert();
@@ -892,6 +930,96 @@ contract RadixMatchingEngineTest is Test {
         assertEq(feeEngine.ownerOfOrder(expectedBid), address(0));
         assertEq(feeEngine.nextNonce(), MAX_ORDER_NONCE);
         assertEq(feeQuote.balanceOf(address(feeEngine)), 0);
+    }
+
+    function test_MintingCollateralPullReverts() public {
+        TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
+        MintingTransferFromERC20 mintingQuote = new MintingTransferFromERC20();
+        RadixMatchingEngine mintingEngine = new RadixMatchingEngine(address(plainBase), address(mintingQuote));
+
+        vm.prank(alice);
+        vm.expectRevert(RadixMatchingEngine.InexactTokenTransfer.selector);
+        mintingEngine.fill(_order(10, 2, 0), true);
+
+        bytes32 expectedBid = _order(10, 2, MAX_ORDER_NONCE);
+        assertEq(mintingEngine.bidRoot(), bytes32(0));
+        assertEq(mintingEngine.ownerOfOrder(expectedBid), address(0));
+        assertEq(mintingEngine.nextNonce(), MAX_ORDER_NONCE);
+        assertEq(mintingQuote.balanceOf(address(mintingEngine)), 0);
+        assertEq(mintingQuote.balanceOf(alice), 0);
+    }
+
+    function test_SenderFeeCollateralPullReverts() public {
+        TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
+        SenderFeeERC20 senderFeeQuote = new SenderFeeERC20();
+        RadixMatchingEngine senderFeeEngine = new RadixMatchingEngine(address(plainBase), address(senderFeeQuote));
+
+        senderFeeQuote.mint(alice, 1_000);
+
+        vm.startPrank(alice);
+        senderFeeQuote.approve(address(senderFeeEngine), type(uint256).max);
+        vm.expectRevert(RadixMatchingEngine.InexactTokenTransfer.selector);
+        senderFeeEngine.fill(_order(10, 2, 0), true);
+        vm.stopPrank();
+
+        bytes32 expectedBid = _order(10, 2, MAX_ORDER_NONCE);
+        assertEq(senderFeeEngine.bidRoot(), bytes32(0));
+        assertEq(senderFeeEngine.ownerOfOrder(expectedBid), address(0));
+        assertEq(senderFeeEngine.nextNonce(), MAX_ORDER_NONCE);
+        assertEq(senderFeeQuote.balanceOf(address(senderFeeEngine)), 0);
+        assertEq(senderFeeQuote.balanceOf(alice), 1_000);
+    }
+
+    function test_MintingPayoutRevertsAndPreservesBook() public {
+        MintingTransferERC20 mintingBase = new MintingTransferERC20();
+        TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
+        RadixMatchingEngine mintingEngine = new RadixMatchingEngine(address(mintingBase), address(plainQuote));
+
+        mintingBase.mint(bob, 1_000);
+        plainQuote.mint(alice, 1_000);
+
+        vm.startPrank(bob);
+        mintingBase.approve(address(mintingEngine), type(uint256).max);
+        bytes32 restingAsk = mintingEngine.fill(_order(10, 2, 0), false);
+        vm.stopPrank();
+
+        vm.startPrank(alice);
+        plainQuote.approve(address(mintingEngine), type(uint256).max);
+        vm.expectRevert(RadixMatchingEngine.InexactTokenTransfer.selector);
+        mintingEngine.fill(_order(10, 1, 0), true);
+        vm.stopPrank();
+
+        assertEq(mintingEngine.askRoot(), restingAsk);
+        assertEq(mintingEngine.ownerOfOrder(restingAsk), bob);
+        assertEq(mintingBase.balanceOf(address(mintingEngine)), 2);
+        assertEq(mintingBase.balanceOf(alice), 0);
+        assertEq(plainQuote.balanceOf(address(mintingEngine)), 0);
+    }
+
+    function test_SenderFeePayoutRevertsAndPreservesBook() public {
+        SenderFeeTransferERC20 senderFeeBase = new SenderFeeTransferERC20();
+        TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
+        RadixMatchingEngine senderFeeEngine = new RadixMatchingEngine(address(senderFeeBase), address(plainQuote));
+
+        senderFeeBase.mint(bob, 1_000);
+        plainQuote.mint(alice, 1_000);
+
+        vm.startPrank(bob);
+        senderFeeBase.approve(address(senderFeeEngine), type(uint256).max);
+        bytes32 restingAsk = senderFeeEngine.fill(_order(10, 2, 0), false);
+        vm.stopPrank();
+
+        vm.startPrank(alice);
+        plainQuote.approve(address(senderFeeEngine), type(uint256).max);
+        vm.expectRevert(RadixMatchingEngine.InexactTokenTransfer.selector);
+        senderFeeEngine.fill(_order(10, 1, 0), true);
+        vm.stopPrank();
+
+        assertEq(senderFeeEngine.askRoot(), restingAsk);
+        assertEq(senderFeeEngine.ownerOfOrder(restingAsk), bob);
+        assertEq(senderFeeBase.balanceOf(address(senderFeeEngine)), 2);
+        assertEq(senderFeeBase.balanceOf(alice), 0);
+        assertEq(plainQuote.balanceOf(address(senderFeeEngine)), 0);
     }
 
     function test_FeeOnBasePayoutRevertsAndPreservesBook() public {

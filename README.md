@@ -37,7 +37,7 @@ Higher order nonce still means earlier time priority at the same price.
 ## Security Assumptions
 
 - `evm_version = "cancun"` is required because the reentrancy guard uses transient storage opcodes.
-- Base and quote tokens must be standard exact-balance ERC20s. Fee-on-transfer, rebasing, or otherwise inexact transfers revert.
+- Base and quote tokens must be standard exact-balance ERC20s. Every transfer must debit the source and credit the recipient by exactly the requested amount; fee-on-transfer, rebasing, mint-on-transfer, or otherwise inexact transfers revert.
 - Filled resting orders are claimed through `cancel(bytes32 order)`, which also withdraws any unfilled remainder.
 
 ## Commands
