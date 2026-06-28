@@ -47,6 +47,31 @@ contract FeeTransferERC20 is TestERC20 {
     }
 }
 
+contract RevertingBalanceERC20 {
+    function balanceOf(address) external pure returns (uint256) {
+        revert();
+    }
+}
+
+contract ShortBalanceERC20 {
+    fallback() external {}
+}
+
+contract ToggleBalanceERC20 is TestERC20 {
+    bool public failBalance;
+
+    constructor() TestERC20("ToggleBalance", "TOGGLE") {}
+
+    function setFailBalance(bool failBalance_) external {
+        failBalance = failBalance_;
+    }
+
+    function balanceOf(address owner) public view override returns (uint256) {
+        if (failBalance) revert();
+        return super.balanceOf(owner);
+    }
+}
+
 contract ReentrantERC20 is TestERC20 {
     RadixMatchingEngine internal target;
     bytes32 internal targetOrder;
@@ -640,6 +665,65 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(engine.askRoot(), secondAsk);
         _assertEmptyBranch(branch);
+    }
+
+    function test_RevertingBalanceQueryRevertsBeforeMutatingRestingBid() public {
+        TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
+        RevertingBalanceERC20 badQuote = new RevertingBalanceERC20();
+        RadixMatchingEngine badEngine = new RadixMatchingEngine(address(plainBase), address(badQuote));
+
+        bytes32 expectedBid = _order(10, 2, MAX_ORDER_NONCE);
+
+        vm.prank(alice);
+        vm.expectRevert(RadixMatchingEngine.TokenBalanceQueryFailed.selector);
+        badEngine.fill(_order(10, 2, 0), true);
+
+        assertEq(badEngine.bidRoot(), bytes32(0));
+        assertEq(badEngine.ownerOfOrder(expectedBid), address(0));
+        assertEq(badEngine.nextNonce(), MAX_ORDER_NONCE);
+    }
+
+    function test_ShortBalanceQueryRevertsBeforeMutatingRestingAsk() public {
+        ShortBalanceERC20 badBase = new ShortBalanceERC20();
+        TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
+        RadixMatchingEngine badEngine = new RadixMatchingEngine(address(badBase), address(plainQuote));
+
+        bytes32 expectedAsk = _order(10, 2, MAX_ORDER_NONCE);
+
+        vm.prank(alice);
+        vm.expectRevert(RadixMatchingEngine.TokenBalanceQueryFailed.selector);
+        badEngine.fill(_order(10, 2, 0), false);
+
+        assertEq(badEngine.askRoot(), bytes32(0));
+        assertEq(badEngine.ownerOfOrder(expectedAsk), address(0));
+        assertEq(badEngine.nextNonce(), MAX_ORDER_NONCE);
+    }
+
+    function test_CancelBalanceQueryFailurePreservesBook() public {
+        ToggleBalanceERC20 toggleBase = new ToggleBalanceERC20();
+        TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
+        RadixMatchingEngine toggleEngine = new RadixMatchingEngine(address(toggleBase), address(plainQuote));
+
+        toggleBase.mint(alice, 1_000);
+
+        vm.startPrank(alice);
+        toggleBase.approve(address(toggleEngine), type(uint256).max);
+        bytes32 restingAsk = toggleEngine.fill(_order(10, 2, 0), false);
+        vm.stopPrank();
+
+        toggleBase.setFailBalance(true);
+
+        vm.prank(alice);
+        vm.expectRevert(RadixMatchingEngine.TokenBalanceQueryFailed.selector);
+        toggleEngine.cancel(restingAsk);
+
+        assertEq(toggleEngine.askRoot(), restingAsk);
+        assertEq(toggleEngine.ownerOfOrder(restingAsk), alice);
+
+        toggleBase.setFailBalance(false);
+
+        assertEq(toggleBase.balanceOf(address(toggleEngine)), 2);
+        assertEq(toggleBase.balanceOf(alice), 998);
     }
 
     function test_FeeOnTransferTokenReverts() public {
