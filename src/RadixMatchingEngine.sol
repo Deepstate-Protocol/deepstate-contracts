@@ -89,26 +89,29 @@ contract RadixMatchingEngine {
             (newRoot, remaining, baseFilled, quoteAmount) = _match(root, limitPrice, remaining, false);
             if (newRoot != root) askRoot = newRoot;
 
-            if (quoteAmount != 0) _safeTransferFromExact(QUOTE_TOKEN, msg.sender, address(this), quoteAmount);
-            if (baseFilled != 0) _safeTransferExact(BASE_TOKEN, msg.sender, baseFilled);
-
+            uint256 quoteCollateral;
             if (remaining != 0) {
                 restingOrder = _rest(limitPrice, remaining, true);
-                _safeTransferFromExact(QUOTE_TOKEN, msg.sender, address(this), _quoteValue(limitPrice, remaining));
+                quoteCollateral = _quoteValue(limitPrice, remaining);
             }
+            unchecked {
+                quoteCollateral += quoteAmount;
+            }
+
+            if (quoteCollateral != 0) _safeTransferFromExact(QUOTE_TOKEN, msg.sender, address(this), quoteCollateral);
+            if (baseFilled != 0) _safeTransferExact(BASE_TOKEN, msg.sender, baseFilled);
         } else {
             bytes32 root = bidRoot;
             bytes32 newRoot;
             (newRoot, remaining, baseFilled, quoteAmount) = _match(root, limitPrice, remaining, true);
             if (newRoot != root) bidRoot = newRoot;
 
-            if (baseFilled != 0) _safeTransferFromExact(BASE_TOKEN, msg.sender, address(this), baseFilled);
-            if (quoteAmount != 0) _safeTransferExact(QUOTE_TOKEN, msg.sender, quoteAmount);
-
             if (remaining != 0) {
                 restingOrder = _rest(limitPrice, remaining, false);
-                _safeTransferFromExact(BASE_TOKEN, msg.sender, address(this), remaining);
             }
+
+            _safeTransferFromExact(BASE_TOKEN, msg.sender, address(this), quantity);
+            if (quoteAmount != 0) _safeTransferExact(QUOTE_TOKEN, msg.sender, quoteAmount);
         }
     }
 
@@ -118,9 +121,16 @@ contract RadixMatchingEngine {
         if (originalQuantity == 0) revert InvalidOrder();
 
         address owner = ownerOfOrder[order];
-        if (owner == address(0) || owner != msg.sender) revert NotOrderOwner();
+        if (owner != msg.sender) revert NotOrderOwner();
 
-        bool isBid = _orderIsBid(order);
+        bytes32 sideKey = _sideKey(order);
+        address marker = ownerOfOrder[sideKey];
+        bool isBid;
+        if (marker == _BID_SENTINEL) {
+            isBid = true;
+        } else if (marker != _ASK_SENTINEL) {
+            revert OrderNotFound();
+        }
 
         uint192 remainingQuantity = 0;
         bytes32 removed;
@@ -154,7 +164,7 @@ contract RadixMatchingEngine {
         }
 
         delete ownerOfOrder[order];
-        delete ownerOfOrder[_sideKey(order)];
+        delete ownerOfOrder[sideKey];
 
         if (baseAmount != 0) _safeTransferExact(BASE_TOKEN, owner, baseAmount);
         if (quoteAmount != 0) _safeTransferExact(QUOTE_TOKEN, owner, quoteAmount);
@@ -423,13 +433,6 @@ contract RadixMatchingEngine {
         unchecked {
             return ((key >> (63 - depth)) & 1) == 1;
         }
-    }
-
-    function _orderIsBid(bytes32 order) private view returns (bool) {
-        address marker = ownerOfOrder[_sideKey(order)];
-        if (marker == _BID_SENTINEL) return true;
-        if (marker == _ASK_SENTINEL) return false;
-        revert OrderNotFound();
     }
 
     function _sideKey(bytes32 order) private pure returns (bytes32) {

@@ -1189,6 +1189,70 @@ contract RadixMatchingEngineTest is Test {
         assertEq(falseBase.balanceOf(alice), 1_000);
     }
 
+    function test_FalseReturnBidPartialRestQuotePullRevertsAtomically() public {
+        TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
+        FalseReturnERC20 falseQuote = new FalseReturnERC20();
+        RadixMatchingEngine falseEngine = new RadixMatchingEngine(address(plainBase), address(falseQuote));
+
+        plainBase.mint(bob, 1_000);
+        falseQuote.mint(alice, 1_000);
+
+        vm.startPrank(bob);
+        plainBase.approve(address(falseEngine), type(uint256).max);
+        bytes32 restingAsk = falseEngine.fill(_order(10, 1, 0), false);
+        vm.stopPrank();
+
+        falseQuote.setFailTransferFrom(true);
+
+        bytes32 expectedBid = _order(10, 1, MAX_ORDER_NONCE - 1);
+
+        vm.startPrank(alice);
+        falseQuote.approve(address(falseEngine), type(uint256).max);
+        vm.expectRevert();
+        falseEngine.fill(_order(10, 2, 0), true);
+        vm.stopPrank();
+
+        assertEq(falseEngine.askRoot(), restingAsk);
+        assertEq(falseEngine.bidRoot(), bytes32(0));
+        assertEq(falseEngine.ownerOfOrder(restingAsk), bob);
+        assertEq(falseEngine.ownerOfOrder(expectedBid), address(0));
+        assertEq(falseEngine.nextNonce(), MAX_ORDER_NONCE - 1);
+        assertEq(plainBase.balanceOf(address(falseEngine)), 1);
+        assertEq(falseQuote.balanceOf(address(falseEngine)), 0);
+    }
+
+    function test_FalseReturnAskPartialRestBasePullRevertsAtomically() public {
+        FalseReturnERC20 falseBase = new FalseReturnERC20();
+        TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
+        RadixMatchingEngine falseEngine = new RadixMatchingEngine(address(falseBase), address(plainQuote));
+
+        falseBase.mint(alice, 1_000);
+        plainQuote.mint(bob, 1_000);
+
+        vm.startPrank(bob);
+        plainQuote.approve(address(falseEngine), type(uint256).max);
+        bytes32 restingBid = falseEngine.fill(_order(10, 1, 0), true);
+        vm.stopPrank();
+
+        falseBase.setFailTransferFrom(true);
+
+        bytes32 expectedAsk = _order(10, 1, MAX_ORDER_NONCE - 1);
+
+        vm.startPrank(alice);
+        falseBase.approve(address(falseEngine), type(uint256).max);
+        vm.expectRevert();
+        falseEngine.fill(_order(10, 2, 0), false);
+        vm.stopPrank();
+
+        assertEq(falseEngine.bidRoot(), restingBid);
+        assertEq(falseEngine.askRoot(), bytes32(0));
+        assertEq(falseEngine.ownerOfOrder(restingBid), bob);
+        assertEq(falseEngine.ownerOfOrder(expectedAsk), address(0));
+        assertEq(falseEngine.nextNonce(), MAX_ORDER_NONCE - 1);
+        assertEq(falseBase.balanceOf(address(falseEngine)), 0);
+        assertEq(plainQuote.balanceOf(address(falseEngine)), 10);
+    }
+
     function test_FalseReturnFilledBidClaimRevertsAndPreservesClaim() public {
         FalseReturnERC20 falseBase = new FalseReturnERC20();
         TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
