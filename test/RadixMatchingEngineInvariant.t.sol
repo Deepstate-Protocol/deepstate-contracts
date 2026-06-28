@@ -80,7 +80,10 @@ contract RadixMatchingEngineHandler is Test {
         if (!tracked.active) return;
 
         vm.prank(tracked.owner);
-        try ENGINE.cancel(tracked.order) {
+        try ENGINE.cancel(tracked.order) returns (uint256 baseAmount, uint256 quoteAmount) {
+            (uint256 expectedBaseAmount, uint256 expectedQuoteAmount) = _cancelAmounts(index);
+            assertEq(baseAmount, expectedBaseAmount, "cancel base amount");
+            assertEq(quoteAmount, expectedQuoteAmount, "cancel quote amount");
             _applyCancel(index);
         } catch (bytes memory reason) {
             ++unexpectedCancelReverts;
@@ -262,6 +265,16 @@ contract RadixMatchingEngineHandler is Test {
     }
 
     function _applyCancel(uint256 index) private {
+        (uint256 baseAmount, uint256 quoteAmount) = _cancelAmounts(index);
+        TrackedOrder storage tracked = trackedOrders[index];
+
+        expectedBaseBalances[tracked.ownerIndex] += baseAmount;
+        expectedQuoteBalances[tracked.ownerIndex] += quoteAmount;
+        tracked.active = false;
+        tracked.remainingQuantity = 0;
+    }
+
+    function _cancelAmounts(uint256 index) private view returns (uint256 baseAmount, uint256 quoteAmount) {
         TrackedOrder storage tracked = trackedOrders[index];
         uint192 originalQuantity = _quantity(tracked.order);
         uint192 remainingQuantity = tracked.remainingQuantity;
@@ -269,15 +282,12 @@ contract RadixMatchingEngineHandler is Test {
         uint24 price = _price(tracked.order);
 
         if (tracked.isBid) {
-            expectedBaseBalances[tracked.ownerIndex] += filledQuantity;
-            expectedQuoteBalances[tracked.ownerIndex] += _quoteValue(price, remainingQuantity);
+            baseAmount = filledQuantity;
+            quoteAmount = _quoteValue(price, remainingQuantity);
         } else {
-            expectedBaseBalances[tracked.ownerIndex] += remainingQuantity;
-            expectedQuoteBalances[tracked.ownerIndex] += _quoteValue(price, filledQuantity);
+            baseAmount = remainingQuantity;
+            quoteAmount = _quoteValue(price, filledQuantity);
         }
-
-        tracked.active = false;
-        tracked.remainingQuantity = 0;
     }
 
     function _bestMatchIndex(uint24 limitPrice, bool incomingIsBid)

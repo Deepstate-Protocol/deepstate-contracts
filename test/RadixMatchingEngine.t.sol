@@ -316,6 +316,7 @@ contract RadixMatchingEngineTest is Test {
         public
     {
         vm.assume(quantity != 0);
+        vm.assume(caller != address(0));
 
         bytes32 order = _order(price, quantity, nonce);
         bytes32 bidRootBefore = engine.bidRoot();
