@@ -130,11 +130,17 @@ contract RadixMatchingEngineHandler is Test {
     function invalidCancel(uint256 actorSeed, uint24 priceSeed, uint192 quantitySeed, uint256 orderSeed) external {
         address actor = actors[bound(actorSeed, 0, actors.length - 1)];
         bytes32 order;
+        uint256 mode = orderSeed % 3;
 
-        if (trackedOrders.length != 0 && orderSeed % 2 == 0) {
+        if (trackedOrders.length != 0 && mode == 0) {
             uint256 index = bound(orderSeed, 0, trackedOrders.length - 1);
             bytes32 trackedOrder = trackedOrders[index].order;
             order = _pack(_price(trackedOrder), 0, _nonce(trackedOrder));
+        } else if (trackedOrders.length != 0 && mode == 1) {
+            uint256 index = bound(orderSeed, 0, trackedOrders.length - 1);
+            TrackedOrder storage tracked = trackedOrders[index];
+            actor = actors[(tracked.ownerIndex + 1) % actors.length];
+            order = tracked.order;
         } else {
             uint24 price = uint24(bound(priceSeed, 1, type(uint24).max));
             uint192 quantity = uint192(bound(quantitySeed, 1, 100));
