@@ -309,6 +309,20 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         _assertLeavesBackedByActiveOrders(engine.askRoot(), false);
     }
 
+    function invariant_InactiveTrackedOrdersAreAbsentFromBooks() public view {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,, bool isBid, bool active) = handler.orderAt(i);
+            if (active) continue;
+
+            bytes32 sameSideRoot = isBid ? engine.bidRoot() : engine.askRoot();
+            bytes32 oppositeSideRoot = isBid ? engine.askRoot() : engine.bidRoot();
+            assertEq(_find(sameSideRoot, order, isBid), bytes32(0), "inactive same-side order");
+            assertEq(_find(oppositeSideRoot, order, !isBid), bytes32(0), "inactive opposite-side order");
+        }
+    }
+
     function _remainingQuantity(bytes32 order, bool isBid) private view returns (uint192) {
         bytes32 root = isBid ? engine.bidRoot() : engine.askRoot();
         bytes32 current = _find(root, order, isBid);
