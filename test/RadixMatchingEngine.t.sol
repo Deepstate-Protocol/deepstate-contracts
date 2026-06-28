@@ -54,7 +54,7 @@ contract FalseReturnERC20 is TestERC20 {
 
 contract ReentrantERC20 is TestERC20 {
     RadixMatchingEngine internal target;
-    bytes32 internal targetOrder;
+    bytes internal reentryCall;
     bool internal armed;
     bool public reentrySucceeded;
     bytes4 public reentrySelector;
@@ -63,7 +63,13 @@ contract ReentrantERC20 is TestERC20 {
 
     function arm(RadixMatchingEngine target_, bytes32 targetOrder_) external {
         target = target_;
-        targetOrder = targetOrder_;
+        reentryCall = abi.encodeCall(RadixMatchingEngine.cancel, (targetOrder_));
+        armed = true;
+    }
+
+    function armFill(RadixMatchingEngine target_, bytes32 order, bool isBid) external {
+        target = target_;
+        reentryCall = abi.encodeCall(RadixMatchingEngine.fill, (order, isBid));
         armed = true;
     }
 
@@ -75,7 +81,7 @@ contract ReentrantERC20 is TestERC20 {
         if (armed) {
             armed = false;
             bytes memory data;
-            (reentrySucceeded, data) = address(target).call(abi.encodeCall(RadixMatchingEngine.cancel, (targetOrder)));
+            (reentrySucceeded, data) = address(target).call(reentryCall);
             // forge-lint: disable-next-line(unsafe-typecast)
             if (data.length >= 4) reentrySelector = bytes4(data);
         }
@@ -85,7 +91,7 @@ contract ReentrantERC20 is TestERC20 {
 
 contract ReentrantTransferFromERC20 is TestERC20 {
     RadixMatchingEngine internal target;
-    bytes32 internal targetOrder;
+    bytes internal reentryCall;
     bool internal armed;
     bool public reentrySucceeded;
     bytes4 public reentrySelector;
@@ -94,7 +100,13 @@ contract ReentrantTransferFromERC20 is TestERC20 {
 
     function arm(RadixMatchingEngine target_, bytes32 targetOrder_) external {
         target = target_;
-        targetOrder = targetOrder_;
+        reentryCall = abi.encodeCall(RadixMatchingEngine.cancel, (targetOrder_));
+        armed = true;
+    }
+
+    function armFill(RadixMatchingEngine target_, bytes32 order, bool isBid) external {
+        target = target_;
+        reentryCall = abi.encodeCall(RadixMatchingEngine.fill, (order, isBid));
         armed = true;
     }
 
@@ -102,7 +114,7 @@ contract ReentrantTransferFromERC20 is TestERC20 {
         if (armed) {
             armed = false;
             bytes memory data;
-            (reentrySucceeded, data) = address(target).call(abi.encodeCall(RadixMatchingEngine.cancel, (targetOrder)));
+            (reentrySucceeded, data) = address(target).call(reentryCall);
             // forge-lint: disable-next-line(unsafe-typecast)
             if (data.length >= 4) reentrySelector = bytes4(data);
         }
@@ -1387,6 +1399,68 @@ contract RadixMatchingEngineTest is Test {
         assertEq(reentrantQuote.balanceOf(bob), 1_010);
     }
 
+    function test_ReentrantBasePayoutCannotFill() public {
+        ReentrantERC20 reentrantBase = new ReentrantERC20();
+        TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
+        RadixMatchingEngine reentrantEngine = new RadixMatchingEngine(address(reentrantBase), address(plainQuote));
+
+        reentrantBase.mint(alice, 1_000);
+        reentrantBase.mint(bob, 1_000);
+        plainQuote.mint(alice, 1_000);
+        plainQuote.mint(bob, 1_000);
+
+        vm.startPrank(alice);
+        reentrantBase.approve(address(reentrantEngine), type(uint256).max);
+        plainQuote.approve(address(reentrantEngine), type(uint256).max);
+        reentrantEngine.fill(_order(10, 1, 0), false);
+        vm.stopPrank();
+
+        vm.startPrank(bob);
+        reentrantBase.approve(address(reentrantEngine), type(uint256).max);
+        plainQuote.approve(address(reentrantEngine), type(uint256).max);
+        vm.stopPrank();
+
+        reentrantBase.armFill(reentrantEngine, _order(11, 1, 0), false);
+
+        vm.prank(bob);
+        reentrantEngine.fill(_order(10, 1, 0), true);
+
+        assertFalse(reentrantBase.reentrySucceeded());
+        assertEq(reentrantBase.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantBase.balanceOf(bob), 1_001);
+    }
+
+    function test_ReentrantQuotePayoutCannotFill() public {
+        TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
+        ReentrantERC20 reentrantQuote = new ReentrantERC20();
+        RadixMatchingEngine reentrantEngine = new RadixMatchingEngine(address(plainBase), address(reentrantQuote));
+
+        plainBase.mint(alice, 1_000);
+        plainBase.mint(bob, 1_000);
+        reentrantQuote.mint(alice, 1_000);
+        reentrantQuote.mint(bob, 1_000);
+
+        vm.startPrank(alice);
+        plainBase.approve(address(reentrantEngine), type(uint256).max);
+        reentrantQuote.approve(address(reentrantEngine), type(uint256).max);
+        reentrantEngine.fill(_order(10, 1, 0), true);
+        vm.stopPrank();
+
+        vm.startPrank(bob);
+        plainBase.approve(address(reentrantEngine), type(uint256).max);
+        reentrantQuote.approve(address(reentrantEngine), type(uint256).max);
+        vm.stopPrank();
+
+        reentrantQuote.armFill(reentrantEngine, _order(11, 1, 0), true);
+
+        vm.prank(bob);
+        reentrantEngine.fill(_order(10, 1, 0), false);
+
+        assertFalse(reentrantQuote.reentrySucceeded());
+        assertEq(reentrantQuote.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantQuote.balanceOf(bob), 1_010);
+    }
+
     function test_ReentrantBaseCancelPayoutCannotCancelTokenOwnedAsk() public {
         ReentrantERC20 reentrantBase = new ReentrantERC20();
         TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
@@ -1487,6 +1561,28 @@ contract RadixMatchingEngineTest is Test {
         assertEq(reentrantQuote.balanceOf(address(reentrantEngine)), 10);
     }
 
+    function test_ReentrantQuoteCollateralPullCannotFill() public {
+        TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
+        ReentrantTransferFromERC20 reentrantQuote = new ReentrantTransferFromERC20();
+        RadixMatchingEngine reentrantEngine = new RadixMatchingEngine(address(plainBase), address(reentrantQuote));
+
+        reentrantQuote.mint(alice, 1_000);
+
+        vm.startPrank(alice);
+        reentrantQuote.approve(address(reentrantEngine), type(uint256).max);
+        bytes32 expectedBid = _order(10, 1, MAX_ORDER_NONCE);
+        reentrantQuote.armFill(reentrantEngine, _order(11, 1, 0), true);
+        bytes32 restingBid = reentrantEngine.fill(_order(10, 1, 0), true);
+        vm.stopPrank();
+
+        assertEq(restingBid, expectedBid);
+        assertFalse(reentrantQuote.reentrySucceeded());
+        assertEq(reentrantQuote.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantEngine.bidRoot(), restingBid);
+        assertEq(reentrantEngine.ownerOfOrder(restingBid), alice);
+        assertEq(reentrantQuote.balanceOf(address(reentrantEngine)), 10);
+    }
+
     function test_ReentrantBaseCollateralPullReverts() public {
         ReentrantTransferFromERC20 reentrantBase = new ReentrantTransferFromERC20();
         TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
@@ -1498,6 +1594,28 @@ contract RadixMatchingEngineTest is Test {
         reentrantBase.approve(address(reentrantEngine), type(uint256).max);
         bytes32 expectedAsk = _order(10, 1, MAX_ORDER_NONCE);
         reentrantBase.arm(reentrantEngine, expectedAsk);
+        bytes32 restingAsk = reentrantEngine.fill(_order(10, 1, 0), false);
+        vm.stopPrank();
+
+        assertEq(restingAsk, expectedAsk);
+        assertFalse(reentrantBase.reentrySucceeded());
+        assertEq(reentrantBase.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantEngine.askRoot(), restingAsk);
+        assertEq(reentrantEngine.ownerOfOrder(restingAsk), alice);
+        assertEq(reentrantBase.balanceOf(address(reentrantEngine)), 1);
+    }
+
+    function test_ReentrantBaseCollateralPullCannotFill() public {
+        ReentrantTransferFromERC20 reentrantBase = new ReentrantTransferFromERC20();
+        TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
+        RadixMatchingEngine reentrantEngine = new RadixMatchingEngine(address(reentrantBase), address(plainQuote));
+
+        reentrantBase.mint(alice, 1_000);
+
+        vm.startPrank(alice);
+        reentrantBase.approve(address(reentrantEngine), type(uint256).max);
+        bytes32 expectedAsk = _order(10, 1, MAX_ORDER_NONCE);
+        reentrantBase.armFill(reentrantEngine, _order(11, 1, 0), false);
         bytes32 restingAsk = reentrantEngine.fill(_order(10, 1, 0), false);
         vm.stopPrank();
 
