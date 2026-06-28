@@ -117,7 +117,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     uint256 private constant _PRICE_SHIFT = 232;
     uint256 private constant _QUANTITY_SHIFT = 40;
     uint256 private constant _QUANTITY_MASK = (uint256(1) << 192) - 1;
-    uint40 private constant _BRANCH_NONCE = type(uint40).max;
+    uint40 private constant _RESERVED_MAX_NONCE = type(uint40).max;
     uint24 private constant _MAX_PRICE = type(uint24).max;
 
     function setUp() public {
@@ -187,16 +187,15 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
         if (!_isBranch(node)) {
             assertGt(_quantity(node), 0, "leaf quantity");
-            assertLt(_nonce(node), _BRANCH_NONCE, "leaf nonce");
+            assertLt(_nonce(node), _RESERVED_MAX_NONCE, "leaf nonce");
             return _quantity(node);
         }
 
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
         assertTrue(leftNode != bytes32(0), "left child");
         assertTrue(rightNode != bytes32(0), "right child");
-        assertEq(_nonce(node), _BRANCH_NONCE, "branch nonce");
         assertEq(engine.ownerOfOrder(node), address(0), "branch owner");
-        _assertBranchAddress(node, leftNode, rightNode);
+        assertEq(node, _branchNodeForChildren(leftNode, rightNode), "branch address");
 
         uint192 leftQuantity = _assertSubtree(leftNode, depth + 1);
         uint192 rightQuantity = _assertSubtree(rightNode, depth + 1);
@@ -234,14 +233,19 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         return _nodeKey(leftNode != bytes32(0) ? leftNode : rightNode, isBidTree);
     }
 
-    function _assertBranchAddress(bytes32 node, bytes32 leftNode, bytes32 rightNode) private view {
+    function _branchNodeForChildren(bytes32 leftNode, bytes32 rightNode) private view returns (bytes32) {
         uint64 leftAddressKey = _nodeAddressKey(leftNode);
         uint64 rightAddressKey = _nodeAddressKey(rightNode);
         uint8 addressDepth = _commonPrefix(leftAddressKey, rightAddressKey);
         assertLt(addressDepth, 64, "branch address depth");
 
         uint192 quantity = _quantity(leftNode) + _quantity(rightNode);
-        assertEq(_quantity(node), quantity, "branch address quantity");
+        uint64 prefix = _branchCode(leftAddressKey, addressDepth);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint24 prefixPrice = uint24(prefix >> 40);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint40 prefixNonce = uint40(prefix);
+        return _pack(prefixPrice, quantity, prefixNonce);
     }
 
     function _nodeAddressKey(bytes32 node) private view returns (uint64) {
@@ -259,6 +263,11 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
     function _pathKey(bytes32 order) private pure returns (uint64) {
         return (uint64(_price(order)) << 40) | uint64(_nonce(order));
+    }
+
+    function _branchCode(uint64 key, uint8 depth) private pure returns (uint64) {
+        uint64 prefixBits = depth == 0 ? 0 : key >> (64 - depth);
+        return ((uint64(1) << depth) - 1) + prefixBits;
     }
 
     function _commonPrefix(uint64 a, uint64 b) private pure returns (uint8 prefixLength) {

@@ -24,7 +24,7 @@ contract RadixMatchingEngine {
     bytes32 public askRoot;
 
     /// @notice Decrementing nonce. Higher nonce means earlier time priority at the same price.
-    /// @dev The maximum nonce value is reserved for branch nodes.
+    /// @dev Resting orders start below the maximum value, leaving the top path endpoint unused by orders.
     uint40 public nextNonce = _MAX_ORDER_NONCE;
 
     address public immutable BASE_TOKEN;
@@ -34,8 +34,8 @@ contract RadixMatchingEngine {
     uint256 private constant _QUANTITY_SHIFT = 40;
     uint256 private constant _QUANTITY_MASK = (uint256(1) << 192) - 1;
     uint256 private constant _NONCE_MASK = (uint256(1) << 40) - 1;
-    uint40 private constant _BRANCH_NONCE = type(uint40).max;
-    uint40 private constant _MAX_ORDER_NONCE = _BRANCH_NONCE - 1;
+    uint40 private constant _RESERVED_MAX_NONCE = type(uint40).max;
+    uint40 private constant _MAX_ORDER_NONCE = _RESERVED_MAX_NONCE - 1;
     uint24 private constant _MAX_PRICE = type(uint24).max;
 
     address private constant _BID_SENTINEL = address(uint160(1));
@@ -56,7 +56,7 @@ contract RadixMatchingEngine {
     error ReentrantCall();
     error TokenBalanceQueryFailed();
     error InexactTokenTransfer();
-    error BranchAddressSpaceExhausted();
+    error BranchAddressAlreadyUsed();
 
     modifier nonReentrant() {
         _enter();
@@ -159,6 +159,7 @@ contract RadixMatchingEngine {
 
         restingOrder = _pack(_price(order), quantity, nonce);
         if (ownerOfOrder[restingOrder] != address(0)) revert DuplicateOrder();
+        if (_isBranch(restingOrder)) revert BranchAddressAlreadyUsed();
 
         ownerOfOrder[restingOrder] = msg.sender;
         ownerOfOrder[_sideKey(restingOrder)] = isBid ? _BID_SENTINEL : _ASK_SENTINEL;
@@ -323,7 +324,10 @@ contract RadixMatchingEngine {
             rightNode = a;
         }
 
-        branchNode = _branchNodeForChildren(a, b, oldBranch);
+        branchNode = _branchNodeForChildren(a, b);
+        if (branchNode != oldBranch && (_isBranch(branchNode) || ownerOfOrder[branchNode] != address(0))) {
+            revert BranchAddressAlreadyUsed();
+        }
         tree[branchNode] = Branch({leftNode: leftNode, rightNode: rightNode});
     }
 
@@ -332,33 +336,21 @@ contract RadixMatchingEngine {
         return restingIsBid ? restingPrice >= limitPrice : restingPrice <= limitPrice;
     }
 
-    function _branchNodeForChildren(bytes32 a, bytes32 b, bytes32 oldBranch) private view returns (bytes32) {
+    function _branchNodeForChildren(bytes32 a, bytes32 b) private view returns (bytes32) {
         uint64 aAddressKey = _nodeAddressKey(a);
         uint64 bAddressKey = _nodeAddressKey(b);
         uint8 addressDepth = _commonPrefix(aAddressKey, bAddressKey);
         if (addressDepth == 64) revert DuplicateOrder();
-        return
-            _resolveBranchNode(_branchCode(aAddressKey, addressDepth), _nodeQuantity(a) + _nodeQuantity(b), oldBranch);
+        return _branchNode(aAddressKey, addressDepth, _nodeQuantity(a) + _nodeQuantity(b));
     }
 
-    function _resolveBranchNode(uint64 branchCode, uint192 quantity, bytes32 oldBranch)
-        private
-        view
-        returns (bytes32 branchNode)
-    {
+    function _branchNode(uint64 key, uint8 depth, uint192 quantity) private pure returns (bytes32) {
+        uint64 prefix = _branchCode(key, depth);
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint24 startPrice = uint24(branchCode);
-        uint24 branchPrice = startPrice;
-
-        while (true) {
-            branchNode = _pack(branchPrice, quantity, _BRANCH_NONCE);
-            if (branchNode == oldBranch || !_isBranch(branchNode)) return branchNode;
-
-            unchecked {
-                ++branchPrice;
-            }
-            if (branchPrice == startPrice) revert BranchAddressSpaceExhausted();
-        }
+        uint24 prefixPrice = uint24(prefix >> 40);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint40 prefixNonce = uint40(prefix);
+        return _pack(prefixPrice, quantity, prefixNonce);
     }
 
     function _branchCode(uint64 key, uint8 depth) private pure returns (uint64) {

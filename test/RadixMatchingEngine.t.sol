@@ -65,8 +65,8 @@ contract ReentrantERC20 is TestERC20 {
 }
 
 contract RadixMatchingEngineTest is Test {
-    uint40 internal constant BRANCH_NONCE = type(uint40).max;
-    uint40 internal constant MAX_ORDER_NONCE = BRANCH_NONCE - 1;
+    uint40 internal constant RESERVED_MAX_NONCE = type(uint40).max;
+    uint40 internal constant MAX_ORDER_NONCE = RESERVED_MAX_NONCE - 1;
 
     TestERC20 internal base;
     TestERC20 internal quote;
@@ -165,7 +165,7 @@ contract RadixMatchingEngineTest is Test {
         engine.cancel(restingAsk);
     }
 
-    function test_BranchesUseMaxNonceAndOrdersDecrementBelowIt() public {
+    function test_OrdersDecrementBelowReservedMaxNonce() public {
         vm.prank(alice);
         bytes32 firstBid = engine.fill(_order(100, 1, 0), true);
 
@@ -177,8 +177,10 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 root = engine.bidRoot();
         assertEq(_nonce(secondBid), MAX_ORDER_NONCE - 1);
-        assertEq(_nonce(root), BRANCH_NONCE);
         assertEq(engine.ownerOfOrder(root), address(0));
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(root);
+        assertTrue(leftNode != bytes32(0));
+        assertTrue(rightNode != bytes32(0));
     }
 
     function test_SideMetadataUsesZeroQuantityNamespace() public {
@@ -223,8 +225,10 @@ contract RadixMatchingEngineTest is Test {
         assertTrue(bidRoot != bytes32(0));
         assertTrue(askRoot != bytes32(0));
         assertTrue(bidRoot != askRoot);
-        assertEq(_nonce(bidRoot), BRANCH_NONCE);
-        assertEq(_nonce(askRoot), BRANCH_NONCE);
+        (bytes32 bidLeft, bytes32 bidRight) = engine.tree(bidRoot);
+        (bytes32 askLeft, bytes32 askRight) = engine.tree(askRoot);
+        assertTrue(bidLeft != bytes32(0) && bidRight != bytes32(0));
+        assertTrue(askLeft != bytes32(0) && askRight != bytes32(0));
     }
 
     function test_MultipleSamePriceBranchesDoNotAlias() public {
@@ -247,7 +251,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(fourthAsk), address(0xD00D));
     }
 
-    function test_BranchAddressProbeHandlesAliasSequence() public {
+    function test_FullPrefixBranchAddressesHandleAliasSequence() public {
         uint24[40] memory prices = [
             uint24(549),
             uint24(308),
@@ -304,11 +308,6 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(quote.balanceOf(address(engine)), quoteSpent);
 
-        (bytes32 baseLeft, bytes32 baseRight) = engine.tree(_order(type(uint24).max - 1, 2, BRANCH_NONCE));
-        (bytes32 probeLeft, bytes32 probeRight) = engine.tree(_order(type(uint24).max, 2, BRANCH_NONCE));
-        assertTrue(baseLeft != bytes32(0) && baseRight != bytes32(0));
-        assertTrue(probeLeft != bytes32(0) && probeRight != bytes32(0));
-
         for (uint256 i; i < orders.length; ++i) {
             vm.prank(alice);
             (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(orders[i]);
@@ -319,6 +318,27 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(engine.bidRoot(), bytes32(0));
         assertEq(quote.balanceOf(alice), 1_000_000);
+    }
+
+    function test_SamePriceBranchSplitsAtFinalNonceBit() public {
+        uint24 price = 321;
+
+        vm.prank(alice);
+        engine.fill(_order(price, 1, 0), true);
+        vm.prank(bob);
+        bytes32 secondBid = engine.fill(_order(price, 1, 0), true);
+        vm.prank(carol);
+        bytes32 thirdBid = engine.fill(_order(price, 1, 0), true);
+
+        assertEq(_nonce(secondBid), MAX_ORDER_NONCE - 1);
+        assertEq(_nonce(thirdBid), MAX_ORDER_NONCE - 2);
+        assertEq(_commonPrefix(_pathKey(secondBid), _pathKey(thirdBid)), 63);
+
+        bytes32 finalSplit = _branchFor(secondBid, thirdBid);
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(finalSplit);
+
+        assertEq(leftNode, thirdBid);
+        assertEq(rightNode, secondBid);
     }
 
     function test_FeeOnTransferTokenReverts() public {
@@ -627,6 +647,44 @@ contract RadixMatchingEngineTest is Test {
 
     function _order(uint24 price, uint192 quantity, uint40 nonce) internal pure returns (bytes32) {
         return bytes32((uint256(price) << 232) | (uint256(quantity) << 40) | uint256(nonce));
+    }
+
+    function _branchFor(bytes32 a, bytes32 b) internal pure returns (bytes32) {
+        uint64 aKey = _pathKey(a);
+        uint64 bKey = _pathKey(b);
+        uint8 depth = _commonPrefix(aKey, bKey);
+        uint64 prefixBits = depth == 0 ? 0 : aKey >> (64 - depth);
+        uint64 prefix = ((uint64(1) << depth) - 1) + prefixBits;
+
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint24 prefixPrice = uint24(prefix >> 40);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint40 prefixNonce = uint40(prefix);
+        return _order(prefixPrice, _quantity(a) + _quantity(b), prefixNonce);
+    }
+
+    function _pathKey(bytes32 order) internal pure returns (uint64) {
+        return (uint64(_price(order)) << 40) | uint64(_nonce(order));
+    }
+
+    function _commonPrefix(uint64 a, uint64 b) internal pure returns (uint8 prefixLength) {
+        for (; prefixLength < 64; ++prefixLength) {
+            if (_bit(a, prefixLength) != _bit(b, prefixLength)) return prefixLength;
+        }
+    }
+
+    function _bit(uint64 key, uint8 depth) internal pure returns (bool) {
+        return ((key >> (63 - depth)) & 1) == 1;
+    }
+
+    function _price(bytes32 order) internal pure returns (uint24) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint24(uint256(order) >> 232);
+    }
+
+    function _quantity(bytes32 order) internal pure returns (uint192) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint192((uint256(order) >> 40) & ((uint256(1) << 192) - 1));
     }
 
     function _nonce(bytes32 order) internal pure returns (uint40) {
