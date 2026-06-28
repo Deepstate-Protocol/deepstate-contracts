@@ -1874,6 +1874,30 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.askRoot(), bytes32(0));
     }
 
+    function test_SamePriceBidsUseEarlierNonceFirst() public {
+        vm.prank(alice);
+        bytes32 firstBid = engine.fill(_order(50, 1, 0), true);
+
+        vm.prank(bob);
+        bytes32 secondBid = engine.fill(_order(50, 1, 0), true);
+
+        vm.prank(carol);
+        engine.fill(_order(50, 1, 0), false);
+
+        vm.prank(alice);
+        (uint256 firstBase, uint256 firstQuote) = engine.cancel(firstBid);
+
+        assertEq(firstBase, 1);
+        assertEq(firstQuote, 0);
+
+        vm.prank(bob);
+        (uint256 secondBase, uint256 secondQuote) = engine.cancel(secondBid);
+
+        assertEq(secondBase, 0);
+        assertEq(secondQuote, 50);
+        assertEq(engine.bidRoot(), bytes32(0));
+    }
+
     function test_ManySamePriceOrdersPreserveTimePriority() public {
         uint256 orderCount = 32;
         uint192 fillQuantity = 16;
