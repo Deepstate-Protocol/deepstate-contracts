@@ -150,6 +150,10 @@ contract ReentrantERC20 is TestERC20 {
         armed = true;
     }
 
+    function approveAsSelf(address spender, uint256 amount) external {
+        _approve(address(this), spender, amount);
+    }
+
     function transfer(address to, uint256 amount) public override returns (bool) {
         if (armed) {
             armed = false;
@@ -1808,6 +1812,84 @@ contract RadixMatchingEngineTest is Test {
         assertFalse(reentrantQuote.reentrySucceeded());
         assertEq(reentrantQuote.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
         assertEq(reentrantQuote.balanceOf(bob), 1_010);
+    }
+
+    function test_ReentrantBaseCancelPayoutCannotCancelTokenOwnedAsk() public {
+        ReentrantERC20 reentrantBase = new ReentrantERC20();
+        TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
+        RadixMatchingEngine reentrantEngine = new RadixMatchingEngine(address(reentrantBase), address(plainQuote));
+
+        reentrantBase.mint(alice, 1_000);
+        reentrantBase.mint(address(reentrantBase), 1_000);
+
+        vm.startPrank(alice);
+        reentrantBase.approve(address(reentrantEngine), type(uint256).max);
+        bytes32 aliceAsk = reentrantEngine.fill(_order(10, 1, 0), false);
+        vm.stopPrank();
+
+        reentrantBase.approveAsSelf(address(reentrantEngine), type(uint256).max);
+
+        vm.prank(address(reentrantBase));
+        bytes32 tokenAsk = reentrantEngine.fill(_order(11, 1, 0), false);
+
+        reentrantBase.arm(reentrantEngine, tokenAsk);
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = reentrantEngine.cancel(aliceAsk);
+
+        assertEq(baseAmount, 1);
+        assertEq(quoteAmount, 0);
+        assertFalse(reentrantBase.reentrySucceeded());
+        assertEq(reentrantBase.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantEngine.ownerOfOrder(aliceAsk), address(0));
+        assertEq(reentrantEngine.ownerOfOrder(tokenAsk), address(reentrantBase));
+        assertEq(reentrantEngine.askRoot(), tokenAsk);
+
+        vm.prank(address(reentrantBase));
+        (baseAmount, quoteAmount) = reentrantEngine.cancel(tokenAsk);
+
+        assertEq(baseAmount, 1);
+        assertEq(quoteAmount, 0);
+        assertEq(reentrantEngine.askRoot(), bytes32(0));
+    }
+
+    function test_ReentrantQuoteCancelPayoutCannotCancelTokenOwnedBid() public {
+        TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
+        ReentrantERC20 reentrantQuote = new ReentrantERC20();
+        RadixMatchingEngine reentrantEngine = new RadixMatchingEngine(address(plainBase), address(reentrantQuote));
+
+        reentrantQuote.mint(alice, 1_000);
+        reentrantQuote.mint(address(reentrantQuote), 1_000);
+
+        vm.startPrank(alice);
+        reentrantQuote.approve(address(reentrantEngine), type(uint256).max);
+        bytes32 aliceBid = reentrantEngine.fill(_order(10, 1, 0), true);
+        vm.stopPrank();
+
+        reentrantQuote.approveAsSelf(address(reentrantEngine), type(uint256).max);
+
+        vm.prank(address(reentrantQuote));
+        bytes32 tokenBid = reentrantEngine.fill(_order(11, 1, 0), true);
+
+        reentrantQuote.arm(reentrantEngine, tokenBid);
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = reentrantEngine.cancel(aliceBid);
+
+        assertEq(baseAmount, 0);
+        assertEq(quoteAmount, 10);
+        assertFalse(reentrantQuote.reentrySucceeded());
+        assertEq(reentrantQuote.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantEngine.ownerOfOrder(aliceBid), address(0));
+        assertEq(reentrantEngine.ownerOfOrder(tokenBid), address(reentrantQuote));
+        assertEq(reentrantEngine.bidRoot(), tokenBid);
+
+        vm.prank(address(reentrantQuote));
+        (baseAmount, quoteAmount) = reentrantEngine.cancel(tokenBid);
+
+        assertEq(baseAmount, 0);
+        assertEq(quoteAmount, 11);
+        assertEq(reentrantEngine.bidRoot(), bytes32(0));
     }
 
     function test_ReentrantQuoteCollateralPullReverts() public {
