@@ -147,6 +147,65 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         targetContract(address(handler));
     }
 
+    function test_ReplayIndirectBranchReuseKeepsLeavesBacked() public {
+        handler.placeBid(270, 19576, 21123);
+        handler.placeAsk(
+            1002581022359336199078931974153934207457820454872615861, 3878, 53889295735608799266297081645648985990
+        );
+        handler.placeAsk(4000000000000000000000000000000, 7863, 3541);
+        handler.placeBid(
+            3059624943739379967374470270119672381169875874, 36485, 11645564289716989261400939689070552422709859780
+        );
+        handler.placeBid(666, 438, 3406);
+        handler.placeAsk(1000002, 4457, 1928);
+        handler.placeBid(4794550167836438011709433744303238, 46, 5678188);
+        handler.placeBid(100, 16777174, 1779);
+        handler.placeAsk(160429806044680488525166673785873168943952911781, 462100, 2387389365671260155253);
+        handler.placeBid(729681749473481788557566957887, 165, 18611313675409404108229000821686780002);
+        handler.placeAsk(30024828595563579209659148688417099986366163774490779226412118460315859943431, 1060, 748);
+        handler.cancel(137055674322412288);
+        handler.placeBid(2722, 1, 2296279256026075824659376772768396023403);
+        handler.placeBid(28272784690565, 16777213, 18893256241734755177516134773133022029);
+        handler.cancel(16544887995648023521142448936955165983041841155778278801766831224);
+        handler.placeAsk(
+            4099465225284685352911376835959935251529073758556160716,
+            18,
+            12697070510775694770772339393737442326823279672089489625
+        );
+        handler.placeAsk(2044, 5651, 8680);
+        handler.placeAsk(3, 3, 280131318836084949503077086354525171);
+        handler.placeAsk(18026610164084466690527283060317127377886, 2, 56021389468481031900328884657986);
+        handler.placeBid(
+            97371405490926153959535763367711722299205905765411566708783824218598899321,
+            59460,
+            25326457943050859515433210047280695747037556560844142878
+        );
+        handler.placeAsk(3, 2864, 1000000000000000000000000000075);
+        handler.placeBid(85017259195378, 11, 266372082697647893014796410456847401);
+        handler.placeBid(34408638515464300, 5308, 17592638990193929870302860670814);
+        handler.placeAsk(417, 1595, 9428);
+        handler.placeAsk(185483, 258, 2);
+        handler.placeBid(
+            108734278369728762803170239352420494748482585739391612092497832276861621190, 1412321, 160653504766890313679
+        );
+        handler.placeBid(35684, 2726, 584837);
+        handler.placeAsk(
+            301314131358404010522233968430262676501474730931246311150272177659,
+            354,
+            17757342861422200353999004658617667434440
+        );
+        handler.placeBid(975351301372804233232436111493935254, 14921, 4860291612095042748318693556795101);
+        handler.placeBid(166, 50564, 64);
+        handler.placeAsk(659918, 8071, 21792);
+        handler.placeAsk(9093, 2583, 8419);
+        handler.placeAsk(0, 636, 0);
+        handler.placeAsk(308, 7396, 25284);
+
+        _assertLeavesBackedByActiveOrders(engine.bidRoot(), true);
+        _assertLeavesBackedByActiveOrders(engine.askRoot(), false);
+        invariant_CollateralEqualsOutstandingClaims();
+    }
+
     function invariant_CollateralEqualsOutstandingClaims() public view {
         uint256 expectedBase;
         uint256 expectedQuote;
@@ -158,6 +217,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
             uint192 originalQuantity = _quantity(order);
             uint192 remainingQuantity = _remainingQuantity(order, isBid);
+            assertLe(remainingQuantity, originalQuantity, "remaining over original");
             uint192 filledQuantity = originalQuantity - remainingQuantity;
             uint24 limitPrice = _price(order);
 
@@ -199,6 +259,12 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         _assertUniqueLiveNodes(engine.askRoot(), seenNodes, seenCount);
     }
 
+    function invariant_LiveLeafSideKeysAreUnique() public view {
+        bytes32[] memory seenSideKeys = new bytes32[](handler.orderCount() + 2);
+        uint256 seenCount = _assertUniqueLiveLeafSideKeys(engine.bidRoot(), seenSideKeys, 0);
+        _assertUniqueLiveLeafSideKeys(engine.askRoot(), seenSideKeys, seenCount);
+    }
+
     function invariant_BooksAreNotCrossed() public view {
         SubtreeStats memory bidStats = _assertSubtree(engine.bidRoot(), 0, true);
         SubtreeStats memory askStats = _assertSubtree(engine.askRoot(), 0, false);
@@ -223,6 +289,11 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
             address expectedMarker = active ? (isBid ? _BID_SENTINEL : _ASK_SENTINEL) : address(0);
             assertEq(engine.ownerOfOrder(_sideKey(order)), expectedMarker, "side marker");
         }
+    }
+
+    function invariant_LiveLeavesAreBackedByActiveOrders() public view {
+        _assertLeavesBackedByActiveOrders(engine.bidRoot(), true);
+        _assertLeavesBackedByActiveOrders(engine.askRoot(), false);
     }
 
     function _remainingQuantity(bytes32 order, bool isBid) private view returns (uint192) {
@@ -334,6 +405,55 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
         seenCount = _assertUniqueLiveNodes(leftNode, seenNodes, seenCount);
         return _assertUniqueLiveNodes(rightNode, seenNodes, seenCount);
+    }
+
+    function _assertUniqueLiveLeafSideKeys(bytes32 node, bytes32[] memory seenSideKeys, uint256 seenCount)
+        private
+        view
+        returns (uint256)
+    {
+        if (node == bytes32(0)) return seenCount;
+
+        if (_isBranch(node)) {
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+            seenCount = _assertUniqueLiveLeafSideKeys(leftNode, seenSideKeys, seenCount);
+            return _assertUniqueLiveLeafSideKeys(rightNode, seenSideKeys, seenCount);
+        }
+
+        bytes32 sideKey = _sideKey(node);
+        for (uint256 i; i < seenCount; ++i) {
+            assertTrue(seenSideKeys[i] != sideKey, "duplicate live side key");
+        }
+        assertLt(seenCount, seenSideKeys.length, "seen side key capacity");
+        seenSideKeys[seenCount++] = sideKey;
+        return seenCount;
+    }
+
+    function _assertLeavesBackedByActiveOrders(bytes32 node, bool isBidTree) private view {
+        if (node == bytes32(0)) return;
+
+        if (_isBranch(node)) {
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+            _assertLeavesBackedByActiveOrders(leftNode, isBidTree);
+            _assertLeavesBackedByActiveOrders(rightNode, isBidTree);
+            return;
+        }
+
+        uint256 matches;
+        bytes32 leafSideKey = _sideKey(node);
+        uint192 leafQuantity = _quantity(node);
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order, address owner, bool trackedIsBid, bool active) = handler.orderAt(i);
+            if (!active || trackedIsBid != isBidTree || _sideKey(order) != leafSideKey) continue;
+
+            assertGe(_quantity(order), leafQuantity, "leaf over original quantity");
+            assertEq(engine.ownerOfOrder(order), owner, "leaf owner");
+            ++matches;
+        }
+
+        assertEq(matches, 1, "leaf backing");
     }
 
     function _find(bytes32 root, bytes32 order, bool isBidTree) private view returns (bytes32) {

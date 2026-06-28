@@ -302,8 +302,16 @@ contract RadixMatchingEngine {
         returns (bytes32)
     {
         bytes32 newBranch = _storeBranch(leftNode, rightNode, isBidTree);
-        if (newBranch != oldBranch && oldBranch != leftNode && oldBranch != rightNode) delete tree[oldBranch];
+        if (newBranch != oldBranch && !_containsBranch(newBranch, oldBranch)) delete tree[oldBranch];
         return newBranch;
+    }
+
+    function _containsBranch(bytes32 root, bytes32 target) private view returns (bool) {
+        if (root == target) return true;
+        if (!_isBranch(root)) return false;
+
+        Branch memory branch = tree[root];
+        return _containsBranch(branch.leftNode, target) || _containsBranch(branch.rightNode, target);
     }
 
     function _storeBranch(bytes32 a, bytes32 b, bool isBidTree) private returns (bytes32 branchNode) {
