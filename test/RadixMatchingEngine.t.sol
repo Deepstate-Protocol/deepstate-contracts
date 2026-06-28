@@ -450,6 +450,68 @@ contract RadixMatchingEngineTest is Test {
         assertEq(quote.balanceOf(bob), bobQuoteBefore);
     }
 
+    function test_BidFullMatchSucceedsWhenNonceExhausted() public {
+        bytes32 nextNonceSlot = bytes32(uint256(4));
+        vm.store(address(engine), nextNonceSlot, bytes32(uint256(1)));
+
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
+
+        assertEq(restingAsk, _order(90, 2, 1));
+        assertEq(engine.askRoot(), restingAsk);
+        assertEq(engine.nextNonce(), 0);
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(engine.nextNonce(), 0);
+        assertEq(base.balanceOf(alice), 1_000_002);
+        assertEq(quote.balanceOf(alice), 1_000_000 - 180);
+        assertEq(engine.ownerOfOrder(restingAsk), bob);
+
+        vm.prank(bob);
+        (uint256 bobBase, uint256 bobQuote) = engine.cancel(restingAsk);
+
+        assertEq(bobBase, 0);
+        assertEq(bobQuote, 180);
+        assertEq(engine.ownerOfOrder(restingAsk), address(0));
+        assertEq(engine.ownerOfOrder(_order(90, 0, 1)), address(0));
+    }
+
+    function test_AskFullMatchSucceedsWhenNonceExhausted() public {
+        bytes32 nextNonceSlot = bytes32(uint256(4));
+        vm.store(address(engine), nextNonceSlot, bytes32(uint256(1)));
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
+
+        assertEq(restingBid, _order(100, 2, 1));
+        assertEq(engine.bidRoot(), restingBid);
+        assertEq(engine.nextNonce(), 0);
+
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(engine.nextNonce(), 0);
+        assertEq(base.balanceOf(bob), 1_000_000 - 2);
+        assertEq(quote.balanceOf(bob), 1_000_200);
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+
+        vm.prank(alice);
+        (uint256 aliceBase, uint256 aliceQuote) = engine.cancel(restingBid);
+
+        assertEq(aliceBase, 2);
+        assertEq(aliceQuote, 0);
+        assertEq(engine.ownerOfOrder(restingBid), address(0));
+        assertEq(engine.ownerOfOrder(_order(100, 0, 1)), address(0));
+    }
+
     function test_MaxPriceAndQuantityBidCancels() public {
         uint24 price = type(uint24).max;
         uint192 quantity = type(uint192).max;
