@@ -337,6 +337,8 @@ contract RadixMatchingEngineTest is Test {
         bytes32 finalSplit = _branchFor(secondBid, thirdBid);
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(finalSplit);
 
+        assertEq(_pathKey(finalSplit), _pathKey(secondBid));
+        assertEq(_quantity(finalSplit), _quantity(secondBid) + _quantity(thirdBid));
         assertEq(leftNode, thirdBid);
         assertEq(rightNode, secondBid);
     }
@@ -653,14 +655,18 @@ contract RadixMatchingEngineTest is Test {
         uint64 aKey = _pathKey(a);
         uint64 bKey = _pathKey(b);
         uint8 depth = _commonPrefix(aKey, bKey);
-        uint64 prefixBits = depth == 0 ? 0 : aKey >> (64 - depth);
-        uint64 prefix = ((uint64(1) << depth) - 1) + prefixBits;
+        uint64 prefix = _branchCode(aKey, depth);
 
         // forge-lint: disable-next-line(unsafe-typecast)
         uint24 prefixPrice = uint24(prefix >> 40);
         // forge-lint: disable-next-line(unsafe-typecast)
         uint40 prefixNonce = uint40(prefix);
         return _order(prefixPrice, _quantity(a) + _quantity(b), prefixNonce);
+    }
+
+    function _branchCode(uint64 key, uint8 depth) internal pure returns (uint64) {
+        uint64 prefix = depth == 0 ? 0 : key & (type(uint64).max << (64 - depth));
+        return prefix | (uint64(1) << (63 - depth));
     }
 
     function _pathKey(bytes32 order) internal pure returns (uint64) {

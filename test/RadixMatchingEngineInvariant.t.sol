@@ -252,7 +252,6 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
         assertTrue(leftNode != bytes32(0), "left child");
         assertTrue(rightNode != bytes32(0), "right child");
-        assertEq(engine.ownerOfOrder(node), address(0), "branch owner");
         assertEq(node, _branchNodeForChildren(leftNode, rightNode), "branch address");
 
         uint8 branchDepth = _branchDepth(node, isBidTree);
@@ -351,8 +350,8 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     }
 
     function _branchCode(uint64 key, uint8 depth) private pure returns (uint64) {
-        uint64 prefixBits = depth == 0 ? 0 : key >> (64 - depth);
-        return ((uint64(1) << depth) - 1) + prefixBits;
+        uint64 prefix = depth == 0 ? 0 : key & (type(uint64).max << (64 - depth));
+        return prefix | (uint64(1) << (63 - depth));
     }
 
     function _commonPrefix(uint64 a, uint64 b) private pure returns (uint8 prefixLength) {

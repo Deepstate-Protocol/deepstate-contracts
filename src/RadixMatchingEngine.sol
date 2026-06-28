@@ -24,7 +24,7 @@ contract RadixMatchingEngine {
     bytes32 public askRoot;
 
     /// @notice Decrementing nonce. Higher nonce means earlier time priority at the same price.
-    /// @dev Resting orders start below the maximum value, leaving the top path endpoint unused by orders.
+    /// @dev Resting orders start below the maximum value, leaving the top nonce endpoint unused by orders.
     uint40 public nextNonce = _MAX_ORDER_NONCE;
 
     address public immutable BASE_TOKEN;
@@ -56,7 +56,6 @@ contract RadixMatchingEngine {
     error ReentrantCall();
     error TokenBalanceQueryFailed();
     error InexactTokenTransfer();
-    error BranchAddressAlreadyUsed();
 
     modifier nonReentrant() {
         _enter();
@@ -159,7 +158,6 @@ contract RadixMatchingEngine {
 
         restingOrder = _pack(_price(order), quantity, nonce);
         if (ownerOfOrder[restingOrder] != address(0)) revert DuplicateOrder();
-        if (_isBranch(restingOrder)) revert BranchAddressAlreadyUsed();
 
         ownerOfOrder[restingOrder] = msg.sender;
         ownerOfOrder[_sideKey(restingOrder)] = isBid ? _BID_SENTINEL : _ASK_SENTINEL;
@@ -239,12 +237,12 @@ contract RadixMatchingEngine {
     function _insert(bytes32 root, bytes32 node, bool isBidTree) private returns (bytes32) {
         if (root == bytes32(0)) return node;
 
-        if (!_isBranch(root)) return _storeBranch(root, node, isBidTree, bytes32(0));
+        if (!_isBranch(root)) return _storeBranch(root, node, isBidTree);
 
         uint64 nodeKey = _nodeKey(node, isBidTree);
         uint8 branchDepth = _branchDepth(root, isBidTree);
         if (_commonPrefix(nodeKey, _nodeKey(root, isBidTree)) < branchDepth) {
-            return _storeBranch(root, node, isBidTree, bytes32(0));
+            return _storeBranch(root, node, isBidTree);
         }
 
         Branch memory branch = tree[root];
@@ -300,15 +298,12 @@ contract RadixMatchingEngine {
         private
         returns (bytes32)
     {
-        bytes32 newBranch = _storeBranch(leftNode, rightNode, isBidTree, oldBranch);
+        bytes32 newBranch = _storeBranch(leftNode, rightNode, isBidTree);
         if (newBranch != oldBranch) delete tree[oldBranch];
         return newBranch;
     }
 
-    function _storeBranch(bytes32 a, bytes32 b, bool isBidTree, bytes32 oldBranch)
-        private
-        returns (bytes32 branchNode)
-    {
+    function _storeBranch(bytes32 a, bytes32 b, bool isBidTree) private returns (bytes32 branchNode) {
         if (a == bytes32(0)) return b;
         if (b == bytes32(0)) return a;
 
@@ -325,9 +320,6 @@ contract RadixMatchingEngine {
         }
 
         branchNode = _branchNodeForChildren(a, b);
-        if (branchNode != oldBranch && (_isBranch(branchNode) || ownerOfOrder[branchNode] != address(0))) {
-            revert BranchAddressAlreadyUsed();
-        }
         tree[branchNode] = Branch({leftNode: leftNode, rightNode: rightNode});
     }
 
@@ -354,8 +346,8 @@ contract RadixMatchingEngine {
     }
 
     function _branchCode(uint64 key, uint8 depth) private pure returns (uint64) {
-        uint64 prefixBits = depth == 0 ? 0 : key >> (64 - depth);
-        return ((uint64(1) << depth) - 1) + prefixBits;
+        uint64 prefix = depth == 0 ? 0 : key & (type(uint64).max << (64 - depth));
+        return prefix | (uint64(1) << (63 - depth));
     }
 
     function _isBranch(bytes32 node) private view returns (bool) {

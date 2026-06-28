@@ -25,9 +25,10 @@ A branch node is addressed by the shared radix prefix of its children across the
 
 ```text
 path = price || nonce
+branch_path = shared_prefix || 1 || trailing_zeroes
 ```
 
-The branch prefix is packed back into the same price and nonce fields, while the quantity field stores the exact sum of the child quantities. This lets bid and ask trees coexist in the single `tree` mapping without adding another storage data type.
+The branch path is packed back into the same price and nonce fields, while the quantity field stores the exact sum of the child quantities. The `1` bit terminates the shared prefix, so branch prefixes at different depths do not alias each other and no nonce-tag namespace is needed.
 
 Resting orders start at `type(uint40).max - 1` and decrement from there. The maximum nonce value is left unused by order assignment.
 
