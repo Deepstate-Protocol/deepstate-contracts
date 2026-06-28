@@ -199,6 +199,27 @@ contract RadixMatchingEngineTest is Test {
         assertTrue(rightNode != bytes32(0));
     }
 
+    function test_NonceExhaustionRevertsWithoutMutatingBook() public {
+        bytes32 nextNonceSlot = bytes32(uint256(4));
+        vm.store(address(engine), nextNonceSlot, bytes32(uint256(1)));
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(10, 1, 0), true);
+
+        assertEq(restingBid, _order(10, 1, 1));
+        assertEq(engine.bidRoot(), restingBid);
+        assertEq(engine.nextNonce(), 0);
+
+        vm.prank(bob);
+        vm.expectRevert(RadixMatchingEngine.NonceExhausted.selector);
+        engine.fill(_order(11, 1, 0), true);
+
+        assertEq(engine.bidRoot(), restingBid);
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertEq(engine.nextNonce(), 0);
+        assertEq(quote.balanceOf(address(engine)), 10);
+    }
+
     function test_SideMetadataUsesZeroQuantityNamespace() public {
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
@@ -471,6 +492,12 @@ contract RadixMatchingEngineTest is Test {
         vm.expectRevert(RadixMatchingEngine.InexactTokenTransfer.selector);
         feeEngine.fill(_order(10, 2, 0), false);
         vm.stopPrank();
+
+        bytes32 expectedAsk = _order(10, 2, MAX_ORDER_NONCE);
+        assertEq(feeEngine.askRoot(), bytes32(0));
+        assertEq(feeEngine.ownerOfOrder(expectedAsk), address(0));
+        assertEq(feeEngine.nextNonce(), MAX_ORDER_NONCE);
+        assertEq(feeBase.balanceOf(address(feeEngine)), 0);
     }
 
     function test_FeeOnTransferQuoteTokenReverts() public {
@@ -487,6 +514,12 @@ contract RadixMatchingEngineTest is Test {
         vm.expectRevert(RadixMatchingEngine.InexactTokenTransfer.selector);
         feeEngine.fill(_order(10, 2, 0), true);
         vm.stopPrank();
+
+        bytes32 expectedBid = _order(10, 2, MAX_ORDER_NONCE);
+        assertEq(feeEngine.bidRoot(), bytes32(0));
+        assertEq(feeEngine.ownerOfOrder(expectedBid), address(0));
+        assertEq(feeEngine.nextNonce(), MAX_ORDER_NONCE);
+        assertEq(feeQuote.balanceOf(address(feeEngine)), 0);
     }
 
     function test_FeeOnBasePayoutRevertsAndPreservesBook() public {
@@ -537,6 +570,48 @@ contract RadixMatchingEngineTest is Test {
         assertEq(feeEngine.ownerOfOrder(restingBid), alice);
         assertEq(plainBase.balanceOf(address(feeEngine)), 0);
         assertEq(feeQuote.balanceOf(bob), 0);
+    }
+
+    function test_FeeOnBaseCancelPayoutRevertsAndPreservesBook() public {
+        FeeTransferERC20 feeBase = new FeeTransferERC20();
+        TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
+        RadixMatchingEngine feeEngine = new RadixMatchingEngine(address(feeBase), address(plainQuote));
+
+        feeBase.mint(alice, 1_000);
+
+        vm.startPrank(alice);
+        feeBase.approve(address(feeEngine), type(uint256).max);
+        bytes32 restingAsk = feeEngine.fill(_order(10, 2, 0), false);
+
+        vm.expectRevert(RadixMatchingEngine.InexactTokenTransfer.selector);
+        feeEngine.cancel(restingAsk);
+        vm.stopPrank();
+
+        assertEq(feeEngine.askRoot(), restingAsk);
+        assertEq(feeEngine.ownerOfOrder(restingAsk), alice);
+        assertEq(feeBase.balanceOf(address(feeEngine)), 2);
+        assertEq(feeBase.balanceOf(alice), 998);
+    }
+
+    function test_FeeOnQuoteCancelPayoutRevertsAndPreservesBook() public {
+        TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
+        FeeTransferERC20 feeQuote = new FeeTransferERC20();
+        RadixMatchingEngine feeEngine = new RadixMatchingEngine(address(plainBase), address(feeQuote));
+
+        feeQuote.mint(alice, 1_000);
+
+        vm.startPrank(alice);
+        feeQuote.approve(address(feeEngine), type(uint256).max);
+        bytes32 restingBid = feeEngine.fill(_order(10, 2, 0), true);
+
+        vm.expectRevert(RadixMatchingEngine.InexactTokenTransfer.selector);
+        feeEngine.cancel(restingBid);
+        vm.stopPrank();
+
+        assertEq(feeEngine.bidRoot(), restingBid);
+        assertEq(feeEngine.ownerOfOrder(restingBid), alice);
+        assertEq(feeQuote.balanceOf(address(feeEngine)), 20);
+        assertEq(feeQuote.balanceOf(alice), 980);
     }
 
     function test_ReentrantTokenPayoutReverts() public {
