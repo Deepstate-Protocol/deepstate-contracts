@@ -1985,6 +1985,41 @@ contract RadixMatchingEngineTest is Test {
         assertEq(carolQuote, 0);
     }
 
+    function test_BidMatchingStopsWhenNextBestAskDoesNotCross() public {
+        vm.prank(alice);
+        bytes32 lowAsk = engine.fill(_order(90, 1, 0), false);
+
+        vm.prank(bob);
+        bytes32 highAsk = engine.fill(_order(100, 1, 0), false);
+
+        vm.prank(carol);
+        bytes32 restingBid = engine.fill(_order(95, 2, 0), true);
+
+        assertEq(base.balanceOf(carol), 1_000_001);
+        assertEq(quote.balanceOf(carol), 1_000_000 - 90 - 95);
+        assertEq(restingBid, _order(95, 1, MAX_ORDER_NONCE - 2));
+        assertEq(engine.ownerOfOrder(lowAsk), alice);
+        assertEq(engine.ownerOfOrder(highAsk), bob);
+
+        vm.prank(alice);
+        (uint256 aliceBase, uint256 aliceQuote) = engine.cancel(lowAsk);
+
+        assertEq(aliceBase, 0);
+        assertEq(aliceQuote, 90);
+
+        vm.prank(bob);
+        (uint256 bobBase, uint256 bobQuote) = engine.cancel(highAsk);
+
+        assertEq(bobBase, 1);
+        assertEq(bobQuote, 0);
+
+        vm.prank(carol);
+        (uint256 carolBase, uint256 carolQuote) = engine.cancel(restingBid);
+
+        assertEq(carolBase, 0);
+        assertEq(carolQuote, 95);
+    }
+
     function _fundAndApprove(address account) internal {
         base.mint(account, 1_000_000);
         quote.mint(account, 1_000_000);
