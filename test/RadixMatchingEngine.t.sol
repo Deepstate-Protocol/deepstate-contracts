@@ -743,6 +743,54 @@ contract RadixMatchingEngineTest is Test {
         _assertEmptyBranch(branch);
     }
 
+    function test_BidMatchRevertsAtomicallyWhenQuotePullFails() public {
+        address poorTaker = address(0xBAD);
+
+        vm.prank(bob);
+        bytes32 firstAsk = engine.fill(_order(80, 1, 0), false);
+        vm.prank(carol);
+        bytes32 secondAsk = engine.fill(_order(90, 1, 0), false);
+
+        bytes32 askRootBefore = engine.askRoot();
+        assertTrue(askRootBefore != firstAsk && askRootBefore != secondAsk);
+
+        vm.prank(poorTaker);
+        vm.expectRevert();
+        engine.fill(_order(100, 2, 0), true);
+
+        assertEq(engine.askRoot(), askRootBefore);
+        assertEq(engine.ownerOfOrder(firstAsk), bob);
+        assertEq(engine.ownerOfOrder(secondAsk), carol);
+        assertEq(base.balanceOf(address(engine)), 2);
+        assertEq(quote.balanceOf(address(engine)), 0);
+        assertEq(base.balanceOf(poorTaker), 0);
+        assertEq(quote.balanceOf(poorTaker), 0);
+    }
+
+    function test_AskMatchRevertsAtomicallyWhenBasePullFails() public {
+        address poorTaker = address(0xBAD);
+
+        vm.prank(alice);
+        bytes32 firstBid = engine.fill(_order(100, 1, 0), true);
+        vm.prank(bob);
+        bytes32 secondBid = engine.fill(_order(90, 1, 0), true);
+
+        bytes32 bidRootBefore = engine.bidRoot();
+        assertTrue(bidRootBefore != firstBid && bidRootBefore != secondBid);
+
+        vm.prank(poorTaker);
+        vm.expectRevert();
+        engine.fill(_order(80, 2, 0), false);
+
+        assertEq(engine.bidRoot(), bidRootBefore);
+        assertEq(engine.ownerOfOrder(firstBid), alice);
+        assertEq(engine.ownerOfOrder(secondBid), bob);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 190);
+        assertEq(base.balanceOf(poorTaker), 0);
+        assertEq(quote.balanceOf(poorTaker), 0);
+    }
+
     function test_RevertingBalanceQueryRevertsBeforeMutatingRestingBid() public {
         TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
         RevertingBalanceERC20 badQuote = new RevertingBalanceERC20();

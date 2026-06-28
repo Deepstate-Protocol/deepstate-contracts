@@ -530,6 +530,11 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         _assertUniqueLiveNodes(engine.askRoot(), seenNodes, seenCount);
     }
 
+    function invariant_LiveBranchesAreReachableByContractRouting() public view {
+        _assertBranchesReachableByContractRouting(engine.bidRoot(), engine.bidRoot(), true);
+        _assertBranchesReachableByContractRouting(engine.askRoot(), engine.askRoot(), false);
+    }
+
     function invariant_LiveLeafSideKeysAreUnique() public view {
         bytes32[] memory seenSideKeys = new bytes32[](handler.orderCount() + 2);
         uint256 seenCount = _assertUniqueLiveLeafSideKeys(engine.bidRoot(), seenSideKeys, 0);
@@ -711,6 +716,39 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         return _assertUniqueLiveNodes(rightNode, seenNodes, seenCount);
     }
 
+    function _assertBranchesReachableByContractRouting(bytes32 root, bytes32 node, bool isBidTree) private view {
+        if (node == bytes32(0) || !_isBranch(node)) return;
+
+        assertTrue(_containsBranchByContractRouting(root, node, isBidTree), "unreachable live branch");
+
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+        _assertBranchesReachableByContractRouting(root, leftNode, isBidTree);
+        _assertBranchesReachableByContractRouting(root, rightNode, isBidTree);
+    }
+
+    function _containsBranchByContractRouting(bytes32 root, bytes32 target, bool isBidTree)
+        private
+        view
+        returns (bool)
+    {
+        uint64 targetKey = _storedNodeKey(target, isBidTree);
+
+        while (root != bytes32(0)) {
+            if (root == target) return true;
+
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(root);
+            if (leftNode == bytes32(0) && rightNode == bytes32(0)) return false;
+
+            uint64 leftKey = _storedNodeKey(leftNode, isBidTree);
+            uint8 branchDepth = _commonPrefix(leftKey, _storedNodeKey(rightNode, isBidTree));
+            if (_commonPrefix(targetKey, leftKey) < branchDepth) return false;
+
+            root = _bit(targetKey, branchDepth) ? rightNode : leftNode;
+        }
+
+        return false;
+    }
+
     function _assertUniqueLiveLeafSideKeys(bytes32 node, bytes32[] memory seenSideKeys, uint256 seenCount)
         private
         view
@@ -789,6 +827,10 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         if (!_isBranch(node)) return _sortKey(node, isBidTree);
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
         return _nodeKey(leftNode != bytes32(0) ? leftNode : rightNode, isBidTree);
+    }
+
+    function _storedNodeKey(bytes32 node, bool isBidTree) private pure returns (uint64) {
+        return _sortKey(node, isBidTree);
     }
 
     function _branchNodeForChildren(bytes32 leftNode, bytes32 rightNode) private pure returns (bytes32) {
