@@ -133,7 +133,6 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     uint256 private constant _PRICE_SHIFT = 232;
     uint256 private constant _QUANTITY_SHIFT = 40;
     uint256 private constant _QUANTITY_MASK = (uint256(1) << 192) - 1;
-    uint40 private constant _RESERVED_MAX_NONCE = type(uint40).max;
     uint24 private constant _MAX_PRICE = type(uint24).max;
     address private constant _BID_SENTINEL = address(uint160(1));
     address private constant _ASK_SENTINEL = address(uint160(2));
@@ -320,7 +319,6 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
         if (!_isBranch(node)) {
             assertGt(_quantity(node), 0, "leaf quantity");
-            assertLt(_nonce(node), _RESERVED_MAX_NONCE, "leaf nonce");
             assertEq(engine.ownerOfOrder(_sideKey(node)), isBidTree ? _BID_SENTINEL : _ASK_SENTINEL, "leaf side");
             uint64 key = _sortKey(node, isBidTree);
             stats.quantity = _quantity(node);

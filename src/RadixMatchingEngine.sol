@@ -24,8 +24,7 @@ contract RadixMatchingEngine {
     bytes32 public askRoot;
 
     /// @notice Decrementing nonce. Higher nonce means earlier time priority at the same price.
-    /// @dev Resting orders start below the maximum value, leaving the top nonce endpoint unused by orders.
-    uint40 public nextNonce = _MAX_ORDER_NONCE;
+    uint40 public nextNonce = type(uint40).max;
 
     address public immutable BASE_TOKEN;
     address public immutable QUOTE_TOKEN;
@@ -34,8 +33,6 @@ contract RadixMatchingEngine {
     uint256 private constant _QUANTITY_SHIFT = 40;
     uint256 private constant _QUANTITY_MASK = (uint256(1) << 192) - 1;
     uint256 private constant _NONCE_MASK = (uint256(1) << 40) - 1;
-    uint40 private constant _RESERVED_MAX_NONCE = type(uint40).max;
-    uint40 private constant _MAX_ORDER_NONCE = _RESERVED_MAX_NONCE - 1;
     uint24 private constant _MAX_PRICE = type(uint24).max;
 
     address private constant _BID_SENTINEL = address(uint160(1));

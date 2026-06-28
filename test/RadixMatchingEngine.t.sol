@@ -75,8 +75,7 @@ contract ReentrantERC20 is TestERC20 {
 }
 
 contract RadixMatchingEngineTest is Test {
-    uint40 internal constant RESERVED_MAX_NONCE = type(uint40).max;
-    uint40 internal constant MAX_ORDER_NONCE = RESERVED_MAX_NONCE - 1;
+    uint40 internal constant MAX_ORDER_NONCE = type(uint40).max;
 
     TestERC20 internal base;
     TestERC20 internal quote;
@@ -181,7 +180,7 @@ contract RadixMatchingEngineTest is Test {
         engine.cancel(restingAsk);
     }
 
-    function test_OrdersDecrementBelowReservedMaxNonce() public {
+    function test_OrdersStartAtMaxNonceAndDecrement() public {
         vm.prank(alice);
         bytes32 firstBid = engine.fill(_order(100, 1, 0), true);
 
@@ -218,6 +217,47 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(restingBid), alice);
         assertEq(engine.nextNonce(), 0);
         assertEq(quote.balanceOf(address(engine)), 10);
+    }
+
+    function test_MaxPriceAndQuantityBidCancels() public {
+        uint24 price = type(uint24).max;
+        uint192 quantity = type(uint192).max;
+        uint256 quoteAmount = uint256(price) * uint256(quantity);
+
+        quote.mint(alice, type(uint216).max);
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(price, quantity, 0), true);
+
+        assertEq(restingBid, _order(price, quantity, MAX_ORDER_NONCE));
+        assertEq(engine.bidRoot(), restingBid);
+        assertEq(quote.balanceOf(address(engine)), quoteAmount);
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 returnedQuote) = engine.cancel(restingBid);
+
+        assertEq(baseAmount, 0);
+        assertEq(returnedQuote, quoteAmount);
+        assertEq(engine.bidRoot(), bytes32(0));
+    }
+
+    function test_BranchQuantityOverflowRevertsWithoutMutatingBook() public {
+        quote.mint(alice, type(uint216).max);
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(1, type(uint192).max, 0), true);
+
+        bytes32 overflowingBid = _order(2, 1, MAX_ORDER_NONCE - 1);
+
+        vm.prank(bob);
+        vm.expectRevert();
+        engine.fill(_order(2, 1, 0), true);
+
+        assertEq(engine.bidRoot(), restingBid);
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertEq(engine.ownerOfOrder(overflowingBid), address(0));
+        assertEq(engine.nextNonce(), MAX_ORDER_NONCE - 1);
+        assertEq(quote.balanceOf(address(engine)), type(uint192).max);
     }
 
     function test_SideMetadataUsesZeroQuantityNamespace() public {
@@ -396,23 +436,24 @@ contract RadixMatchingEngineTest is Test {
         uint24 price = 321;
 
         vm.prank(alice);
-        engine.fill(_order(price, 1, 0), true);
+        bytes32 firstBid = engine.fill(_order(price, 1, 0), true);
         vm.prank(bob);
         bytes32 secondBid = engine.fill(_order(price, 1, 0), true);
         vm.prank(carol);
         bytes32 thirdBid = engine.fill(_order(price, 1, 0), true);
 
+        assertEq(_nonce(firstBid), MAX_ORDER_NONCE);
         assertEq(_nonce(secondBid), MAX_ORDER_NONCE - 1);
         assertEq(_nonce(thirdBid), MAX_ORDER_NONCE - 2);
-        assertEq(_commonPrefix(_pathKey(secondBid), _pathKey(thirdBid)), 63);
+        assertEq(_commonPrefix(_pathKey(firstBid), _pathKey(secondBid)), 63);
 
-        bytes32 finalSplit = _branchFor(secondBid, thirdBid);
+        bytes32 finalSplit = _branchFor(firstBid, secondBid);
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(finalSplit);
 
-        assertEq(_pathKey(finalSplit), _pathKey(secondBid));
-        assertEq(_quantity(finalSplit), _quantity(secondBid) + _quantity(thirdBid));
-        assertEq(leftNode, thirdBid);
-        assertEq(rightNode, secondBid);
+        assertEq(_pathKey(finalSplit), _pathKey(firstBid));
+        assertEq(_quantity(finalSplit), _quantity(firstBid) + _quantity(secondBid));
+        assertEq(leftNode, secondBid);
+        assertEq(rightNode, firstBid);
     }
 
     function test_InsertPreservesChildBranchWhenItReusesParentAddress() public {
