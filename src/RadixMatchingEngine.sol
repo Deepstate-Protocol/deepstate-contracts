@@ -33,6 +33,7 @@ contract RadixMatchingEngine {
     uint256 private constant _QUANTITY_SHIFT = 40;
     uint256 private constant _QUANTITY_MASK = (uint256(1) << 192) - 1;
     uint256 private constant _NONCE_MASK = (uint256(1) << 40) - 1;
+    uint256 private constant _PATH_MASK = ~(_QUANTITY_MASK << _QUANTITY_SHIFT);
     uint24 private constant _MAX_PRICE = type(uint24).max;
 
     address private constant _BID_SENTINEL = address(uint160(1));
@@ -83,23 +84,29 @@ contract RadixMatchingEngine {
         uint256 quoteAmount;
 
         if (isBid) {
-            (askRoot, remaining, baseFilled, quoteAmount) = _match(askRoot, limitPrice, remaining, false);
+            bytes32 root = askRoot;
+            bytes32 newRoot;
+            (newRoot, remaining, baseFilled, quoteAmount) = _match(root, limitPrice, remaining, false);
+            if (newRoot != root) askRoot = newRoot;
 
             if (quoteAmount != 0) _safeTransferFromExact(QUOTE_TOKEN, msg.sender, address(this), quoteAmount);
             if (baseFilled != 0) _safeTransferExact(BASE_TOKEN, msg.sender, baseFilled);
 
             if (remaining != 0) {
-                restingOrder = _rest(order, remaining, true);
+                restingOrder = _rest(limitPrice, remaining, true);
                 _safeTransferFromExact(QUOTE_TOKEN, msg.sender, address(this), _quoteValue(limitPrice, remaining));
             }
         } else {
-            (bidRoot, remaining, baseFilled, quoteAmount) = _match(bidRoot, limitPrice, remaining, true);
+            bytes32 root = bidRoot;
+            bytes32 newRoot;
+            (newRoot, remaining, baseFilled, quoteAmount) = _match(root, limitPrice, remaining, true);
+            if (newRoot != root) bidRoot = newRoot;
 
             if (baseFilled != 0) _safeTransferFromExact(BASE_TOKEN, msg.sender, address(this), baseFilled);
             if (quoteAmount != 0) _safeTransferExact(QUOTE_TOKEN, msg.sender, quoteAmount);
 
             if (remaining != 0) {
-                restingOrder = _rest(order, remaining, false);
+                restingOrder = _rest(limitPrice, remaining, false);
                 _safeTransferFromExact(BASE_TOKEN, msg.sender, address(this), remaining);
             }
         }
@@ -107,26 +114,35 @@ contract RadixMatchingEngine {
 
     /// @notice Cancel an open order or claim a filled order.
     function cancel(bytes32 order) external nonReentrant returns (uint256 baseAmount, uint256 quoteAmount) {
-        if (_quantity(order) == 0) revert InvalidOrder();
+        uint192 originalQuantity = _quantity(order);
+        if (originalQuantity == 0) revert InvalidOrder();
 
         address owner = ownerOfOrder[order];
         if (owner == address(0) || owner != msg.sender) revert NotOrderOwner();
 
         bool isBid = _orderIsBid(order);
 
-        uint192 originalQuantity = _quantity(order);
         uint192 remainingQuantity = 0;
         bytes32 removed;
 
         if (isBid) {
-            (bidRoot, removed) = _removeByKey(bidRoot, order, true);
+            bytes32 root = bidRoot;
+            bytes32 newRoot;
+            (newRoot, removed) = _removeByKey(root, order, true);
+            if (newRoot != root) bidRoot = newRoot;
         } else {
-            (askRoot, removed) = _removeByKey(askRoot, order, false);
+            bytes32 root = askRoot;
+            bytes32 newRoot;
+            (newRoot, removed) = _removeByKey(root, order, false);
+            if (newRoot != root) askRoot = newRoot;
         }
 
         if (removed != bytes32(0)) remainingQuantity = _quantity(removed);
         if (remainingQuantity > originalQuantity) revert InvalidOrder();
-        uint192 filledQuantity = originalQuantity - remainingQuantity;
+        uint192 filledQuantity;
+        unchecked {
+            filledQuantity = originalQuantity - remainingQuantity;
+        }
         uint24 limitPrice = _price(order);
 
         if (isBid) {
@@ -146,16 +162,14 @@ contract RadixMatchingEngine {
         emit OrderCancelled(order, owner, baseAmount, quoteAmount);
     }
 
-    function _rest(bytes32 order, uint192 quantity, bool isBid) private returns (bytes32 restingOrder) {
+    function _rest(uint24 price, uint192 quantity, bool isBid) private returns (bytes32 restingOrder) {
         uint40 nonce = nextNonce;
         if (nonce == 0) revert NonceExhausted();
         unchecked {
             nextNonce = nonce - 1;
         }
 
-        restingOrder = _pack(_price(order), quantity, nonce);
-        if (ownerOfOrder[restingOrder] != address(0)) revert DuplicateOrder();
-
+        restingOrder = _pack(price, quantity, nonce);
         ownerOfOrder[restingOrder] = msg.sender;
         ownerOfOrder[_sideKey(restingOrder)] = isBid ? _BID_SENTINEL : _ASK_SENTINEL;
 
@@ -217,11 +231,12 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
-        if (!_canMatch(root, limitPrice, restingIsBid)) return (root, remaining, 0, 0);
+        uint24 restingPrice = _price(root);
+        if (restingIsBid ? restingPrice < limitPrice : restingPrice > limitPrice) return (root, remaining, 0, 0);
 
         uint192 restingQuantity = _quantity(root);
         uint192 fillQuantity = remaining < restingQuantity ? remaining : restingQuantity;
-        quoteAmount = _quoteValue(_price(root), fillQuantity);
+        quoteAmount = _quoteValue(restingPrice, fillQuantity);
 
         emit OrderMatched(root, restingIsBid, fillQuantity, quoteAmount);
 
@@ -231,7 +246,9 @@ contract RadixMatchingEngine {
         }
 
         if (fillQuantity < restingQuantity) {
-            newRoot = _withQuantity(root, restingQuantity - fillQuantity);
+            unchecked {
+                newRoot = _withQuantity(root, restingQuantity - fillQuantity);
+            }
         }
     }
 
@@ -291,20 +308,30 @@ contract RadixMatchingEngine {
     {
         bytes32 newBranch = _storeBranch(leftNode, rightNode, isBidTree);
         if (newBranch != oldBranch && oldBranch != leftNode && oldBranch != rightNode) {
-            if (_quantity(oldBranch) > _quantity(newBranch) || !_containsBranch(newBranch, oldBranch)) {
+            if (_quantity(oldBranch) > _quantity(newBranch) || !_containsBranch(newBranch, oldBranch, isBidTree)) {
                 delete tree[oldBranch];
             }
         }
         return newBranch;
     }
 
-    function _containsBranch(bytes32 root, bytes32 target) private view returns (bool) {
-        if (root == target) return true;
+    function _containsBranch(bytes32 root, bytes32 target, bool isBidTree) private view returns (bool) {
+        uint64 targetKey = _nodeKey(target, isBidTree);
 
-        Branch memory branch = tree[root];
-        if (branch.leftNode == bytes32(0) && branch.rightNode == bytes32(0)) return false;
+        while (root != bytes32(0)) {
+            if (root == target) return true;
 
-        return _containsBranch(branch.leftNode, target) || _containsBranch(branch.rightNode, target);
+            Branch memory branch = tree[root];
+            if (branch.leftNode == bytes32(0) && branch.rightNode == bytes32(0)) return false;
+
+            uint64 leftKey = _nodeKey(branch.leftNode, isBidTree);
+            uint8 branchDepth = _commonPrefix(leftKey, _nodeKey(branch.rightNode, isBidTree));
+            if (_commonPrefix(targetKey, leftKey) < branchDepth) return false;
+
+            root = _bit(targetKey, branchDepth) ? branch.rightNode : branch.leftNode;
+        }
+
+        return false;
     }
 
     function _storeBranch(bytes32 a, bytes32 b, bool isBidTree) private returns (bytes32 branchNode) {
@@ -327,17 +354,12 @@ contract RadixMatchingEngine {
         tree[branchNode] = Branch({leftNode: leftNode, rightNode: rightNode});
     }
 
-    function _canMatch(bytes32 restingOrder, uint24 limitPrice, bool restingIsBid) private pure returns (bool) {
-        uint24 restingPrice = _price(restingOrder);
-        return restingIsBid ? restingPrice >= limitPrice : restingPrice <= limitPrice;
-    }
-
     function _branchNodeForChildren(bytes32 a, bytes32 b) private pure returns (bytes32) {
-        uint64 aAddressKey = _nodeAddressKey(a);
-        uint64 bAddressKey = _nodeAddressKey(b);
+        uint64 aAddressKey = _pathKey(a);
+        uint64 bAddressKey = _pathKey(b);
         if (aAddressKey == bAddressKey) revert DuplicateOrder();
         uint64 boundaryKey = aAddressKey > bAddressKey ? aAddressKey : bAddressKey;
-        return _branchNode(boundaryKey, _nodeQuantity(a) + _nodeQuantity(b));
+        return _branchNode(boundaryKey, _quantity(a) + _quantity(b));
     }
 
     function _branchNode(uint64 key, uint192 quantity) private pure returns (bytes32) {
@@ -348,24 +370,17 @@ contract RadixMatchingEngine {
         return _pack(prefixPrice, quantity, prefixNonce);
     }
 
-    function _nodeKey(bytes32 node, bool isBidTree) private view returns (uint64) {
-        Branch memory branch = tree[node];
-        if (branch.leftNode == bytes32(0) && branch.rightNode == bytes32(0)) return _sortKey(node, isBidTree);
-        return _nodeKey(branch.leftNode != bytes32(0) ? branch.leftNode : branch.rightNode, isBidTree);
-    }
-
-    function _nodeAddressKey(bytes32 node) private pure returns (uint64) {
-        return _pathKey(node);
-    }
-
-    function _nodeQuantity(bytes32 node) private pure returns (uint192) {
-        return _quantity(node);
+    function _nodeKey(bytes32 node, bool isBidTree) private pure returns (uint64) {
+        return _sortKey(node, isBidTree);
     }
 
     function _sortKey(bytes32 order, bool isBidTree) private pure returns (uint64) {
         uint24 price = _price(order);
         uint40 nonce = _nonce(order);
-        uint24 sortablePrice = isBidTree ? price : _MAX_PRICE - price;
+        uint24 sortablePrice;
+        unchecked {
+            sortablePrice = isBidTree ? price : _MAX_PRICE - price;
+        }
         return (uint64(sortablePrice) << 40) | uint64(nonce);
     }
 
@@ -374,13 +389,40 @@ contract RadixMatchingEngine {
     }
 
     function _commonPrefix(uint64 a, uint64 b) private pure returns (uint8 prefixLength) {
-        for (; prefixLength < 64; ++prefixLength) {
-            if (_bit(a, prefixLength) != _bit(b, prefixLength)) return prefixLength;
+        uint256 differingBits = uint256(a ^ b);
+        if (differingBits == 0) return 64;
+
+        unchecked {
+            if (differingBits >> 32 == 0) {
+                prefixLength += 32;
+                differingBits <<= 32;
+            }
+            if (differingBits >> 48 == 0) {
+                prefixLength += 16;
+                differingBits <<= 16;
+            }
+            if (differingBits >> 56 == 0) {
+                prefixLength += 8;
+                differingBits <<= 8;
+            }
+            if (differingBits >> 60 == 0) {
+                prefixLength += 4;
+                differingBits <<= 4;
+            }
+            if (differingBits >> 62 == 0) {
+                prefixLength += 2;
+                differingBits <<= 2;
+            }
+            if (differingBits >> 63 == 0) {
+                ++prefixLength;
+            }
         }
     }
 
     function _bit(uint64 key, uint8 depth) private pure returns (bool) {
-        return ((key >> (63 - depth)) & 1) == 1;
+        unchecked {
+            return ((key >> (63 - depth)) & 1) == 1;
+        }
     }
 
     function _orderIsBid(bytes32 order) private view returns (bool) {
@@ -391,11 +433,13 @@ contract RadixMatchingEngine {
     }
 
     function _sideKey(bytes32 order) private pure returns (bytes32) {
-        return _pack(_price(order), 0, _nonce(order));
+        return bytes32(uint256(order) & _PATH_MASK);
     }
 
     function _quoteValue(uint24 price, uint192 quantity) private pure returns (uint256) {
-        return uint256(price) * uint256(quantity);
+        unchecked {
+            return uint256(price) * uint256(quantity);
+        }
     }
 
     function _safeTransferFromExact(address token, address from, address to, uint256 amount) private {
@@ -446,7 +490,7 @@ contract RadixMatchingEngine {
     }
 
     function _withQuantity(bytes32 order, uint192 quantity) private pure returns (bytes32) {
-        return _pack(_price(order), quantity, _nonce(order));
+        return bytes32((uint256(order) & _PATH_MASK) | (uint256(quantity) << _QUANTITY_SHIFT));
     }
 
     function _pack(uint24 price, uint192 quantity, uint40 nonce) private pure returns (bytes32) {
