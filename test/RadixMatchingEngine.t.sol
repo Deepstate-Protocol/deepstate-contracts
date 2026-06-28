@@ -1070,6 +1070,61 @@ contract RadixMatchingEngineTest is Test {
         assertEq(falseQuote.balanceOf(alice), 1_000);
     }
 
+    function test_FalseReturnCollateralPullRevertsBeforeRestingAsk() public {
+        FalseReturnERC20 falseBase = new FalseReturnERC20();
+        TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
+        RadixMatchingEngine falseEngine = new RadixMatchingEngine(address(falseBase), address(plainQuote));
+
+        falseBase.mint(alice, 1_000);
+        falseBase.setFailTransferFrom(true);
+
+        bytes32 expectedAsk = _order(10, 2, MAX_ORDER_NONCE);
+
+        vm.startPrank(alice);
+        falseBase.approve(address(falseEngine), type(uint256).max);
+        vm.expectRevert();
+        falseEngine.fill(_order(10, 2, 0), false);
+        vm.stopPrank();
+
+        assertEq(falseEngine.askRoot(), bytes32(0));
+        assertEq(falseEngine.ownerOfOrder(expectedAsk), address(0));
+        assertEq(falseEngine.nextNonce(), MAX_ORDER_NONCE);
+        assertEq(falseBase.balanceOf(address(falseEngine)), 0);
+        assertEq(falseBase.balanceOf(alice), 1_000);
+    }
+
+    function test_FalseReturnFilledBidClaimRevertsAndPreservesClaim() public {
+        FalseReturnERC20 falseBase = new FalseReturnERC20();
+        TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
+        RadixMatchingEngine falseEngine = new RadixMatchingEngine(address(falseBase), address(plainQuote));
+
+        plainQuote.mint(alice, 1_000);
+        falseBase.mint(bob, 1_000);
+
+        vm.startPrank(alice);
+        plainQuote.approve(address(falseEngine), type(uint256).max);
+        bytes32 restingBid = falseEngine.fill(_order(10, 2, 0), true);
+        vm.stopPrank();
+
+        vm.startPrank(bob);
+        falseBase.approve(address(falseEngine), type(uint256).max);
+        falseEngine.fill(_order(10, 2, 0), false);
+        vm.stopPrank();
+
+        assertEq(falseEngine.bidRoot(), bytes32(0));
+        assertEq(falseBase.balanceOf(address(falseEngine)), 2);
+
+        falseBase.setFailTransfer(true);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        falseEngine.cancel(restingBid);
+
+        assertEq(falseEngine.ownerOfOrder(restingBid), alice);
+        assertEq(falseBase.balanceOf(address(falseEngine)), 2);
+        assertEq(falseBase.balanceOf(alice), 0);
+    }
+
     function test_FalseReturnFilledAskClaimRevertsAndPreservesClaim() public {
         TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
         FalseReturnERC20 falseQuote = new FalseReturnERC20();
