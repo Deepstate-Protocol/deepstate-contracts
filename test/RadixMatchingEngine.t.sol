@@ -67,6 +67,31 @@ contract SenderFeeTransferERC20 is TestERC20 {
     }
 }
 
+contract FalseReturnERC20 is TestERC20 {
+    bool public failTransfer;
+    bool public failTransferFrom;
+
+    constructor() TestERC20("FalseReturn", "FALSE") {}
+
+    function setFailTransfer(bool failTransfer_) external {
+        failTransfer = failTransfer_;
+    }
+
+    function setFailTransferFrom(bool failTransferFrom_) external {
+        failTransferFrom = failTransferFrom_;
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        if (failTransfer) return false;
+        return super.transfer(to, amount);
+    }
+
+    function transferFrom(address from, address to, uint256 amount) public override returns (bool) {
+        if (failTransferFrom) return false;
+        return super.transferFrom(from, to, amount);
+    }
+}
+
 contract MintingTransferFromERC20 is TestERC20 {
     constructor() TestERC20("MintingTransferFrom", "MINTFROM") {}
 
@@ -1020,6 +1045,61 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(toggleBase.balanceOf(address(toggleEngine)), 2);
         assertEq(toggleBase.balanceOf(alice), 998);
+    }
+
+    function test_FalseReturnCollateralPullRevertsBeforeRestingBid() public {
+        TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
+        FalseReturnERC20 falseQuote = new FalseReturnERC20();
+        RadixMatchingEngine falseEngine = new RadixMatchingEngine(address(plainBase), address(falseQuote));
+
+        falseQuote.mint(alice, 1_000);
+        falseQuote.setFailTransferFrom(true);
+
+        bytes32 expectedBid = _order(10, 2, MAX_ORDER_NONCE);
+
+        vm.startPrank(alice);
+        falseQuote.approve(address(falseEngine), type(uint256).max);
+        vm.expectRevert();
+        falseEngine.fill(_order(10, 2, 0), true);
+        vm.stopPrank();
+
+        assertEq(falseEngine.bidRoot(), bytes32(0));
+        assertEq(falseEngine.ownerOfOrder(expectedBid), address(0));
+        assertEq(falseEngine.nextNonce(), MAX_ORDER_NONCE);
+        assertEq(falseQuote.balanceOf(address(falseEngine)), 0);
+        assertEq(falseQuote.balanceOf(alice), 1_000);
+    }
+
+    function test_FalseReturnFilledAskClaimRevertsAndPreservesClaim() public {
+        TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
+        FalseReturnERC20 falseQuote = new FalseReturnERC20();
+        RadixMatchingEngine falseEngine = new RadixMatchingEngine(address(plainBase), address(falseQuote));
+
+        plainBase.mint(alice, 1_000);
+        falseQuote.mint(bob, 1_000);
+
+        vm.startPrank(alice);
+        plainBase.approve(address(falseEngine), type(uint256).max);
+        bytes32 restingAsk = falseEngine.fill(_order(10, 2, 0), false);
+        vm.stopPrank();
+
+        vm.startPrank(bob);
+        falseQuote.approve(address(falseEngine), type(uint256).max);
+        falseEngine.fill(_order(10, 2, 0), true);
+        vm.stopPrank();
+
+        assertEq(falseEngine.askRoot(), bytes32(0));
+        assertEq(falseQuote.balanceOf(address(falseEngine)), 20);
+
+        falseQuote.setFailTransfer(true);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        falseEngine.cancel(restingAsk);
+
+        assertEq(falseEngine.ownerOfOrder(restingAsk), alice);
+        assertEq(falseQuote.balanceOf(address(falseEngine)), 20);
+        assertEq(falseQuote.balanceOf(alice), 0);
     }
 
     function test_FeeOnTransferTokenReverts() public {
