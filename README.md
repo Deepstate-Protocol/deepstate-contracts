@@ -36,7 +36,7 @@ Higher order nonce still means earlier time priority at the same price.
 
 ## Security Assumptions
 
-- Builds are pinned to Solidity `0.8.28` with Foundry compiler auto-detection disabled. Do not deploy bytecode built with a different compiler without rerunning the full test and invariant suite.
+- Builds are pinned to Solidity `0.8.28` with Foundry compiler auto-detection disabled and optimizer enabled. Do not deploy bytecode built with a different compiler/profile without rerunning the full test and invariant suite.
 - `evm_version = "cancun"` is required because the reentrancy guard uses transient storage opcodes.
 - Base and quote tokens must be standard exact-balance ERC20s selected by deployment configuration. Every transfer is assumed to debit the source and credit the recipient by exactly the requested amount. Fee-on-transfer, rebasing, mint-on-transfer, or otherwise inexact tokens are out of scope for this contract and must be excluded before deployment.
 - Filled resting orders are claimed through `cancel(bytes32 order)`, which also withdraws any unfilled remainder.
