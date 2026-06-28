@@ -64,7 +64,10 @@ contract RadixMatchingEngine {
     }
 
     constructor(address baseToken_, address quoteToken_) {
-        if (baseToken_ == address(0) || quoteToken_ == address(0) || baseToken_ == quoteToken_) {
+        if (
+            baseToken_ == address(0) || quoteToken_ == address(0) || baseToken_ == quoteToken_
+                || baseToken_.code.length == 0 || quoteToken_.code.length == 0
+        ) {
             revert InvalidToken();
         }
         BASE_TOKEN = baseToken_;

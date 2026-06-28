@@ -18,7 +18,7 @@ contract RadixMatchingEngineHandler is Test {
     TestERC20 internal immutable QUOTE;
     RadixMatchingEngine internal immutable ENGINE;
 
-    uint256 internal constant MAX_TRACKED_ORDERS = 64;
+    uint256 internal constant MAX_TRACKED_ORDERS = 96;
 
     address[] internal actors;
     TrackedOrder[] internal trackedOrders;
@@ -97,7 +97,7 @@ contract RadixMatchingEngineHandler is Test {
         if (trackedOrders.length >= MAX_TRACKED_ORDERS) return;
 
         address actor = actors[bound(actorSeed, 0, actors.length - 1)];
-        uint24 price = uint24(bound(priceSeed, 1, 1_000));
+        uint24 price = uint24(bound(priceSeed, 1, type(uint24).max));
         uint192 quantity = uint192(bound(quantitySeed, 1, 100));
         bytes32 order = bytes32((uint256(price) << 232) | (uint256(quantity) << 40));
 
@@ -189,6 +189,10 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         _assertSubtree(engine.askRoot(), 0, false);
     }
 
+    function invariant_BidAskBranchesDoNotShareStorage() public view {
+        _assertNoSharedBranches(engine.bidRoot(), engine.askRoot());
+    }
+
     function invariant_BooksAreNotCrossed() public view {
         SubtreeStats memory bidStats = _assertSubtree(engine.bidRoot(), 0, true);
         SubtreeStats memory askStats = _assertSubtree(engine.askRoot(), 0, false);
@@ -240,6 +244,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         if (!_isBranch(node)) {
             assertGt(_quantity(node), 0, "leaf quantity");
             assertLt(_nonce(node), _RESERVED_MAX_NONCE, "leaf nonce");
+            assertEq(engine.ownerOfOrder(_sideKey(node)), isBidTree ? _BID_SENTINEL : _ASK_SENTINEL, "leaf side");
             uint64 key = _sortKey(node, isBidTree);
             stats.quantity = _quantity(node);
             stats.minKey = key;
@@ -285,6 +290,24 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         if (rightStats.minKey != rightStats.maxKey) {
             assertGe(_commonPrefix(rightStats.minKey, rightStats.maxKey), branchDepth + 1, "right prefix");
         }
+    }
+
+    function _assertNoSharedBranches(bytes32 bidNode, bytes32 askRoot) private view {
+        if (bidNode == bytes32(0) || !_isBranch(bidNode)) return;
+
+        _assertBranchAbsentFromSubtree(bidNode, askRoot);
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(bidNode);
+        _assertNoSharedBranches(leftNode, askRoot);
+        _assertNoSharedBranches(rightNode, askRoot);
+    }
+
+    function _assertBranchAbsentFromSubtree(bytes32 targetBranch, bytes32 node) private view {
+        if (node == bytes32(0) || !_isBranch(node)) return;
+
+        assertTrue(targetBranch != node, "shared branch");
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+        _assertBranchAbsentFromSubtree(targetBranch, leftNode);
+        _assertBranchAbsentFromSubtree(targetBranch, rightNode);
     }
 
     function _find(bytes32 root, bytes32 order, bool isBidTree) private view returns (bytes32) {

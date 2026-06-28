@@ -116,6 +116,12 @@ contract RadixMatchingEngineTest is Test {
 
         vm.expectRevert(RadixMatchingEngine.InvalidToken.selector);
         new RadixMatchingEngine(address(base), address(base));
+
+        vm.expectRevert(RadixMatchingEngine.InvalidToken.selector);
+        new RadixMatchingEngine(alice, address(quote));
+
+        vm.expectRevert(RadixMatchingEngine.InvalidToken.selector);
+        new RadixMatchingEngine(address(base), bob);
     }
 
     function test_InvalidOrdersRevert() public {
@@ -318,6 +324,41 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(engine.bidRoot(), bytes32(0));
         assertEq(quote.balanceOf(alice), 1_000_000);
+    }
+
+    function test_PartialFillOriginalOrderCanAliasBranchAndStillCancel() public {
+        address d00d = address(0xD00D);
+        _fundAndApprove(d00d);
+
+        vm.prank(bob);
+        engine.fill(_order(1, 57, 0), true);
+
+        vm.prank(d00d);
+        engine.fill(_order(99, 56, 0), false);
+
+        vm.prank(d00d);
+        engine.fill(_order(1, 75, 0), false);
+
+        vm.prank(d00d);
+        engine.fill(_order(1060, 42, 0), true);
+
+        vm.prank(bob);
+        bytes32 bobAsk = engine.fill(_order(1, 83, 0), false);
+
+        vm.prank(carol);
+        engine.fill(_order(87, 19, 0), true);
+
+        vm.prank(d00d);
+        engine.fill(_order(13769, 49, 0), true);
+
+        vm.prank(bob);
+        engine.fill(_order(1, 68, 0), false);
+
+        vm.prank(bob);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(bobAsk);
+
+        assertEq(baseAmount, 15);
+        assertEq(quoteAmount, 68);
     }
 
     function test_SamePriceBranchSplitsAtFinalNonceBit() public {
