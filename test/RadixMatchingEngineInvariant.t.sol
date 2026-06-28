@@ -340,14 +340,13 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         return _nodeKey(leftNode != bytes32(0) ? leftNode : rightNode, isBidTree);
     }
 
-    function _branchNodeForChildren(bytes32 leftNode, bytes32 rightNode) private view returns (bytes32) {
+    function _branchNodeForChildren(bytes32 leftNode, bytes32 rightNode) private pure returns (bytes32) {
         uint64 leftAddressKey = _nodeAddressKey(leftNode);
         uint64 rightAddressKey = _nodeAddressKey(rightNode);
-        uint8 addressDepth = _commonPrefix(leftAddressKey, rightAddressKey);
-        assertLt(addressDepth, 64, "branch address depth");
+        assertTrue(leftAddressKey != rightAddressKey, "branch address key");
 
         uint192 quantity = _quantity(leftNode) + _quantity(rightNode);
-        uint64 prefix = _branchCode(leftAddressKey, addressDepth);
+        uint64 prefix = leftAddressKey > rightAddressKey ? leftAddressKey : rightAddressKey;
         // forge-lint: disable-next-line(unsafe-typecast)
         uint24 prefixPrice = uint24(prefix >> 40);
         // forge-lint: disable-next-line(unsafe-typecast)
@@ -355,10 +354,8 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         return _pack(prefixPrice, quantity, prefixNonce);
     }
 
-    function _nodeAddressKey(bytes32 node) private view returns (uint64) {
-        if (!_isBranch(node)) return _pathKey(node);
-        (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
-        return _nodeAddressKey(leftNode != bytes32(0) ? leftNode : rightNode);
+    function _nodeAddressKey(bytes32 node) private pure returns (uint64) {
+        return _pathKey(node);
     }
 
     function _sortKey(bytes32 order, bool isBidTree) private pure returns (uint64) {
@@ -370,11 +367,6 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
     function _pathKey(bytes32 order) private pure returns (uint64) {
         return (uint64(_price(order)) << 40) | uint64(_nonce(order));
-    }
-
-    function _branchCode(uint64 key, uint8 depth) private pure returns (uint64) {
-        uint64 prefix = depth == 0 ? 0 : key & (type(uint64).max << (64 - depth));
-        return prefix | (uint64(1) << (63 - depth));
     }
 
     function _commonPrefix(uint64 a, uint64 b) private pure returns (uint8 prefixLength) {

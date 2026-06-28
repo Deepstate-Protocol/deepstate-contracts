@@ -394,6 +394,33 @@ contract RadixMatchingEngineTest is Test {
         assertEq(rightNode, secondBid);
     }
 
+    function test_InsertPreservesChildBranchWhenItReusesParentAddress() public {
+        vm.prank(alice);
+        bytes32 firstBid = engine.fill(_order(108, 77, 0), true);
+        vm.prank(bob);
+        bytes32 secondBid = engine.fill(_order(14, 19, 0), true);
+
+        bytes32 oldRoot = _branchFor(firstBid, secondBid);
+        assertEq(engine.bidRoot(), oldRoot);
+
+        vm.prank(carol);
+        bytes32 thirdBid = engine.fill(_order(80, 19, 0), true);
+
+        bytes32 reusedChild = _branchFor(firstBid, thirdBid);
+        bytes32 newRoot = _branchFor(secondBid, reusedChild);
+
+        assertEq(reusedChild, oldRoot);
+        assertEq(engine.bidRoot(), newRoot);
+
+        (bytes32 rootLeft, bytes32 rootRight) = engine.tree(newRoot);
+        assertEq(rootLeft, secondBid);
+        assertEq(rootRight, reusedChild);
+
+        (bytes32 childLeft, bytes32 childRight) = engine.tree(reusedChild);
+        assertEq(childLeft, thirdBid);
+        assertEq(childRight, firstBid);
+    }
+
     function test_CancelDeletesCollapsedBranchStorage() public {
         uint24 price = 222;
 
@@ -791,19 +818,13 @@ contract RadixMatchingEngineTest is Test {
     function _branchFor(bytes32 a, bytes32 b) internal pure returns (bytes32) {
         uint64 aKey = _pathKey(a);
         uint64 bKey = _pathKey(b);
-        uint8 depth = _commonPrefix(aKey, bKey);
-        uint64 prefix = _branchCode(aKey, depth);
+        uint64 boundaryKey = aKey > bKey ? aKey : bKey;
 
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint24 prefixPrice = uint24(prefix >> 40);
+        uint24 prefixPrice = uint24(boundaryKey >> 40);
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint40 prefixNonce = uint40(prefix);
+        uint40 prefixNonce = uint40(boundaryKey);
         return _order(prefixPrice, _quantity(a) + _quantity(b), prefixNonce);
-    }
-
-    function _branchCode(uint64 key, uint8 depth) internal pure returns (uint64) {
-        uint64 prefix = depth == 0 ? 0 : key & (type(uint64).max << (64 - depth));
-        return prefix | (uint64(1) << (63 - depth));
     }
 
     function _pathKey(bytes32 order) internal pure returns (uint64) {

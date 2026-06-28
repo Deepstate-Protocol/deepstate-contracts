@@ -302,8 +302,16 @@ contract RadixMatchingEngine {
         returns (bytes32)
     {
         bytes32 newBranch = _storeBranch(leftNode, rightNode, isBidTree);
-        if (newBranch != oldBranch) delete tree[oldBranch];
+        if (newBranch != oldBranch && !_containsBranch(newBranch, oldBranch)) delete tree[oldBranch];
         return newBranch;
+    }
+
+    function _containsBranch(bytes32 root, bytes32 target) private view returns (bool) {
+        if (root == target) return true;
+        if (!_isBranch(root)) return false;
+
+        Branch memory branch = tree[root];
+        return _containsBranch(branch.leftNode, target) || _containsBranch(branch.rightNode, target);
     }
 
     function _storeBranch(bytes32 a, bytes32 b, bool isBidTree) private returns (bytes32 branchNode) {
@@ -331,26 +339,20 @@ contract RadixMatchingEngine {
         return restingIsBid ? restingPrice >= limitPrice : restingPrice <= limitPrice;
     }
 
-    function _branchNodeForChildren(bytes32 a, bytes32 b) private view returns (bytes32) {
+    function _branchNodeForChildren(bytes32 a, bytes32 b) private pure returns (bytes32) {
         uint64 aAddressKey = _nodeAddressKey(a);
         uint64 bAddressKey = _nodeAddressKey(b);
-        uint8 addressDepth = _commonPrefix(aAddressKey, bAddressKey);
-        if (addressDepth == 64) revert DuplicateOrder();
-        return _branchNode(aAddressKey, addressDepth, _nodeQuantity(a) + _nodeQuantity(b));
+        if (aAddressKey == bAddressKey) revert DuplicateOrder();
+        uint64 boundaryKey = aAddressKey > bAddressKey ? aAddressKey : bAddressKey;
+        return _branchNode(boundaryKey, _nodeQuantity(a) + _nodeQuantity(b));
     }
 
-    function _branchNode(uint64 key, uint8 depth, uint192 quantity) private pure returns (bytes32) {
-        uint64 prefix = _branchCode(key, depth);
+    function _branchNode(uint64 key, uint192 quantity) private pure returns (bytes32) {
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint24 prefixPrice = uint24(prefix >> 40);
+        uint24 prefixPrice = uint24(key >> 40);
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint40 prefixNonce = uint40(prefix);
+        uint40 prefixNonce = uint40(key);
         return _pack(prefixPrice, quantity, prefixNonce);
-    }
-
-    function _branchCode(uint64 key, uint8 depth) private pure returns (uint64) {
-        uint64 prefix = depth == 0 ? 0 : key & (type(uint64).max << (64 - depth));
-        return prefix | (uint64(1) << (63 - depth));
     }
 
     function _isBranch(bytes32 node) private view returns (bool) {
@@ -368,10 +370,8 @@ contract RadixMatchingEngine {
         return _nodeKey(branch.leftNode != bytes32(0) ? branch.leftNode : branch.rightNode, isBidTree);
     }
 
-    function _nodeAddressKey(bytes32 node) private view returns (uint64) {
-        if (!_isBranch(node)) return _pathKey(node);
-        Branch memory branch = tree[node];
-        return _nodeAddressKey(branch.leftNode != bytes32(0) ? branch.leftNode : branch.rightNode);
+    function _nodeAddressKey(bytes32 node) private pure returns (uint64) {
+        return _pathKey(node);
     }
 
     function _nodeQuantity(bytes32 node) private pure returns (uint192) {
