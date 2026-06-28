@@ -127,6 +127,10 @@ contract ReentrantTransferFromERC20 is TestERC20 {
 contract RadixMatchingEngineTest is Test {
     uint40 internal constant MAX_ORDER_NONCE = type(uint40).max;
 
+    event OrderRested(bytes32 indexed order, address indexed owner, bool indexed isBid);
+    event OrderMatched(bytes32 indexed restingOrder, bool indexed restingIsBid, uint192 quantity, uint256 quoteAmount);
+    event OrderCancelled(bytes32 indexed order, address indexed owner, uint256 baseAmount, uint256 quoteAmount);
+
     TestERC20 internal base;
     TestERC20 internal quote;
     RadixMatchingEngine internal engine;
@@ -164,6 +168,48 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.bidRoot(), bytes32(0));
         assertEq(engine.ownerOfOrder(restingBid), address(0));
         assertEq(quote.balanceOf(alice), 1_000_000);
+    }
+
+    function test_RestMatchClaimAndCancelEvents() public {
+        bytes32 expectedAsk = _order(90, 2, MAX_ORDER_NONCE);
+
+        vm.expectEmit(true, true, true, true, address(engine));
+        emit OrderRested(expectedAsk, bob, false);
+
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
+
+        assertEq(restingAsk, expectedAsk);
+
+        bytes32 expectedBid = _order(100, 1, MAX_ORDER_NONCE - 1);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(restingAsk, false, 2, 180);
+        vm.expectEmit(true, true, true, true, address(engine));
+        emit OrderRested(expectedBid, alice, true);
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(100, 3, 0), true);
+
+        assertEq(restingBid, expectedBid);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderCancelled(restingAsk, bob, 0, 180);
+
+        vm.prank(bob);
+        (uint256 bobBaseAmount, uint256 bobQuoteAmount) = engine.cancel(restingAsk);
+
+        assertEq(bobBaseAmount, 0);
+        assertEq(bobQuoteAmount, 180);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderCancelled(restingBid, alice, 0, 100);
+
+        vm.prank(alice);
+        (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = engine.cancel(restingBid);
+
+        assertEq(aliceBaseAmount, 0);
+        assertEq(aliceQuoteAmount, 100);
     }
 
     function test_ConstructorRejectsInvalidTokens() public {
