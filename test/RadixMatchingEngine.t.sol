@@ -394,6 +394,42 @@ contract RadixMatchingEngineTest is Test {
         assertEq(rightNode, secondBid);
     }
 
+    function test_CancelDeletesCollapsedBranchStorage() public {
+        uint24 price = 222;
+
+        vm.prank(alice);
+        bytes32 firstBid = engine.fill(_order(price, 1, 0), true);
+        vm.prank(bob);
+        bytes32 secondBid = engine.fill(_order(price, 1, 0), true);
+
+        bytes32 branch = _branchFor(firstBid, secondBid);
+        assertEq(engine.bidRoot(), branch);
+
+        vm.prank(bob);
+        engine.cancel(secondBid);
+
+        assertEq(engine.bidRoot(), firstBid);
+        _assertEmptyBranch(branch);
+    }
+
+    function test_MatchDeletesCollapsedBranchStorage() public {
+        uint24 price = 333;
+
+        vm.prank(alice);
+        bytes32 firstAsk = engine.fill(_order(price, 1, 0), false);
+        vm.prank(bob);
+        bytes32 secondAsk = engine.fill(_order(price, 1, 0), false);
+
+        bytes32 branch = _branchFor(firstAsk, secondAsk);
+        assertEq(engine.askRoot(), branch);
+
+        vm.prank(carol);
+        engine.fill(_order(price, 1, 0), true);
+
+        assertEq(engine.askRoot(), secondAsk);
+        _assertEmptyBranch(branch);
+    }
+
     function test_FeeOnTransferTokenReverts() public {
         FeeERC20 feeBase = new FeeERC20();
         TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
@@ -782,6 +818,12 @@ contract RadixMatchingEngineTest is Test {
 
     function _bit(uint64 key, uint8 depth) internal pure returns (bool) {
         return ((key >> (63 - depth)) & 1) == 1;
+    }
+
+    function _assertEmptyBranch(bytes32 branch) internal view {
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(branch);
+        assertEq(leftNode, bytes32(0));
+        assertEq(rightNode, bytes32(0));
     }
 
     function _price(bytes32 order) internal pure returns (uint24) {
