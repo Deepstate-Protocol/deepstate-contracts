@@ -403,7 +403,20 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         engine = new RadixMatchingEngine(address(base), address(quote));
         handler = new RadixMatchingEngineHandler(base, quote, engine);
 
-        targetContract(address(handler));
+        excludeContract(address(base));
+        excludeContract(address(quote));
+        excludeContract(address(engine));
+
+        bytes4[] memory selectors = new bytes4[](7);
+        selectors[0] = RadixMatchingEngineHandler.placeBid.selector;
+        selectors[1] = RadixMatchingEngineHandler.placeAsk.selector;
+        selectors[2] = RadixMatchingEngineHandler.placeMaxBid.selector;
+        selectors[3] = RadixMatchingEngineHandler.placeMaxAsk.selector;
+        selectors[4] = RadixMatchingEngineHandler.cancel.selector;
+        selectors[5] = RadixMatchingEngineHandler.invalidFill.selector;
+        selectors[6] = RadixMatchingEngineHandler.invalidCancel.selector;
+
+        targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
 
     function test_ReplayIndirectBranchReuseKeepsLeavesBacked() public {

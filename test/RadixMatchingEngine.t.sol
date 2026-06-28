@@ -170,6 +170,92 @@ contract RadixMatchingEngineTest is Test {
         assertEq(quote.balanceOf(alice), 1_000_000);
     }
 
+    function test_StandardTokenBidRestAndCancelTransfersQuote() public {
+        uint256 quoteAmount = 25 * 4;
+        uint256 aliceBaseBefore = base.balanceOf(alice);
+        uint256 aliceQuoteBefore = quote.balanceOf(alice);
+        uint256 engineBaseBefore = base.balanceOf(address(engine));
+        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(25, 4, 0), true);
+
+        assertEq(base.balanceOf(alice), aliceBaseBefore);
+        assertEq(quote.balanceOf(alice), aliceQuoteBefore - quoteAmount);
+        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
+        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore + quoteAmount);
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 returnedQuote) = engine.cancel(restingBid);
+
+        assertEq(baseAmount, 0);
+        assertEq(returnedQuote, quoteAmount);
+        assertEq(base.balanceOf(alice), aliceBaseBefore);
+        assertEq(quote.balanceOf(alice), aliceQuoteBefore);
+        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
+        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
+    }
+
+    function test_StandardTokenAskRestAndCancelTransfersBase() public {
+        uint256 quantity = 4;
+        uint256 bobBaseBefore = base.balanceOf(bob);
+        uint256 bobQuoteBefore = quote.balanceOf(bob);
+        uint256 engineBaseBefore = base.balanceOf(address(engine));
+        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
+
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(25, 4, 0), false);
+
+        assertEq(base.balanceOf(bob), bobBaseBefore - quantity);
+        assertEq(quote.balanceOf(bob), bobQuoteBefore);
+        assertEq(base.balanceOf(address(engine)), engineBaseBefore + quantity);
+        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
+
+        vm.prank(bob);
+        (uint256 returnedBase, uint256 quoteAmount) = engine.cancel(restingAsk);
+
+        assertEq(returnedBase, quantity);
+        assertEq(quoteAmount, 0);
+        assertEq(base.balanceOf(bob), bobBaseBefore);
+        assertEq(quote.balanceOf(bob), bobQuoteBefore);
+        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
+        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
+    }
+
+    function test_StandardTokenFullMatchPaysTakerAndMakerClaim() public {
+        uint256 aliceBaseBefore = base.balanceOf(alice);
+        uint256 aliceQuoteBefore = quote.balanceOf(alice);
+        uint256 bobBaseBefore = base.balanceOf(bob);
+        uint256 bobQuoteBefore = quote.balanceOf(bob);
+
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
+
+        assertEq(base.balanceOf(bob), bobBaseBefore - 2);
+        assertEq(base.balanceOf(address(engine)), 2);
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(base.balanceOf(alice), aliceBaseBefore + 2);
+        assertEq(quote.balanceOf(alice), aliceQuoteBefore - 180);
+        assertEq(base.balanceOf(bob), bobBaseBefore - 2);
+        assertEq(quote.balanceOf(bob), bobQuoteBefore);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 180);
+
+        vm.prank(bob);
+        (uint256 bobBaseAmount, uint256 bobQuoteAmount) = engine.cancel(restingAsk);
+
+        assertEq(bobBaseAmount, 0);
+        assertEq(bobQuoteAmount, 180);
+        assertEq(base.balanceOf(bob), bobBaseBefore - 2);
+        assertEq(quote.balanceOf(bob), bobQuoteBefore + 180);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
     function test_RestMatchClaimAndCancelEvents() public {
         bytes32 expectedAsk = _order(90, 2, MAX_ORDER_NONCE);
 
