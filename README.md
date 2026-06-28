@@ -17,14 +17,27 @@ The contract exposes the two order actions:
 
 Incoming `fill` orders must leave nonce bits empty. Any unfilled remainder receives the next decrementing nonce and rests on the bid or ask tree.
 
-## Branch Nonce Reservation
+## Branch Encoding
 
-The node layout remains one `bytes32`. Branch nodes reserve the single maximum nonce value:
+The node layout remains one `bytes32`. Branch nodes do not use nonce tags, probes, or a separate namespace.
 
-- `type(uint40).max`: branch nodes
-- `type(uint40).max - 1` and below: resting orders, assigned by the decrementing nonce
+A branch node is addressed by the shared radix prefix of its children across the full 64-bit path:
+
+```text
+path = price || nonce
+```
+
+The branch prefix is packed back into the same price and nonce fields, while the quantity field stores the exact sum of the child quantities. This lets bid and ask trees coexist in the single `tree` mapping without adding another storage data type.
+
+Resting orders start at `type(uint40).max - 1` and decrement from there. The maximum nonce value is left unused by order assignment.
 
 Higher order nonce still means earlier time priority at the same price.
+
+## Security Assumptions
+
+- `evm_version = "cancun"` is required because the reentrancy guard uses transient storage opcodes.
+- Base and quote tokens must be standard exact-balance ERC20s. Fee-on-transfer, rebasing, or otherwise inexact transfers revert.
+- Filled resting orders are claimed through `cancel(bytes32 order)`, which also withdraws any unfilled remainder.
 
 ## Commands
 

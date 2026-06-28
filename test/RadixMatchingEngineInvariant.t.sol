@@ -80,6 +80,14 @@ contract RadixMatchingEngineHandler is Test {
         return trackedOrders.length;
     }
 
+    function actorCount() external view returns (uint256) {
+        return actors.length;
+    }
+
+    function actorAt(uint256 index) external view returns (address) {
+        return actors[index];
+    }
+
     function orderAt(uint256 index) external view returns (bytes32 order, address owner, bool isBid, bool active) {
         TrackedOrder storage tracked = trackedOrders[index];
         return (tracked.order, tracked.owner, tracked.isBid, tracked.active);
@@ -166,6 +174,11 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         assertEq(quote.balanceOf(address(engine)), expectedQuote, "quote collateral");
     }
 
+    function invariant_TotalTokenSupplyConserved() public view {
+        assertEq(_trackedBalanceSum(base), base.totalSupply(), "base supply");
+        assertEq(_trackedBalanceSum(quote), quote.totalSupply(), "quote supply");
+    }
+
     function invariant_NoUnexpectedHandlerReverts() public view {
         assertEq(handler.unexpectedFillReverts(), 0, "unexpected fill revert");
         assertEq(handler.unexpectedCancelReverts(), 0, "unexpected cancel revert");
@@ -206,6 +219,14 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         bytes32 root = isBid ? engine.bidRoot() : engine.askRoot();
         bytes32 current = _find(root, order, isBid);
         return current == bytes32(0) ? 0 : _quantity(current);
+    }
+
+    function _trackedBalanceSum(TestERC20 token) private view returns (uint256 sum) {
+        sum = token.balanceOf(address(engine));
+        uint256 length = handler.actorCount();
+        for (uint256 i; i < length; ++i) {
+            sum += token.balanceOf(handler.actorAt(i));
+        }
     }
 
     function _assertSubtree(bytes32 node, uint256 depth, bool isBidTree)
