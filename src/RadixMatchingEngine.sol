@@ -117,7 +117,7 @@ contract RadixMatchingEngine {
         bytes32 currentNode = isBid ? _find(bidRoot, order, true) : _find(askRoot, order, false);
 
         uint192 originalQuantity = _quantity(order);
-        uint192 remainingQuantity;
+        uint192 remainingQuantity = 0;
 
         if (currentNode != bytes32(0)) {
             remainingQuantity = _quantity(currentNode);
