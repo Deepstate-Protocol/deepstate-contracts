@@ -49,8 +49,8 @@ contract RadixMatchingEngineHandler is Test {
         actors.push(address(0xB0B));
         actors.push(address(0xCA201));
         actors.push(address(0xD00D));
-        actors.push(address(1));
-        actors.push(address(2));
+        actors.push(address(0xE1EE));
+        actors.push(address(0xF00D));
 
         for (uint256 i; i < actors.length; ++i) {
             BASE.mint(actors[i], INITIAL_BALANCE);
