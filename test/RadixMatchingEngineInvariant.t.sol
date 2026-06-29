@@ -652,6 +652,21 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
     }
 
+    function invariant_ReducedLiveLeafKeysAreNotOwnedOrders() public view {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,,, bool active) = handler.orderAt(i);
+            if (!active) continue;
+
+            uint192 remainingQuantity = handler.remainingQuantityAt(i);
+            if (remainingQuantity == 0 || remainingQuantity == _quantity(order)) continue;
+
+            bytes32 reducedOrder = _pack(_price(order), remainingQuantity, _nonce(order));
+            assertEq(engine.ownerOfOrder(reducedOrder), address(0), "reduced leaf owner");
+        }
+    }
+
     function invariant_SideMetadataMatchesTrackedOrders() public view {
         uint256 length = handler.orderCount();
 
