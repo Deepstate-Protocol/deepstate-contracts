@@ -1377,6 +1377,73 @@ contract RadixMatchingEngineTest is Test {
         assertEq(quote.balanceOf(address(engine)), 0);
     }
 
+    function test_FullDepthBidNonceCombFullyMatchesAndClaims() public {
+        uint256 orderCount = 65;
+        uint192 matchQuantity = 65;
+        uint64 targetKey = type(uint64).max;
+        (bytes32[] memory orders, uint256 quoteTotal) = _buildFullDepthBidNonceComb();
+
+        bytes32 node = engine.bidRoot();
+        for (uint256 depth; depth < 64; ++depth) {
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+            uint64 siblingKey = targetKey ^ uint64(uint256(1) << (63 - depth));
+
+            assertTrue(leftNode != bytes32(0));
+            assertTrue(rightNode != bytes32(0));
+            assertEq(_commonPrefix(_pathKey(leftNode), _pathKey(rightNode)), depth);
+            assertEq(_pathKey(leftNode), siblingKey);
+            assertEq(_pathKey(rightNode), targetKey);
+            // casting to uint192 is safe because the synthetic comb has 65 orders.
+            // forge-lint: disable-next-line(unsafe-typecast)
+            assertEq(_quantity(rightNode), uint192(orderCount - depth - 1));
+
+            node = rightNode;
+        }
+        assertEq(node, orders[0]);
+
+        address seller = address(0x5E11E2);
+        _fundAndApprove(seller);
+
+        vm.prank(seller);
+        bytes32 restingAsk = engine.fill(_order(1, matchQuantity, 0), false);
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(base.balanceOf(address(engine)), orderCount);
+        assertEq(quote.balanceOf(address(engine)), 0);
+        assertEq(base.balanceOf(seller), 1_000_000 - orderCount);
+        assertEq(quote.balanceOf(seller), 1_000_000 + quoteTotal);
+
+        for (uint256 i; i < orderCount; ++i) {
+            vm.prank(alice);
+            (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(orders[i]);
+
+            assertEq(baseAmount, 1);
+            assertEq(quoteAmount, 0);
+            assertEq(engine.ownerOfOrder(orders[i]), address(0));
+        }
+
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_FullDepthBidNonceCombCancelsRightmostOrder() public {
+        uint256 orderCount = 65;
+        uint64 targetKey = type(uint64).max;
+        (bytes32[] memory orders,) = _buildFullDepthBidNonceComb();
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(orders[0]);
+
+        assertEq(baseAmount, 0);
+        assertEq(quoteAmount, type(uint24).max);
+        assertEq(engine.ownerOfOrder(orders[0]), address(0));
+        assertEq(_pathKey(engine.bidRoot()), targetKey - 1);
+        // casting to uint192 is safe because the synthetic comb has 65 orders.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        assertEq(_quantity(engine.bidRoot()), uint192(orderCount - 1));
+    }
+
     function test_AskPricePrefixCombFullyMatchesAndClaims() public {
         uint256 orderCount = 25;
         uint192 matchQuantity = 25;
@@ -2484,6 +2551,36 @@ contract RadixMatchingEngineTest is Test {
         return type(uint24).max - sortPrice;
     }
 
+    function _buildFullDepthBidNonceComb() internal returns (bytes32[] memory orders, uint256 quoteTotal) {
+        uint256 orderCount = 65;
+        uint64 targetKey = type(uint64).max;
+        orders = new bytes32[](orderCount);
+
+        quote.mint(alice, 2_000_000_000);
+
+        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
+        vm.prank(alice);
+        orders[0] = engine.fill(_order(type(uint24).max, 1, 0), true);
+
+        assertEq(_pathKey(orders[0]), targetKey);
+        quoteTotal += _price(orders[0]);
+
+        for (uint256 depth; depth < 64; ++depth) {
+            uint64 siblingKey = targetKey ^ uint64(uint256(1) << (63 - depth));
+            // forge-lint: disable-next-line(unsafe-typecast)
+            uint24 price = uint24(siblingKey >> 40);
+            // forge-lint: disable-next-line(unsafe-typecast)
+            uint40 nonce = uint40(siblingKey);
+
+            vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
+            vm.prank(alice);
+            orders[depth + 1] = engine.fill(_order(price, 1, 0), true);
+
+            assertEq(_pathKey(orders[depth + 1]), siblingKey);
+            quoteTotal += price;
+        }
+    }
+
     function _assertBidPricePrefixCombShape() internal view {
         bytes32 node = engine.bidRoot();
 
@@ -2532,6 +2629,10 @@ contract RadixMatchingEngineTest is Test {
 
     function _bidRootSlot() internal pure returns (bytes32) {
         return bytes32(uint256(2));
+    }
+
+    function _nextNonceSlot() internal pure returns (bytes32) {
+        return bytes32(uint256(4));
     }
 
     function _branchFor(bytes32 a, bytes32 b) internal pure returns (bytes32) {

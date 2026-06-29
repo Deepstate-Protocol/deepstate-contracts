@@ -217,68 +217,46 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
-        bytes32 leftNode = tree[root].leftNode;
-        if (leftNode == bytes32(0)) return _matchAskLeaf(root, limitPrice, remaining);
+        if (tree[root].leftNode == bytes32(0)) return _matchAskLeaf(root, limitPrice, remaining);
 
-        return _matchAskBranch(root, leftNode, tree[root].rightNode, limitPrice, remaining);
-    }
+        newRoot = root;
+        newRemaining = remaining;
 
-    function _matchAskBranch(bytes32 root, bytes32 leftNode, bytes32 rightNode, uint24 limitPrice, uint192 remaining)
-        private
-        returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
-    {
-        bytes32 oldRightNode = rightNode;
-        (rightNode, remaining, baseFilled, quoteAmount) = _matchAskTree(rightNode, limitPrice, remaining);
+        while (newRoot != bytes32(0) && newRemaining != 0) {
+            uint192 fillQuantity;
+            uint256 fillQuoteAmount;
+            (newRoot, fillQuantity, fillQuoteAmount) = _matchBestAsk(newRoot, limitPrice, newRemaining);
+            if (fillQuantity == 0) break;
 
-        if (remaining == 0 || rightNode != bytes32(0)) {
-            if (rightNode == oldRightNode) return (root, remaining, baseFilled, quoteAmount);
-            return (_replaceBranch(leftNode, rightNode), remaining, baseFilled, quoteAmount);
+            unchecked {
+                newRemaining -= fillQuantity;
+                baseFilled += fillQuantity;
+                quoteAmount += fillQuoteAmount;
+            }
         }
-
-        uint192 leftBaseFilled;
-        uint256 leftQuoteAmount;
-        (leftNode, newRemaining, leftBaseFilled, leftQuoteAmount) = _matchAskTree(leftNode, limitPrice, remaining);
-
-        unchecked {
-            baseFilled += leftBaseFilled;
-            quoteAmount += leftQuoteAmount;
-        }
-
-        newRoot = _replaceBranch(leftNode, rightNode);
     }
 
     function _matchBidTree(bytes32 root, uint24 limitPrice, uint192 remaining)
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
-        bytes32 leftNode = tree[root].leftNode;
-        if (leftNode == bytes32(0)) return _matchBidLeaf(root, limitPrice, remaining);
+        if (tree[root].leftNode == bytes32(0)) return _matchBidLeaf(root, limitPrice, remaining);
 
-        return _matchBidBranch(root, leftNode, tree[root].rightNode, limitPrice, remaining);
-    }
+        newRoot = root;
+        newRemaining = remaining;
 
-    function _matchBidBranch(bytes32 root, bytes32 leftNode, bytes32 rightNode, uint24 limitPrice, uint192 remaining)
-        private
-        returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
-    {
-        bytes32 oldRightNode = rightNode;
-        (rightNode, remaining, baseFilled, quoteAmount) = _matchBidTree(rightNode, limitPrice, remaining);
+        while (newRoot != bytes32(0) && newRemaining != 0) {
+            uint192 fillQuantity;
+            uint256 fillQuoteAmount;
+            (newRoot, fillQuantity, fillQuoteAmount) = _matchBestBid(newRoot, limitPrice, newRemaining);
+            if (fillQuantity == 0) break;
 
-        if (remaining == 0 || rightNode != bytes32(0)) {
-            if (rightNode == oldRightNode) return (root, remaining, baseFilled, quoteAmount);
-            return (_replaceBranch(leftNode, rightNode), remaining, baseFilled, quoteAmount);
+            unchecked {
+                newRemaining -= fillQuantity;
+                baseFilled += fillQuantity;
+                quoteAmount += fillQuoteAmount;
+            }
         }
-
-        uint192 leftBaseFilled;
-        uint256 leftQuoteAmount;
-        (leftNode, newRemaining, leftBaseFilled, leftQuoteAmount) = _matchBidTree(leftNode, limitPrice, remaining);
-
-        unchecked {
-            baseFilled += leftBaseFilled;
-            quoteAmount += leftQuoteAmount;
-        }
-
-        newRoot = _replaceBranch(leftNode, rightNode);
     }
 
     function _matchAskLeaf(bytes32 root, uint24 limitPrice, uint192 remaining)
@@ -330,6 +308,66 @@ contract RadixMatchingEngine {
             }
         } else {
             ownerOfOrder[_sideKey(root)] = _BID_SENTINEL;
+        }
+    }
+
+    function _matchBestAsk(bytes32 root, uint24 limitPrice, uint192 remaining)
+        private
+        returns (bytes32 newRoot, uint192 fillQuantity, uint256 quoteAmount)
+    {
+        bytes32[64] memory leftSiblings;
+        uint256 depth;
+        bytes32 node = root;
+
+        while (true) {
+            bytes32 leftNode = tree[node].leftNode;
+            if (leftNode == bytes32(0)) break;
+
+            leftSiblings[depth] = leftNode;
+            node = tree[node].rightNode;
+            unchecked {
+                ++depth;
+            }
+        }
+
+        (newRoot,, fillQuantity, quoteAmount) = _matchAskLeaf(node, limitPrice, remaining);
+        if (fillQuantity == 0) return (root, 0, 0);
+
+        while (depth != 0) {
+            unchecked {
+                --depth;
+            }
+            newRoot = _replaceBranch(leftSiblings[depth], newRoot);
+        }
+    }
+
+    function _matchBestBid(bytes32 root, uint24 limitPrice, uint192 remaining)
+        private
+        returns (bytes32 newRoot, uint192 fillQuantity, uint256 quoteAmount)
+    {
+        bytes32[64] memory leftSiblings;
+        uint256 depth;
+        bytes32 node = root;
+
+        while (true) {
+            bytes32 leftNode = tree[node].leftNode;
+            if (leftNode == bytes32(0)) break;
+
+            leftSiblings[depth] = leftNode;
+            node = tree[node].rightNode;
+            unchecked {
+                ++depth;
+            }
+        }
+
+        (newRoot,, fillQuantity, quoteAmount) = _matchBidLeaf(node, limitPrice, remaining);
+        if (fillQuantity == 0) return (root, 0, 0);
+
+        while (depth != 0) {
+            unchecked {
+                --depth;
+            }
+            newRoot = _replaceBranch(leftSiblings[depth], newRoot);
         }
     }
 
