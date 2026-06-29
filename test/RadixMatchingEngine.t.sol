@@ -998,6 +998,54 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(bidSideKey), address(0));
     }
 
+    function test_FilledSideMarkerAddressCannotClaimForOriginalOwner() public {
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(100, 1, 0), true);
+
+        vm.prank(bob);
+        engine.fill(_order(90, 1, 0), false);
+
+        bytes32 bidSideKey = _order(100, 0, _nonce(restingBid));
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+
+        vm.prank(address(1));
+        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        engine.cancel(restingBid);
+
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+
+        vm.prank(alice);
+        engine.cancel(restingBid);
+
+        assertEq(engine.ownerOfOrder(restingBid), address(0));
+        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
+
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(90, 1, 0), false);
+
+        vm.prank(alice);
+        engine.fill(_order(100, 1, 0), true);
+
+        bytes32 askSideKey = _order(90, 0, _nonce(restingAsk));
+        assertEq(engine.ownerOfOrder(restingAsk), bob);
+        assertEq(engine.ownerOfOrder(askSideKey), address(2));
+
+        vm.prank(address(2));
+        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        engine.cancel(restingAsk);
+
+        assertEq(engine.ownerOfOrder(restingAsk), bob);
+        assertEq(engine.ownerOfOrder(askSideKey), address(2));
+
+        vm.prank(bob);
+        engine.cancel(restingAsk);
+
+        assertEq(engine.ownerOfOrder(restingAsk), address(0));
+        assertEq(engine.ownerOfOrder(askSideKey), address(0));
+    }
+
     function test_SentinelAddressOwnersCanCancelUnfilledOrders() public {
         address bidOwner = address(1);
         address askOwner = address(2);
