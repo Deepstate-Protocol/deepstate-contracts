@@ -680,6 +680,22 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         if (bidStats.exists && askStats.exists) assertLt(bidStats.bestPrice, askStats.bestPrice, "crossed book");
     }
 
+    function invariant_BestPricesMatchTrackedOrders() public view {
+        (bool hasBid, uint24 bestBid, bool hasAsk, uint24 bestAsk) = _trackedBestPrices();
+
+        if (hasBid) {
+            assertEq(_rightmostLeafPrice(engine.bidRoot()), bestBid, "best bid price");
+        } else {
+            assertEq(engine.bidRoot(), bytes32(0), "empty bid root");
+        }
+
+        if (hasAsk) {
+            assertEq(_rightmostLeafPrice(engine.askRoot()), bestAsk, "best ask price");
+        } else {
+            assertEq(engine.askRoot(), bytes32(0), "empty ask root");
+        }
+    }
+
     function invariant_OwnerMappingMatchesTrackedOrders() public view {
         uint256 length = handler.orderCount();
 
@@ -814,6 +830,26 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
                 expectedBidQuantity += remainingQuantity;
             } else {
                 expectedAskQuantity += remainingQuantity;
+            }
+        }
+    }
+
+    function _trackedBestPrices() private view returns (bool hasBid, uint24 bestBid, bool hasAsk, uint24 bestAsk) {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,, bool isBid, bool active) = handler.orderAt(i);
+            if (!active || handler.remainingQuantityAt(i) == 0) continue;
+
+            uint24 price = _price(order);
+            if (isBid) {
+                if (!hasBid || price > bestBid) {
+                    hasBid = true;
+                    bestBid = price;
+                }
+            } else if (!hasAsk || price < bestAsk) {
+                hasAsk = true;
+                bestAsk = price;
             }
         }
     }
@@ -994,6 +1030,17 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
 
         assertEq(matches, 1, "leaf backing");
+    }
+
+    function _rightmostLeafPrice(bytes32 node) private view returns (uint24) {
+        assertTrue(node != bytes32(0), "best price root");
+
+        while (_isBranch(node)) {
+            (, bytes32 rightNode) = engine.tree(node);
+            node = rightNode;
+        }
+
+        return _price(node);
     }
 
     function _find(bytes32 root, bytes32 order, bool isBidTree) private view returns (bytes32) {
