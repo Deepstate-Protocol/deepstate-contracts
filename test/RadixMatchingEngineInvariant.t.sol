@@ -184,6 +184,27 @@ contract RadixMatchingEngineHandler is Test {
         }
     }
 
+    function invalidReducedLeafCancel(uint256 orderSeed) external {
+        (uint256 index, bool found) = _partialOrderIndex(orderSeed);
+        if (!found) return;
+
+        TrackedOrder storage tracked = trackedOrders[index];
+        bytes32 reducedOrder = _pack(_price(tracked.order), tracked.remainingQuantity, _nonce(tracked.order));
+
+        vm.prank(tracked.owner);
+        try ENGINE.cancel(reducedOrder) {
+            ++unexpectedInvalidCancelSuccesses;
+        } catch (bytes memory reason) {
+            if (!_isExpectedInvalidCancelRevert(reducedOrder, reason)) {
+                ++unexpectedInvalidCancelReverts;
+                if (reason.length >= 4) {
+                    // forge-lint: disable-next-line(unsafe-typecast)
+                    lastInvalidCancelRevertSelector = bytes4(reason);
+                }
+            }
+        }
+    }
+
     function orderCount() external view returns (uint256) {
         return trackedOrders.length;
     }
@@ -356,6 +377,24 @@ contract RadixMatchingEngineHandler is Test {
         }
     }
 
+    function _partialOrderIndex(uint256 orderSeed) private view returns (uint256 index, bool found) {
+        uint256 length = trackedOrders.length;
+        if (length == 0) return (0, false);
+
+        uint256 start = bound(orderSeed, 0, length - 1);
+        for (uint256 offset; offset < length; ++offset) {
+            index = (start + offset) % length;
+            TrackedOrder storage tracked = trackedOrders[index];
+            if (
+                tracked.active && tracked.remainingQuantity != 0 && tracked.remainingQuantity < _quantity(tracked.order)
+            ) {
+                return (index, true);
+            }
+        }
+
+        return (0, false);
+    }
+
     function _isExpectedInvalidCancelRevert(bytes32 order, bytes memory reason) private pure returns (bool) {
         if (reason.length < 4) return false;
 
@@ -422,7 +461,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         excludeContract(address(quote));
         excludeContract(address(engine));
 
-        bytes4[] memory selectors = new bytes4[](9);
+        bytes4[] memory selectors = new bytes4[](10);
         selectors[0] = RadixMatchingEngineHandler.placeBid.selector;
         selectors[1] = RadixMatchingEngineHandler.placeAsk.selector;
         selectors[2] = RadixMatchingEngineHandler.placeMaxBid.selector;
@@ -432,6 +471,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         selectors[6] = RadixMatchingEngineHandler.cancel.selector;
         selectors[7] = RadixMatchingEngineHandler.invalidFill.selector;
         selectors[8] = RadixMatchingEngineHandler.invalidCancel.selector;
+        selectors[9] = RadixMatchingEngineHandler.invalidReducedLeafCancel.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
