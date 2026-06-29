@@ -315,8 +315,8 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, uint192 fillQuantity, uint256 quoteAmount)
     {
-        bytes32[64] memory leftSiblings;
-        uint256 depth;
+        bytes32[] memory leftSiblings = new bytes32[](64);
+        uint256 depth = 0;
         bytes32 node = root;
 
         while (true) {
@@ -345,8 +345,8 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, uint192 fillQuantity, uint256 quoteAmount)
     {
-        bytes32[64] memory leftSiblings;
-        uint256 depth;
+        bytes32[] memory leftSiblings = new bytes32[](64);
+        uint256 depth = 0;
         bytes32 node = root;
 
         while (true) {
