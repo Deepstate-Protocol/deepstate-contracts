@@ -420,6 +420,30 @@ contract RadixMatchingEngineTest is Test {
         assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
     }
 
+    function test_CancelCorruptedRemainingAboveOriginalRevertsInvalidOrder() public {
+        vm.prank(alice);
+        bytes32 order = engine.fill(_order(777, 1, 0), true);
+
+        bytes32 corruptedLeaf = _order(777, 2, _nonce(order));
+        vm.store(address(engine), _bidRootSlot(), corruptedLeaf);
+
+        uint256 aliceBaseBefore = base.balanceOf(alice);
+        uint256 aliceQuoteBefore = quote.balanceOf(alice);
+        uint256 engineBaseBefore = base.balanceOf(address(engine));
+        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
+
+        vm.prank(alice);
+        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        engine.cancel(order);
+
+        assertEq(engine.bidRoot(), corruptedLeaf);
+        assertEq(engine.ownerOfOrder(order), alice);
+        assertEq(base.balanceOf(alice), aliceBaseBefore);
+        assertEq(quote.balanceOf(alice), aliceQuoteBefore);
+        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
+        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
+    }
+
     function test_OnlyOwnerCanCancel() public {
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
@@ -2121,6 +2145,10 @@ contract RadixMatchingEngineTest is Test {
 
     function _ownerOfOrderSlot(bytes32 order) internal pure returns (bytes32) {
         return keccak256(abi.encode(order, uint256(1)));
+    }
+
+    function _bidRootSlot() internal pure returns (bytes32) {
+        return bytes32(uint256(2));
     }
 
     function _branchFor(bytes32 a, bytes32 b) internal pure returns (bytes32) {
