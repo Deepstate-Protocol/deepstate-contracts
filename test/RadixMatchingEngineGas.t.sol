@@ -185,6 +185,54 @@ contract RadixMatchingEngineGasTest is Test {
         vm.resumeGasMetering();
     }
 
+    function testGas_CancelFullDepthBidCombRightmost() public {
+        vm.pauseGasMetering();
+        bytes32 targetBid = _buildFullDepthBidNonceComb();
+
+        vm.prank(alice);
+        vm.resumeGasMetering();
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(targetBid);
+        vm.pauseGasMetering();
+
+        assertEq(baseAmount, 0);
+        assertEq(quoteAmount, type(uint24).max);
+        assertEq(engine.ownerOfOrder(targetBid), address(0));
+        vm.resumeGasMetering();
+    }
+
+    function testGas_CancelMaxValidDepthAskCombRightmost() public {
+        vm.pauseGasMetering();
+        bytes32 targetAsk = _buildMaxValidDepthAskNonceComb();
+
+        vm.prank(alice);
+        vm.resumeGasMetering();
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(targetAsk);
+        vm.pauseGasMetering();
+
+        assertEq(baseAmount, 1);
+        assertEq(quoteAmount, 0);
+        assertEq(engine.ownerOfOrder(targetAsk), address(0));
+        vm.resumeGasMetering();
+    }
+
+    function testGas_CancelAskSkipsPathologicalBidTree() public {
+        vm.pauseGasMetering();
+        _buildSamePriceBidNonceComb(1);
+
+        vm.prank(bob);
+        bytes32 targetAsk = engine.fill(_order(2, 1, 0), false);
+
+        vm.prank(bob);
+        vm.resumeGasMetering();
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(targetAsk);
+        vm.pauseGasMetering();
+
+        assertEq(baseAmount, 1);
+        assertEq(quoteAmount, 0);
+        assertEq(engine.ownerOfOrder(targetAsk), address(0));
+        vm.resumeGasMetering();
+    }
+
     function testGas_CancelUnfilledBid() public {
         vm.pauseGasMetering();
         vm.prank(alice);
@@ -265,13 +313,13 @@ contract RadixMatchingEngineGasTest is Test {
         vm.stopPrank();
     }
 
-    function _buildFullDepthBidNonceComb() internal {
+    function _buildFullDepthBidNonceComb() internal returns (bytes32 targetOrder) {
         uint64 targetKey = type(uint64).max;
         quote.mint(alice, 2_000_000_000);
 
         vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
         vm.prank(alice);
-        engine.fill(_order(type(uint24).max, 1, 0), true);
+        targetOrder = engine.fill(_order(type(uint24).max, 1, 0), true);
 
         for (uint256 depth; depth < 64; ++depth) {
             uint64 siblingKey = targetKey ^ uint64(uint256(1) << (63 - depth));
@@ -286,12 +334,12 @@ contract RadixMatchingEngineGasTest is Test {
         }
     }
 
-    function _buildMaxValidDepthAskNonceComb() internal {
+    function _buildMaxValidDepthAskNonceComb() internal returns (bytes32 targetOrder) {
         uint24 targetSortPrice = type(uint24).max - 1;
 
         vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
         vm.prank(alice);
-        engine.fill(_order(1, 1, 0), false);
+        targetOrder = engine.fill(_order(1, 1, 0), false);
 
         uint256 orderIndex = 1;
         for (uint256 depth; depth < 23; ++depth) {
@@ -319,6 +367,25 @@ contract RadixMatchingEngineGasTest is Test {
             vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
             vm.prank(alice);
             engine.fill(_order(1, 1, 0), false);
+        }
+    }
+
+    function _buildSamePriceBidNonceComb(uint24 price) internal returns (bytes32 targetOrder) {
+        uint64 targetKey = (uint64(price) << 40) | uint64(MAX_ORDER_NONCE);
+        quote.mint(alice, 2_000_000_000);
+
+        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
+        vm.prank(alice);
+        targetOrder = engine.fill(_order(price, 1, 0), true);
+
+        for (uint256 depth = 24; depth < 64; ++depth) {
+            uint64 siblingKey = targetKey ^ uint64(uint256(1) << (63 - depth));
+            // forge-lint: disable-next-line(unsafe-typecast)
+            uint40 nonce = uint40(siblingKey);
+
+            vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
+            vm.prank(alice);
+            engine.fill(_order(price, 1, 0), true);
         }
     }
 

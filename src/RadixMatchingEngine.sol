@@ -130,37 +130,35 @@ contract RadixMatchingEngine {
         uint192 remainingQuantity = 0;
         bytes32 removed = bytes32(0);
         bytes32 sideKey = _sideKey(order);
-
-        bytes32 root = bidRoot;
-        if (root != bytes32(0)) {
-            bytes32 newRoot;
-            (newRoot, removed) = _removeBidByKey(root, _bidSortKey(order));
-            if (removed != bytes32(0)) {
-                isBid = true;
-                if (newRoot != root) bidRoot = newRoot;
-            }
+        address marker = ownerOfOrder[sideKey];
+        if (marker == _BID_SENTINEL) {
+            isBid = true;
+        } else if (marker != _ASK_SENTINEL) {
+            revert OrderNotFound();
         }
 
-        if (removed == bytes32(0)) {
-            root = askRoot;
+        if (isBid) {
+            bytes32 root = bidRoot;
+            bytes32 newRoot;
             if (root != bytes32(0)) {
-                bytes32 newRoot;
+                (newRoot, removed) = _removeBidByKey(root, _bidSortKey(order));
+                if (removed != bytes32(0) && newRoot != root) {
+                    bidRoot = newRoot;
+                }
+            }
+        } else {
+            bytes32 root = askRoot;
+            bytes32 newRoot;
+            if (root != bytes32(0)) {
                 (newRoot, removed) = _removeAskByKey(root, _askSortKey(order));
-                if (removed != bytes32(0)) {
-                    if (newRoot != root) askRoot = newRoot;
+                if (removed != bytes32(0) && newRoot != root) {
+                    askRoot = newRoot;
                 }
             }
         }
 
         if (removed != bytes32(0)) {
             remainingQuantity = _quantity(removed);
-        } else {
-            address marker = ownerOfOrder[sideKey];
-            if (marker == _BID_SENTINEL) {
-                isBid = true;
-            } else if (marker != _ASK_SENTINEL) {
-                revert OrderNotFound();
-            }
         }
         if (remainingQuantity > originalQuantity) revert InvalidOrder();
         uint192 filledQuantity;
