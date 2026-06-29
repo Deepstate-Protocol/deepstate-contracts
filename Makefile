@@ -1,0 +1,39 @@
+.PHONY: fmt lint test invariant invariant-deep gas-runtime snapshot-runtime snapshot-runtime-check build-size slither verify verify-deep
+
+INVARIANT_RUNS ?= 2048
+INVARIANT_DEPTH ?= 64
+SLITHER ?= slither
+
+fmt:
+	forge fmt --check
+
+lint:
+	forge lint
+
+test:
+	forge test --force -vv
+
+invariant:
+	forge test --force --match-contract '.*RadixMatchingEngineInvariantTest.*' --match-test 'invariant_.*'
+
+invariant-deep:
+	FOUNDRY_INVARIANT_RUNS=$(INVARIANT_RUNS) FOUNDRY_INVARIANT_DEPTH=$(INVARIANT_DEPTH) forge test --force --match-contract '.*RadixMatchingEngineInvariantTest.*' --match-test 'invariant_.*'
+
+gas-runtime:
+	forge test --force --match-contract RadixMatchingEngineGasTest --gas-report
+
+snapshot-runtime:
+	forge snapshot --match-contract RadixMatchingEngineGasTest --snap .gas-snapshot.runtime
+
+snapshot-runtime-check:
+	forge snapshot --match-contract RadixMatchingEngineGasTest --check .gas-snapshot.runtime
+
+build-size:
+	forge build --sizes
+
+slither:
+	$(SLITHER) src/RadixMatchingEngine.sol
+
+verify: fmt lint test invariant build-size slither
+
+verify-deep: fmt lint test invariant-deep build-size slither
