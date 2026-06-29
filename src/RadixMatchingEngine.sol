@@ -74,9 +74,8 @@ contract RadixMatchingEngine {
     /// @notice Submit a bid or ask. Any unfilled quantity rests on that side of the book.
     /// @dev Incoming orders must leave the low 40 nonce bits empty; the contract assigns time priority.
     function fill(bytes32 order, bool isBid) external nonReentrant returns (bytes32 restingOrder) {
-        uint24 limitPrice = _price(order);
-        uint192 quantity = _quantity(order);
-        if (limitPrice == 0 || quantity == 0 || _nonce(order) != 0) revert InvalidOrder();
+        (uint24 limitPrice, uint192 quantity) = _priceAndQuantity(order);
+        if (limitPrice == 0 || quantity == 0 || uint256(order) & _NONCE_MASK != 0) revert InvalidOrder();
 
         uint192 remaining = quantity;
         uint192 baseFilled;
@@ -138,14 +137,14 @@ contract RadixMatchingEngine {
             bytes32 root = bidRoot;
             if (root != bytes32(0)) {
                 bytes32 newRoot;
-                (newRoot, removed) = _removeByKey(root, _sortKey(order, true), true);
+                (newRoot, removed) = _removeBidByKey(root, _bidSortKey(order));
                 if (newRoot != root) bidRoot = newRoot;
             }
         } else {
             bytes32 root = askRoot;
             if (root != bytes32(0)) {
                 bytes32 newRoot;
-                (newRoot, removed) = _removeByKey(root, _sortKey(order, false), false);
+                (newRoot, removed) = _removeAskByKey(root, _askSortKey(order));
                 if (newRoot != root) askRoot = newRoot;
             }
         }
@@ -157,7 +156,6 @@ contract RadixMatchingEngine {
             filledQuantity = originalQuantity - remainingQuantity;
         }
         uint24 limitPrice = _price(order);
-
         if (isBid) {
             baseAmount = filledQuantity;
             quoteAmount = _quoteValue(limitPrice, remainingQuantity);
@@ -187,9 +185,9 @@ contract RadixMatchingEngine {
         ownerOfOrder[_sideKey(restingOrder)] = isBid ? _BID_SENTINEL : _ASK_SENTINEL;
 
         if (isBid) {
-            bidRoot = _insert(bidRoot, restingOrder, _sortKey(restingOrder, true), true);
+            bidRoot = _insertBid(bidRoot, restingOrder, _bidSortKey(restingOrder));
         } else {
-            askRoot = _insert(askRoot, restingOrder, _sortKey(restingOrder, false), false);
+            askRoot = _insertAsk(askRoot, restingOrder, _askSortKey(restingOrder));
         }
 
         emit OrderRested(restingOrder, msg.sender, isBid);
@@ -240,10 +238,9 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
-        uint24 restingPrice = _price(root);
+        (uint24 restingPrice, uint192 restingQuantity) = _priceAndQuantity(root);
         if (restingIsBid ? restingPrice < limitPrice : restingPrice > limitPrice) return (root, remaining, 0, 0);
 
-        uint192 restingQuantity = _quantity(root);
         uint192 fillQuantity = remaining < restingQuantity ? remaining : restingQuantity;
         quoteAmount = _quoteValue(restingPrice, fillQuantity);
 
@@ -261,48 +258,90 @@ contract RadixMatchingEngine {
         }
     }
 
-    function _insert(bytes32 root, bytes32 node, uint64 nodeKey, bool isBidTree) private returns (bytes32) {
+    function _insertBid(bytes32 root, bytes32 node, uint64 nodeKey) private returns (bytes32) {
         if (root == bytes32(0)) return node;
 
         bytes32 leftNode = tree[root].leftNode;
-        if (leftNode == bytes32(0)) return _storeBranch(root, node, isBidTree);
+        if (leftNode == bytes32(0)) return _storeBranch(root, node, _bidSortKey(root), nodeKey);
 
         bytes32 rightNode = tree[root].rightNode;
-        uint64 leftKey = _nodeKey(leftNode, isBidTree);
-        uint8 branchDepth = _commonPrefix(leftKey, _nodeKey(rightNode, isBidTree));
+        uint64 leftKey = _bidSortKey(leftNode);
+        uint8 branchDepth = _commonPrefix(leftKey, _bidSortKey(rightNode));
         if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
-            return _storeBranch(root, node, isBidTree);
+            return _storeBranch(root, node, _bidSortKey(root), nodeKey);
         }
 
         if (_bit(nodeKey, branchDepth)) {
-            rightNode = _insert(rightNode, node, nodeKey, isBidTree);
+            rightNode = _insertBid(rightNode, node, nodeKey);
         } else {
-            leftNode = _insert(leftNode, node, nodeKey, isBidTree);
+            leftNode = _insertBid(leftNode, node, nodeKey);
         }
 
         return _replaceBranch(leftNode, rightNode);
     }
 
-    function _removeByKey(bytes32 root, uint64 targetKey, bool isBidTree)
-        private
-        returns (bytes32 newRoot, bytes32 removed)
-    {
+    function _insertAsk(bytes32 root, bytes32 node, uint64 nodeKey) private returns (bytes32) {
+        if (root == bytes32(0)) return node;
+
+        bytes32 leftNode = tree[root].leftNode;
+        if (leftNode == bytes32(0)) return _storeBranch(root, node, _askSortKey(root), nodeKey);
+
+        bytes32 rightNode = tree[root].rightNode;
+        uint64 leftKey = _askSortKey(leftNode);
+        uint8 branchDepth = _commonPrefix(leftKey, _askSortKey(rightNode));
+        if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
+            return _storeBranch(root, node, _askSortKey(root), nodeKey);
+        }
+
+        if (_bit(nodeKey, branchDepth)) {
+            rightNode = _insertAsk(rightNode, node, nodeKey);
+        } else {
+            leftNode = _insertAsk(leftNode, node, nodeKey);
+        }
+
+        return _replaceBranch(leftNode, rightNode);
+    }
+
+    function _removeBidByKey(bytes32 root, uint64 targetKey) private returns (bytes32 newRoot, bytes32 removed) {
         if (root == bytes32(0)) return (bytes32(0), bytes32(0));
 
         bytes32 leftNode = tree[root].leftNode;
         if (leftNode == bytes32(0)) {
-            return _sortKey(root, isBidTree) == targetKey ? (bytes32(0), root) : (root, bytes32(0));
+            return _bidSortKey(root) == targetKey ? (bytes32(0), root) : (root, bytes32(0));
         }
 
         bytes32 rightNode = tree[root].rightNode;
-        uint64 leftKey = _nodeKey(leftNode, isBidTree);
-        uint8 branchDepth = _commonPrefix(leftKey, _nodeKey(rightNode, isBidTree));
+        uint64 leftKey = _bidSortKey(leftNode);
+        uint8 branchDepth = _commonPrefix(leftKey, _bidSortKey(rightNode));
         if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0));
 
         if (_bit(targetKey, branchDepth)) {
-            (rightNode, removed) = _removeByKey(rightNode, targetKey, isBidTree);
+            (rightNode, removed) = _removeBidByKey(rightNode, targetKey);
         } else {
-            (leftNode, removed) = _removeByKey(leftNode, targetKey, isBidTree);
+            (leftNode, removed) = _removeBidByKey(leftNode, targetKey);
+        }
+
+        if (removed == bytes32(0)) return (root, bytes32(0));
+        return (_replaceBranch(leftNode, rightNode), removed);
+    }
+
+    function _removeAskByKey(bytes32 root, uint64 targetKey) private returns (bytes32 newRoot, bytes32 removed) {
+        if (root == bytes32(0)) return (bytes32(0), bytes32(0));
+
+        bytes32 leftNode = tree[root].leftNode;
+        if (leftNode == bytes32(0)) {
+            return _askSortKey(root) == targetKey ? (bytes32(0), root) : (root, bytes32(0));
+        }
+
+        bytes32 rightNode = tree[root].rightNode;
+        uint64 leftKey = _askSortKey(leftNode);
+        uint8 branchDepth = _commonPrefix(leftKey, _askSortKey(rightNode));
+        if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0));
+
+        if (_bit(targetKey, branchDepth)) {
+            (rightNode, removed) = _removeAskByKey(rightNode, targetKey);
+        } else {
+            (leftNode, removed) = _removeAskByKey(leftNode, targetKey);
         }
 
         if (removed == bytes32(0)) return (root, bytes32(0));
@@ -324,12 +363,10 @@ contract RadixMatchingEngine {
         return newBranch;
     }
 
-    function _storeBranch(bytes32 a, bytes32 b, bool isBidTree) private returns (bytes32 branchNode) {
+    function _storeBranch(bytes32 a, bytes32 b, uint64 aKey, uint64 bKey) private returns (bytes32 branchNode) {
         if (a == bytes32(0)) return b;
         if (b == bytes32(0)) return a;
 
-        uint64 aKey = _nodeKey(a, isBidTree);
-        uint64 bKey = _nodeKey(b, isBidTree);
         uint8 branchDepth = _commonPrefix(aKey, bKey);
         if (branchDepth == 64) revert DuplicateOrder();
 
@@ -360,17 +397,16 @@ contract RadixMatchingEngine {
         return _pack(prefixPrice, quantity, prefixNonce);
     }
 
-    function _nodeKey(bytes32 node, bool isBidTree) private pure returns (uint64) {
-        return _sortKey(node, isBidTree);
+    function _bidSortKey(bytes32 order) private pure returns (uint64) {
+        uint256 packed = uint256(order);
+        return uint64(((packed >> _PRICE_SHIFT) << _QUANTITY_SHIFT) | (packed & _NONCE_MASK));
     }
 
-    function _sortKey(bytes32 order, bool isBidTree) private pure returns (uint64) {
+    function _askSortKey(bytes32 order) private pure returns (uint64) {
         uint256 packed = uint256(order);
-        uint256 sortablePrice = packed >> _PRICE_SHIFT;
         unchecked {
-            if (!isBidTree) sortablePrice = _MAX_PRICE - sortablePrice;
+            return uint64(((_MAX_PRICE - (packed >> _PRICE_SHIFT)) << _QUANTITY_SHIFT) | (packed & _NONCE_MASK));
         }
-        return uint64((sortablePrice << _QUANTITY_SHIFT) | (packed & _NONCE_MASK));
     }
 
     function _pathKey(bytes32 order) private pure returns (uint64) {
@@ -401,6 +437,14 @@ contract RadixMatchingEngine {
         unchecked {
             return uint256(price) * uint256(quantity);
         }
+    }
+
+    function _priceAndQuantity(bytes32 order) private pure returns (uint24 price, uint192 quantity) {
+        uint256 packed = uint256(order);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        price = uint24(packed >> _PRICE_SHIFT);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        quantity = uint192((packed >> _QUANTITY_SHIFT) & _QUANTITY_MASK);
     }
 
     function _enter() private {
