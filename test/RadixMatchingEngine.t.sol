@@ -769,6 +769,46 @@ contract RadixMatchingEngineTest is Test {
         assertEq(base.balanceOf(address(engine)), 0);
     }
 
+    function test_MaxBidConsumesAskBranchAtQuantityLimit() public {
+        uint24 price = type(uint24).max;
+        uint192 quantity = type(uint192).max;
+        uint192 secondAskQuantity = quantity - 1;
+        uint256 totalQuote = uint256(price) * uint256(quantity);
+
+        base.mint(bob, quantity);
+        quote.mint(carol, type(uint216).max);
+
+        vm.prank(alice);
+        bytes32 firstAsk = engine.fill(_order(price, 1, 0), false);
+
+        vm.prank(bob);
+        bytes32 secondAsk = engine.fill(_order(price, secondAskQuantity, 0), false);
+
+        assertEq(engine.askRoot(), _branchFor(firstAsk, secondAsk));
+        assertEq(base.balanceOf(address(engine)), quantity);
+
+        vm.prank(carol);
+        bytes32 restingBid = engine.fill(_order(price, quantity, 0), true);
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(base.balanceOf(carol), 1_000_000 + uint256(quantity));
+        assertEq(quote.balanceOf(address(engine)), totalQuote);
+
+        vm.prank(alice);
+        (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = engine.cancel(firstAsk);
+
+        assertEq(aliceBaseAmount, 0);
+        assertEq(aliceQuoteAmount, price);
+
+        vm.prank(bob);
+        (uint256 bobBaseAmount, uint256 bobQuoteAmount) = engine.cancel(secondAsk);
+
+        assertEq(bobBaseAmount, 0);
+        assertEq(bobQuoteAmount, uint256(price) * uint256(secondAskQuantity));
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
     function test_BranchQuantityOverflowRevertsWithoutMutatingBook() public {
         quote.mint(alice, type(uint216).max);
 
