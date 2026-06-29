@@ -1121,7 +1121,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(quote.balanceOf(address(engine)), 0);
     }
 
-    function test_CancelDeletesCollapsedBranchStorage() public {
+    function test_CancelCollapsesBranchFromRoot() public {
         uint24 price = 222;
 
         vm.prank(alice);
@@ -1136,10 +1136,10 @@ contract RadixMatchingEngineTest is Test {
         engine.cancel(secondBid);
 
         assertEq(engine.bidRoot(), firstBid);
-        _assertEmptyBranch(branch);
+        assertTrue(engine.bidRoot() != branch);
     }
 
-    function test_MatchDeletesCollapsedBranchStorage() public {
+    function test_MatchCollapsesBranchFromRoot() public {
         uint24 price = 333;
 
         vm.prank(alice);
@@ -1154,7 +1154,7 @@ contract RadixMatchingEngineTest is Test {
         engine.fill(_order(price, 1, 0), true);
 
         assertEq(engine.askRoot(), secondAsk);
-        _assertEmptyBranch(branch);
+        assertTrue(engine.askRoot() != branch);
     }
 
     function test_BidMatchRevertsAtomicallyWhenQuotePullFails() public {
@@ -2117,12 +2117,6 @@ contract RadixMatchingEngineTest is Test {
 
     function _bit(uint64 key, uint8 depth) internal pure returns (bool) {
         return ((key >> (63 - depth)) & 1) == 1;
-    }
-
-    function _assertEmptyBranch(bytes32 branch) internal view {
-        (bytes32 leftNode, bytes32 rightNode) = engine.tree(branch);
-        assertEq(leftNode, bytes32(0));
-        assertEq(rightNode, bytes32(0));
     }
 
     function _price(bytes32 order) internal pure returns (uint24) {
