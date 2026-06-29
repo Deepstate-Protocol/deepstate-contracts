@@ -714,6 +714,17 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
     }
 
+    function invariant_SideMetadataKeysHaveNoBranchStorage() public view {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,,,) = handler.orderAt(i);
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(_sideKey(order));
+            assertEq(leftNode, bytes32(0), "side key left child");
+            assertEq(rightNode, bytes32(0), "side key right child");
+        }
+    }
+
     function invariant_ActiveOrderBookStateMatchesRemainingQuantity() public view {
         uint256 length = handler.orderCount();
 
