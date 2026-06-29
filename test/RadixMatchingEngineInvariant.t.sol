@@ -611,6 +611,26 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
     }
 
+    function invariant_TrackedOrdersAppearOnlyOnExpectedSide() public view {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,, bool isBid, bool active) = handler.orderAt(i);
+            bytes32 sameSideRoot = isBid ? engine.bidRoot() : engine.askRoot();
+            bytes32 oppositeSideRoot = isBid ? engine.askRoot() : engine.bidRoot();
+            bytes32 sameSideNode = _find(sameSideRoot, order, isBid);
+
+            assertEq(_find(oppositeSideRoot, order, !isBid), bytes32(0), "opposite-side order");
+
+            if (!active || handler.remainingQuantityAt(i) == 0) {
+                assertEq(sameSideNode, bytes32(0), "inactive-or-filled same-side order");
+            } else {
+                assertTrue(sameSideNode != bytes32(0), "active same-side order");
+                assertEq(_quantity(sameSideNode), handler.remainingQuantityAt(i), "active same-side remaining");
+            }
+        }
+    }
+
     function invariant_NonceAccountingMatchesRestedOrders() public view {
         assertEq(uint256(engine.nextNonce()), uint256(_MAX_ORDER_NONCE) - handler.orderCount(), "next nonce");
     }
