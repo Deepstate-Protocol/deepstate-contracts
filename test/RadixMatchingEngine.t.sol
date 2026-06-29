@@ -2118,6 +2118,42 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.askRoot(), bytes32(0));
     }
 
+    function test_CancelRejectsReducedLiveAskLeafKey() public {
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(80, 5, 0), false);
+
+        vm.prank(alice);
+        bytes32 crossingBid = engine.fill(_order(100, 2, 0), true);
+
+        assertEq(crossingBid, bytes32(0));
+
+        bytes32 reducedAsk = _order(80, 3, _nonce(restingAsk));
+        assertEq(engine.askRoot(), reducedAsk);
+        assertEq(engine.ownerOfOrder(restingAsk), bob);
+        assertEq(engine.ownerOfOrder(reducedAsk), address(0));
+
+        uint256 engineBaseBefore = base.balanceOf(address(engine));
+        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
+
+        vm.prank(bob);
+        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        engine.cancel(reducedAsk);
+
+        assertEq(engine.askRoot(), reducedAsk);
+        assertEq(engine.ownerOfOrder(restingAsk), bob);
+        assertEq(engine.ownerOfOrder(reducedAsk), address(0));
+        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
+        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
+
+        vm.prank(bob);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(restingAsk);
+
+        assertEq(baseAmount, 3);
+        assertEq(quoteAmount, 160);
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(engine.ownerOfOrder(restingAsk), address(0));
+    }
+
     function test_FullyFilledBidClaimPaysBase() public {
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
@@ -2157,6 +2193,42 @@ contract RadixMatchingEngineTest is Test {
         assertEq(aliceQuote, 300);
         assertEq(base.balanceOf(alice), 1_000_002);
         assertEq(quote.balanceOf(alice), 1_000_000 - 500 + 300);
+    }
+
+    function test_CancelRejectsReducedLiveBidLeafKey() public {
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
+
+        vm.prank(bob);
+        bytes32 crossingAsk = engine.fill(_order(90, 2, 0), false);
+
+        assertEq(crossingAsk, bytes32(0));
+
+        bytes32 reducedBid = _order(100, 3, _nonce(restingBid));
+        assertEq(engine.bidRoot(), reducedBid);
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertEq(engine.ownerOfOrder(reducedBid), address(0));
+
+        uint256 engineBaseBefore = base.balanceOf(address(engine));
+        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
+
+        vm.prank(alice);
+        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        engine.cancel(reducedBid);
+
+        assertEq(engine.bidRoot(), reducedBid);
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertEq(engine.ownerOfOrder(reducedBid), address(0));
+        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
+        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(restingBid);
+
+        assertEq(baseAmount, 2);
+        assertEq(quoteAmount, 300);
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(engine.ownerOfOrder(restingBid), address(0));
     }
 
     function test_SamePriceUsesEarlierNonceFirst() public {
