@@ -200,11 +200,12 @@ contract RadixMatchingEngine {
     {
         if (root == bytes32(0) || remaining == 0) return (root, remaining, 0, 0);
 
-        Branch memory branch = tree[root];
-        if (branch.leftNode != bytes32(0) || branch.rightNode != bytes32(0)) {
-            return _matchBranch(root, branch, limitPrice, remaining, restingIsBid);
-        }
-        return _matchLeaf(root, limitPrice, remaining, restingIsBid);
+        bytes32 leftNode = tree[root].leftNode;
+        if (leftNode == bytes32(0)) return _matchLeaf(root, limitPrice, remaining, restingIsBid);
+
+        return _matchBranch(
+            root, Branch({leftNode: leftNode, rightNode: tree[root].rightNode}), limitPrice, remaining, restingIsBid
+        );
     }
 
     function _matchBranch(bytes32 root, Branch memory branch, uint24 limitPrice, uint192 remaining, bool restingIsBid)
@@ -267,11 +268,10 @@ contract RadixMatchingEngine {
     function _insert(bytes32 root, bytes32 node, uint64 nodeKey, bool isBidTree) private returns (bytes32) {
         if (root == bytes32(0)) return node;
 
-        Branch memory branch = tree[root];
-        if (branch.leftNode == bytes32(0) && branch.rightNode == bytes32(0)) {
-            return _storeBranch(root, node, isBidTree);
-        }
+        bytes32 leftNode = tree[root].leftNode;
+        if (leftNode == bytes32(0)) return _storeBranch(root, node, isBidTree);
 
+        Branch memory branch = Branch({leftNode: leftNode, rightNode: tree[root].rightNode});
         uint64 leftKey = _nodeKey(branch.leftNode, isBidTree);
         uint8 branchDepth = _commonPrefix(leftKey, _nodeKey(branch.rightNode, isBidTree));
         if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
@@ -293,11 +293,12 @@ contract RadixMatchingEngine {
     {
         if (root == bytes32(0)) return (bytes32(0), bytes32(0));
 
-        Branch memory branch = tree[root];
-        if (branch.leftNode == bytes32(0) && branch.rightNode == bytes32(0)) {
+        bytes32 leftNode = tree[root].leftNode;
+        if (leftNode == bytes32(0)) {
             return _sortKey(root, isBidTree) == targetKey ? (bytes32(0), root) : (root, bytes32(0));
         }
 
+        Branch memory branch = Branch({leftNode: leftNode, rightNode: tree[root].rightNode});
         uint64 leftKey = _nodeKey(branch.leftNode, isBidTree);
         uint8 branchDepth = _commonPrefix(leftKey, _nodeKey(branch.rightNode, isBidTree));
         if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0));
@@ -331,14 +332,15 @@ contract RadixMatchingEngine {
         while (root != bytes32(0)) {
             if (root == target) return true;
 
-            Branch memory branch = tree[root];
-            if (branch.leftNode == bytes32(0) && branch.rightNode == bytes32(0)) return false;
+            bytes32 leftNode = tree[root].leftNode;
+            if (leftNode == bytes32(0)) return false;
 
-            uint64 leftKey = _nodeKey(branch.leftNode, isBidTree);
-            uint8 branchDepth = _commonPrefix(leftKey, _nodeKey(branch.rightNode, isBidTree));
+            bytes32 rightNode = tree[root].rightNode;
+            uint64 leftKey = _nodeKey(leftNode, isBidTree);
+            uint8 branchDepth = _commonPrefix(leftKey, _nodeKey(rightNode, isBidTree));
             if (_commonPrefix(targetKey, leftKey) < branchDepth) return false;
 
-            root = _bit(targetKey, branchDepth) ? branch.rightNode : branch.leftNode;
+            root = _bit(targetKey, branchDepth) ? rightNode : leftNode;
         }
 
         return false;
@@ -361,6 +363,7 @@ contract RadixMatchingEngine {
         }
 
         branchNode = _branchNodeForChildren(a, b);
+        // Walkers use leftNode as the branch sentinel, so stored branches are always two-child.
         tree[branchNode] = Branch({leftNode: leftNode, rightNode: rightNode});
     }
 
