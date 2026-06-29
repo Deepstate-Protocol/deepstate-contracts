@@ -714,6 +714,31 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
     }
 
+    function invariant_ActiveOrderBookStateMatchesRemainingQuantity() public view {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,, bool isBid, bool active) = handler.orderAt(i);
+            if (!active) continue;
+
+            uint192 remainingQuantity = handler.remainingQuantityAt(i);
+            bytes32 sameSideRoot = isBid ? engine.bidRoot() : engine.askRoot();
+            bytes32 oppositeSideRoot = isBid ? engine.askRoot() : engine.bidRoot();
+            bytes32 liveLeaf = _find(sameSideRoot, order, isBid);
+
+            assertEq(_find(oppositeSideRoot, order, !isBid), bytes32(0), "active opposite-side order");
+
+            if (remainingQuantity == 0) {
+                assertEq(liveLeaf, bytes32(0), "filled active order still live");
+                continue;
+            }
+
+            assertTrue(liveLeaf != bytes32(0), "open active order missing live leaf");
+            assertEq(_sideKey(liveLeaf), _sideKey(order), "open active leaf side key");
+            assertEq(_quantity(liveLeaf), remainingQuantity, "open active leaf quantity");
+        }
+    }
+
     function invariant_LiveLeavesAreBackedByActiveOrders() public view {
         _assertLeavesBackedByActiveOrders(engine.bidRoot(), true);
         _assertLeavesBackedByActiveOrders(engine.askRoot(), false);
