@@ -23,6 +23,7 @@ contract RadixMatchingEngineHandler is Test {
     uint256 internal constant MAX_TRACKED_ORDERS = 96;
     uint192 internal constant MAX_ORDER_QUANTITY = type(uint192).max / 96;
     uint256 internal constant INITIAL_BALANCE = type(uint216).max;
+    uint24 internal constant SAME_PRICE = 777_777;
 
     address[] internal actors;
     TrackedOrder[] internal trackedOrders;
@@ -81,6 +82,14 @@ contract RadixMatchingEngineHandler is Test {
 
     function placeMaxAsk(uint256 actorSeed, uint24 priceSeed) external {
         _place(actorSeed, priceSeed, MAX_ORDER_QUANTITY, false);
+    }
+
+    function placeSamePriceBid(uint256 actorSeed, uint192 quantitySeed) external {
+        _placeAtPrice(actorSeed, SAME_PRICE, quantitySeed, true);
+    }
+
+    function placeSamePriceAsk(uint256 actorSeed, uint192 quantitySeed) external {
+        _placeAtPrice(actorSeed, SAME_PRICE, quantitySeed, false);
     }
 
     function cancel(uint256 orderSeed) external {
@@ -205,11 +214,15 @@ contract RadixMatchingEngineHandler is Test {
     }
 
     function _place(uint256 actorSeed, uint24 priceSeed, uint192 quantitySeed, bool isBid) private {
+        uint24 price = uint24(bound(priceSeed, 1, type(uint24).max));
+        _placeAtPrice(actorSeed, price, quantitySeed, isBid);
+    }
+
+    function _placeAtPrice(uint256 actorSeed, uint24 price, uint192 quantitySeed, bool isBid) private {
         if (trackedOrders.length >= MAX_TRACKED_ORDERS) return;
 
         uint256 actorIndex = bound(actorSeed, 0, actors.length - 1);
         address actor = actors[actorIndex];
-        uint24 price = uint24(bound(priceSeed, 1, type(uint24).max));
         uint192 quantity = uint192(bound(quantitySeed, 1, uint256(MAX_ORDER_QUANTITY)));
         bytes32 order = bytes32((uint256(price) << 232) | (uint256(quantity) << 40));
 
@@ -409,14 +422,16 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         excludeContract(address(quote));
         excludeContract(address(engine));
 
-        bytes4[] memory selectors = new bytes4[](7);
+        bytes4[] memory selectors = new bytes4[](9);
         selectors[0] = RadixMatchingEngineHandler.placeBid.selector;
         selectors[1] = RadixMatchingEngineHandler.placeAsk.selector;
         selectors[2] = RadixMatchingEngineHandler.placeMaxBid.selector;
         selectors[3] = RadixMatchingEngineHandler.placeMaxAsk.selector;
-        selectors[4] = RadixMatchingEngineHandler.cancel.selector;
-        selectors[5] = RadixMatchingEngineHandler.invalidFill.selector;
-        selectors[6] = RadixMatchingEngineHandler.invalidCancel.selector;
+        selectors[4] = RadixMatchingEngineHandler.placeSamePriceBid.selector;
+        selectors[5] = RadixMatchingEngineHandler.placeSamePriceAsk.selector;
+        selectors[6] = RadixMatchingEngineHandler.cancel.selector;
+        selectors[7] = RadixMatchingEngineHandler.invalidFill.selector;
+        selectors[8] = RadixMatchingEngineHandler.invalidCancel.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
