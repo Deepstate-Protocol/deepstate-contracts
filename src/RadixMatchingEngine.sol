@@ -16,7 +16,8 @@ contract RadixMatchingEngine {
 
     mapping(bytes32 => Branch) public tree;
 
-    /// @notice Owner lookup by order node. Fill/cancel state is derived by searching trees.
+    /// @notice Owner lookup by order node. Zero-quantity keys store side metadata for claims.
+    /// Fill/cancel state is derived by searching trees.
     mapping(bytes32 => address) public ownerOfOrder;
 
     bytes32 public bidRoot;
@@ -175,7 +176,7 @@ contract RadixMatchingEngine {
         }
 
         delete ownerOfOrder[order];
-        if (removed == bytes32(0)) delete ownerOfOrder[sideKey];
+        delete ownerOfOrder[sideKey];
 
         if (baseAmount != 0) BASE_TOKEN.safeTransfer(owner, baseAmount);
         if (quoteAmount != 0) QUOTE_TOKEN.safeTransfer(owner, quoteAmount);
@@ -192,6 +193,7 @@ contract RadixMatchingEngine {
 
         restingOrder = _pack(price, quantity, nonce);
         ownerOfOrder[restingOrder] = msg.sender;
+        ownerOfOrder[_sideKey(restingOrder)] = _BID_SENTINEL;
         bidRoot = _insertBid(bidRoot, restingOrder, (uint64(price) << 40) | uint64(nonce));
 
         emit OrderRested(restingOrder, msg.sender, true);
@@ -206,6 +208,7 @@ contract RadixMatchingEngine {
 
         restingOrder = _pack(price, quantity, nonce);
         ownerOfOrder[restingOrder] = msg.sender;
+        ownerOfOrder[_sideKey(restingOrder)] = _ASK_SENTINEL;
         unchecked {
             askRoot = _insertAsk(askRoot, restingOrder, (uint64(_MAX_PRICE - price) << 40) | uint64(nonce));
         }
@@ -280,8 +283,6 @@ contract RadixMatchingEngine {
             unchecked {
                 newRoot = _withQuantity(root, restingQuantity - fillQuantity);
             }
-        } else {
-            ownerOfOrder[_sideKey(root)] = _ASK_SENTINEL;
         }
     }
 
@@ -306,8 +307,6 @@ contract RadixMatchingEngine {
             unchecked {
                 newRoot = _withQuantity(root, restingQuantity - fillQuantity);
             }
-        } else {
-            ownerOfOrder[_sideKey(root)] = _BID_SENTINEL;
         }
     }
 

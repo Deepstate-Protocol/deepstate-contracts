@@ -692,8 +692,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
         for (uint256 i; i < length; ++i) {
             (bytes32 order,, bool isBid, bool active) = handler.orderAt(i);
-            bool filledClaim = active && handler.remainingQuantityAt(i) == 0;
-            address expectedMarker = filledClaim ? (isBid ? _BID_SENTINEL : _ASK_SENTINEL) : address(0);
+            address expectedMarker = active ? (isBid ? _BID_SENTINEL : _ASK_SENTINEL) : address(0);
             assertEq(engine.ownerOfOrder(_sideKey(order)), expectedMarker, "side marker");
         }
     }

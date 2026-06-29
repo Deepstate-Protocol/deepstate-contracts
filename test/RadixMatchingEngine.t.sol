@@ -631,7 +631,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.askRoot(), askRootBefore);
         assertEq(engine.bidRoot(), bytes32(0));
         assertEq(engine.ownerOfOrder(restingAsk), bob);
-        assertEq(engine.ownerOfOrder(_order(90, 0, 1)), address(0));
+        assertEq(engine.ownerOfOrder(_order(90, 0, 1)), address(2));
         assertEq(engine.nextNonce(), 0);
         assertEq(base.balanceOf(address(engine)), engineBaseBefore);
         assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
@@ -667,7 +667,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.bidRoot(), bidRootBefore);
         assertEq(engine.askRoot(), bytes32(0));
         assertEq(engine.ownerOfOrder(restingBid), alice);
-        assertEq(engine.ownerOfOrder(_order(100, 0, 1)), address(0));
+        assertEq(engine.ownerOfOrder(_order(100, 0, 1)), address(1));
         assertEq(engine.nextNonce(), 0);
         assertEq(base.balanceOf(address(engine)), engineBaseBefore);
         assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
@@ -937,13 +937,13 @@ contract RadixMatchingEngineTest is Test {
         assertEq(base.balanceOf(address(engine)), type(uint192).max);
     }
 
-    function test_FilledSideMetadataUsesZeroQuantityNamespace() public {
+    function test_RestingSideMetadataUsesZeroQuantityNamespace() public {
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
 
         bytes32 bidSideKey = _order(100, 0, _nonce(restingBid));
         assertEq(engine.ownerOfOrder(restingBid), alice);
-        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
+        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
 
         vm.prank(bob);
         engine.fill(_order(100, 5, 0), false);
@@ -955,7 +955,7 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 askSideKey = _order(101, 0, _nonce(restingAsk));
         assertEq(engine.ownerOfOrder(restingAsk), bob);
-        assertEq(engine.ownerOfOrder(askSideKey), address(0));
+        assertEq(engine.ownerOfOrder(askSideKey), address(2));
 
         vm.prank(alice);
         engine.fill(_order(101, 7, 0), true);
@@ -1057,14 +1057,14 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 bidSideKey = _order(100, 0, _nonce(restingBid));
         assertEq(engine.ownerOfOrder(restingBid), bidOwner);
-        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
+        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
 
         vm.prank(askOwner);
         bytes32 restingAsk = engine.fill(_order(101, 4, 0), false);
 
         bytes32 askSideKey = _order(101, 0, _nonce(restingAsk));
         assertEq(engine.ownerOfOrder(restingAsk), askOwner);
-        assertEq(engine.ownerOfOrder(askSideKey), address(0));
+        assertEq(engine.ownerOfOrder(askSideKey), address(2));
 
         vm.prank(bidOwner);
         (uint256 bidBaseAmount, uint256 bidQuoteAmount) = engine.cancel(restingBid);
@@ -1621,8 +1621,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.askRoot(), askRootBefore);
         assertEq(engine.ownerOfOrder(firstAsk), bob);
         assertEq(engine.ownerOfOrder(secondAsk), carol);
-        assertEq(engine.ownerOfOrder(_order(80, 0, _nonce(firstAsk))), address(0));
-        assertEq(engine.ownerOfOrder(_order(90, 0, _nonce(secondAsk))), address(0));
+        assertEq(engine.ownerOfOrder(_order(80, 0, _nonce(firstAsk))), address(2));
+        assertEq(engine.ownerOfOrder(_order(90, 0, _nonce(secondAsk))), address(2));
         assertEq(base.balanceOf(address(engine)), 2);
         assertEq(quote.balanceOf(address(engine)), 0);
         assertEq(base.balanceOf(poorTaker), 0);
@@ -1647,8 +1647,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.bidRoot(), bidRootBefore);
         assertEq(engine.ownerOfOrder(firstBid), alice);
         assertEq(engine.ownerOfOrder(secondBid), bob);
-        assertEq(engine.ownerOfOrder(_order(100, 0, _nonce(firstBid))), address(0));
-        assertEq(engine.ownerOfOrder(_order(90, 0, _nonce(secondBid))), address(0));
+        assertEq(engine.ownerOfOrder(_order(100, 0, _nonce(firstBid))), address(1));
+        assertEq(engine.ownerOfOrder(_order(90, 0, _nonce(secondBid))), address(1));
         assertEq(base.balanceOf(address(engine)), 0);
         assertEq(quote.balanceOf(address(engine)), 190);
         assertEq(base.balanceOf(poorTaker), 0);
