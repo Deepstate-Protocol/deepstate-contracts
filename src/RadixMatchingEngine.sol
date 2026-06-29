@@ -78,8 +78,8 @@ contract RadixMatchingEngine {
         if (limitPrice == 0 || quantity == 0 || uint256(order) & _NONCE_MASK != 0) revert InvalidOrder();
 
         uint192 remaining = quantity;
-        uint192 baseFilled;
-        uint256 quoteAmount;
+        uint192 baseFilled = 0;
+        uint256 quoteAmount = 0;
 
         if (isBid) {
             bytes32 root = askRoot;
@@ -89,7 +89,7 @@ contract RadixMatchingEngine {
                 if (newRoot != root) askRoot = newRoot;
             }
 
-            uint256 quoteCollateral;
+            uint256 quoteCollateral = 0;
             if (remaining != 0) {
                 restingOrder = _rest(limitPrice, remaining, true);
                 quoteCollateral = _quoteValue(limitPrice, remaining);
@@ -125,9 +125,9 @@ contract RadixMatchingEngine {
         address owner = ownerOfOrder[order];
         if (owner != msg.sender) revert NotOrderOwner();
 
-        bool isBid;
+        bool isBid = false;
         uint192 remainingQuantity = 0;
-        bytes32 removed;
+        bytes32 removed = bytes32(0);
         bytes32 sideKey = _sideKey(order);
 
         bytes32 root = bidRoot;
@@ -493,10 +493,5 @@ contract RadixMatchingEngine {
     function _quantity(bytes32 order) private pure returns (uint192) {
         // forge-lint: disable-next-line(unsafe-typecast)
         return uint192((uint256(order) >> _QUANTITY_SHIFT) & _QUANTITY_MASK);
-    }
-
-    function _nonce(bytes32 order) private pure returns (uint40) {
-        // forge-lint: disable-next-line(unsafe-typecast)
-        return uint40(uint256(order) & _NONCE_MASK);
     }
 }
