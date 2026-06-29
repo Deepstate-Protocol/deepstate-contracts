@@ -83,9 +83,11 @@ contract RadixMatchingEngine {
 
         if (isBid) {
             bytes32 root = askRoot;
-            bytes32 newRoot;
-            (newRoot, remaining, baseFilled, quoteAmount) = _match(root, limitPrice, remaining, false);
-            if (newRoot != root) askRoot = newRoot;
+            if (root != bytes32(0)) {
+                bytes32 newRoot;
+                (newRoot, remaining, baseFilled, quoteAmount) = _match(root, limitPrice, remaining, false);
+                if (newRoot != root) askRoot = newRoot;
+            }
 
             uint256 quoteCollateral;
             if (remaining != 0) {
@@ -100,9 +102,11 @@ contract RadixMatchingEngine {
             if (baseFilled != 0) BASE_TOKEN.safeTransfer(msg.sender, baseFilled);
         } else {
             bytes32 root = bidRoot;
-            bytes32 newRoot;
-            (newRoot, remaining, baseFilled, quoteAmount) = _match(root, limitPrice, remaining, true);
-            if (newRoot != root) bidRoot = newRoot;
+            if (root != bytes32(0)) {
+                bytes32 newRoot;
+                (newRoot, remaining, baseFilled, quoteAmount) = _match(root, limitPrice, remaining, true);
+                if (newRoot != root) bidRoot = newRoot;
+            }
 
             if (remaining != 0) {
                 restingOrder = _rest(limitPrice, remaining, false);
@@ -191,9 +195,11 @@ contract RadixMatchingEngine {
         ownerOfOrder[restingOrder] = msg.sender;
 
         if (isBid) {
-            bidRoot = _insertBid(bidRoot, restingOrder, _bidSortKey(restingOrder));
+            bidRoot = _insertBid(bidRoot, restingOrder, (uint64(price) << 40) | uint64(nonce));
         } else {
-            askRoot = _insertAsk(askRoot, restingOrder, _askSortKey(restingOrder));
+            unchecked {
+                askRoot = _insertAsk(askRoot, restingOrder, (uint64(_MAX_PRICE - price) << 40) | uint64(nonce));
+            }
         }
 
         emit OrderRested(restingOrder, msg.sender, isBid);
@@ -203,8 +209,6 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
-        if (root == bytes32(0) || remaining == 0) return (root, remaining, 0, 0);
-
         bytes32 leftNode = tree[root].leftNode;
         if (leftNode == bytes32(0)) return _matchLeaf(root, limitPrice, remaining, restingIsBid);
 
