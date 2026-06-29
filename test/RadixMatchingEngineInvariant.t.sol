@@ -600,7 +600,8 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
         for (uint256 i; i < length; ++i) {
             (bytes32 order,, bool isBid, bool active) = handler.orderAt(i);
-            address expectedMarker = active ? (isBid ? _BID_SENTINEL : _ASK_SENTINEL) : address(0);
+            bool filledClaim = active && handler.remainingQuantityAt(i) == 0;
+            address expectedMarker = filledClaim ? (isBid ? _BID_SENTINEL : _ASK_SENTINEL) : address(0);
             assertEq(engine.ownerOfOrder(_sideKey(order)), expectedMarker, "side marker");
         }
     }
@@ -668,7 +669,6 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
         if (!_isBranch(node)) {
             assertGt(_quantity(node), 0, "leaf quantity");
-            assertEq(engine.ownerOfOrder(_sideKey(node)), isBidTree ? _BID_SENTINEL : _ASK_SENTINEL, "leaf side");
             uint64 key = _sortKey(node, isBidTree);
             stats.quantity = _quantity(node);
             stats.minKey = key;

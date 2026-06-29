@@ -497,7 +497,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.askRoot(), askRootBefore);
         assertEq(engine.bidRoot(), bytes32(0));
         assertEq(engine.ownerOfOrder(restingAsk), bob);
-        assertEq(engine.ownerOfOrder(_order(90, 0, 1)), address(2));
+        assertEq(engine.ownerOfOrder(_order(90, 0, 1)), address(0));
         assertEq(engine.nextNonce(), 0);
         assertEq(base.balanceOf(address(engine)), engineBaseBefore);
         assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
@@ -533,7 +533,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.bidRoot(), bidRootBefore);
         assertEq(engine.askRoot(), bytes32(0));
         assertEq(engine.ownerOfOrder(restingBid), alice);
-        assertEq(engine.ownerOfOrder(_order(100, 0, 1)), address(1));
+        assertEq(engine.ownerOfOrder(_order(100, 0, 1)), address(0));
         assertEq(engine.nextNonce(), 0);
         assertEq(base.balanceOf(address(engine)), engineBaseBefore);
         assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
@@ -686,12 +686,17 @@ contract RadixMatchingEngineTest is Test {
         assertEq(base.balanceOf(address(engine)), type(uint192).max);
     }
 
-    function test_SideMetadataUsesZeroQuantityNamespace() public {
+    function test_FilledSideMetadataUsesZeroQuantityNamespace() public {
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
 
         bytes32 bidSideKey = _order(100, 0, _nonce(restingBid));
         assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
+
+        vm.prank(bob);
+        engine.fill(_order(100, 5, 0), false);
+
         assertEq(engine.ownerOfOrder(bidSideKey), address(1));
 
         vm.prank(bob);
@@ -699,6 +704,11 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 askSideKey = _order(101, 0, _nonce(restingAsk));
         assertEq(engine.ownerOfOrder(restingAsk), bob);
+        assertEq(engine.ownerOfOrder(askSideKey), address(0));
+
+        vm.prank(alice);
+        engine.fill(_order(101, 7, 0), true);
+
         assertEq(engine.ownerOfOrder(askSideKey), address(2));
 
         vm.prank(alice);
@@ -748,14 +758,14 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 bidSideKey = _order(100, 0, _nonce(restingBid));
         assertEq(engine.ownerOfOrder(restingBid), bidOwner);
-        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
 
         vm.prank(askOwner);
         bytes32 restingAsk = engine.fill(_order(101, 4, 0), false);
 
         bytes32 askSideKey = _order(101, 0, _nonce(restingAsk));
         assertEq(engine.ownerOfOrder(restingAsk), askOwner);
-        assertEq(engine.ownerOfOrder(askSideKey), address(2));
+        assertEq(engine.ownerOfOrder(askSideKey), address(0));
 
         vm.prank(bidOwner);
         (uint256 bidBaseAmount, uint256 bidQuoteAmount) = engine.cancel(restingBid);

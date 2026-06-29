@@ -121,35 +121,42 @@ contract RadixMatchingEngine {
         address owner = ownerOfOrder[order];
         if (owner != msg.sender) revert NotOrderOwner();
 
-        bytes32 sideKey = _sideKey(order);
-        address marker = ownerOfOrder[sideKey];
         bool isBid;
-        if (marker == _BID_SENTINEL) {
-            isBid = true;
-        } else if (marker != _ASK_SENTINEL) {
-            revert OrderNotFound();
-        }
-
         uint192 remainingQuantity = 0;
         bytes32 removed;
+        bytes32 sideKey = _sideKey(order);
 
-        if (isBid) {
-            bytes32 root = bidRoot;
-            if (root != bytes32(0)) {
-                bytes32 newRoot;
-                (newRoot, removed) = _removeBidByKey(root, _bidSortKey(order));
+        bytes32 root = bidRoot;
+        if (root != bytes32(0)) {
+            bytes32 newRoot;
+            (newRoot, removed) = _removeBidByKey(root, _bidSortKey(order));
+            if (removed != bytes32(0)) {
+                isBid = true;
                 if (newRoot != root) bidRoot = newRoot;
             }
-        } else {
-            bytes32 root = askRoot;
+        }
+
+        if (removed == bytes32(0)) {
+            root = askRoot;
             if (root != bytes32(0)) {
                 bytes32 newRoot;
                 (newRoot, removed) = _removeAskByKey(root, _askSortKey(order));
-                if (newRoot != root) askRoot = newRoot;
+                if (removed != bytes32(0)) {
+                    if (newRoot != root) askRoot = newRoot;
+                }
             }
         }
 
-        if (removed != bytes32(0)) remainingQuantity = _quantity(removed);
+        if (removed != bytes32(0)) {
+            remainingQuantity = _quantity(removed);
+        } else {
+            address marker = ownerOfOrder[sideKey];
+            if (marker == _BID_SENTINEL) {
+                isBid = true;
+            } else if (marker != _ASK_SENTINEL) {
+                revert OrderNotFound();
+            }
+        }
         if (remainingQuantity > originalQuantity) revert InvalidOrder();
         uint192 filledQuantity;
         unchecked {
@@ -165,7 +172,7 @@ contract RadixMatchingEngine {
         }
 
         delete ownerOfOrder[order];
-        delete ownerOfOrder[sideKey];
+        if (removed == bytes32(0)) delete ownerOfOrder[sideKey];
 
         if (baseAmount != 0) BASE_TOKEN.safeTransfer(owner, baseAmount);
         if (quoteAmount != 0) QUOTE_TOKEN.safeTransfer(owner, quoteAmount);
@@ -182,7 +189,6 @@ contract RadixMatchingEngine {
 
         restingOrder = _pack(price, quantity, nonce);
         ownerOfOrder[restingOrder] = msg.sender;
-        ownerOfOrder[_sideKey(restingOrder)] = isBid ? _BID_SENTINEL : _ASK_SENTINEL;
 
         if (isBid) {
             bidRoot = _insertBid(bidRoot, restingOrder, _bidSortKey(restingOrder));
@@ -255,6 +261,8 @@ contract RadixMatchingEngine {
             unchecked {
                 newRoot = _withQuantity(root, restingQuantity - fillQuantity);
             }
+        } else {
+            ownerOfOrder[_sideKey(root)] = restingIsBid ? _BID_SENTINEL : _ASK_SENTINEL;
         }
     }
 
