@@ -49,6 +49,7 @@ forge lint
 forge test --force -vv
 FOUNDRY_INVARIANT_RUNS=2048 FOUNDRY_INVARIANT_DEPTH=64 forge test --force --match-contract '.*RadixMatchingEngineInvariantTest.*' --match-test 'invariant_.*'
 forge build --sizes
+slither src/RadixMatchingEngine.sol
 ```
 
 Deploy script:
