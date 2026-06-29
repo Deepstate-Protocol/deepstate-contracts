@@ -744,6 +744,21 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         _assertLeavesBackedByActiveOrders(engine.askRoot(), false);
     }
 
+    function invariant_OpenTrackedLeavesHaveNoBranchStorage() public view {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,,, bool active) = handler.orderAt(i);
+            uint192 remainingQuantity = handler.remainingQuantityAt(i);
+            if (!active || remainingQuantity == 0) continue;
+
+            bytes32 liveLeaf = _pack(_price(order), remainingQuantity, _nonce(order));
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(liveLeaf);
+            assertEq(leftNode, bytes32(0), "live leaf left child");
+            assertEq(rightNode, bytes32(0), "live leaf right child");
+        }
+    }
+
     function invariant_InactiveTrackedOrdersAreAbsentFromBooks() public view {
         uint256 length = handler.orderCount();
 
