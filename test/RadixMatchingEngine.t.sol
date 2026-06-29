@@ -298,6 +298,50 @@ contract RadixMatchingEngineTest is Test {
         assertEq(aliceQuoteAmount, 100);
     }
 
+    function test_BidRestMatchClaimAndCancelEvents() public {
+        bytes32 expectedBid = _order(100, 2, MAX_ORDER_NONCE);
+
+        vm.expectEmit(true, true, true, true, address(engine));
+        emit OrderRested(expectedBid, alice, true);
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
+
+        assertEq(restingBid, expectedBid);
+
+        bytes32 expectedAsk = _order(90, 1, MAX_ORDER_NONCE - 1);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(restingBid, true, 2, 200);
+        vm.expectEmit(true, true, true, true, address(engine));
+        emit OrderRested(expectedAsk, bob, false);
+
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(90, 3, 0), false);
+
+        assertEq(restingAsk, expectedAsk);
+        assertEq(engine.ownerOfOrder(_order(100, 0, MAX_ORDER_NONCE)), address(1));
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderCancelled(restingBid, alice, 2, 0);
+
+        vm.prank(alice);
+        (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = engine.cancel(restingBid);
+
+        assertEq(aliceBaseAmount, 2);
+        assertEq(aliceQuoteAmount, 0);
+        assertEq(engine.ownerOfOrder(_order(100, 0, MAX_ORDER_NONCE)), address(0));
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderCancelled(restingAsk, bob, 1, 0);
+
+        vm.prank(bob);
+        (uint256 bobBaseAmount, uint256 bobQuoteAmount) = engine.cancel(restingAsk);
+
+        assertEq(bobBaseAmount, 1);
+        assertEq(bobQuoteAmount, 0);
+    }
+
     function test_ConstructorRejectsInvalidTokens() public {
         vm.expectRevert(RadixMatchingEngine.InvalidToken.selector);
         new RadixMatchingEngine(address(0), address(quote));
