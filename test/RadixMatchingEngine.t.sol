@@ -1270,6 +1270,51 @@ contract RadixMatchingEngineTest is Test {
         assertEq(quoteAmount, 68);
     }
 
+    function test_PartialFillOriginalOrderCanAliasBranchAndStillClaimAfterFullFill() public {
+        address d00d = address(0xD00D);
+        _fundAndApprove(d00d);
+
+        vm.prank(bob);
+        engine.fill(_order(1, 57, 0), true);
+
+        vm.prank(d00d);
+        engine.fill(_order(99, 56, 0), false);
+
+        vm.prank(d00d);
+        engine.fill(_order(1, 75, 0), false);
+
+        vm.prank(d00d);
+        engine.fill(_order(1060, 42, 0), true);
+
+        vm.prank(bob);
+        bytes32 bobAsk = engine.fill(_order(1, 83, 0), false);
+
+        vm.prank(carol);
+        engine.fill(_order(87, 19, 0), true);
+
+        vm.prank(d00d);
+        engine.fill(_order(13769, 49, 0), true);
+
+        vm.prank(bob);
+        engine.fill(_order(1, 68, 0), false);
+
+        (bytes32 aliasLeft, bytes32 aliasRight) = engine.tree(bobAsk);
+        assertTrue(aliasLeft != bytes32(0));
+        assertTrue(aliasRight != bytes32(0));
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(1, 15, 0), true);
+
+        assertEq(restingBid, bytes32(0));
+
+        vm.prank(bob);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(bobAsk);
+
+        assertEq(baseAmount, 0);
+        assertEq(quoteAmount, 83);
+        assertEq(engine.ownerOfOrder(bobAsk), address(0));
+    }
+
     function test_SamePriceBranchSplitsAtFinalNonceBit() public {
         uint24 price = 321;
 
