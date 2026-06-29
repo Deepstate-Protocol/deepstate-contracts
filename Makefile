@@ -34,6 +34,6 @@ build-size:
 slither:
 	$(SLITHER) src/RadixMatchingEngine.sol
 
-verify: fmt lint test invariant build-size slither
+verify: fmt lint test invariant snapshot-runtime-check build-size slither
 
-verify-deep: fmt lint test invariant-deep build-size slither
+verify-deep: fmt lint test invariant-deep snapshot-runtime-check build-size slither
