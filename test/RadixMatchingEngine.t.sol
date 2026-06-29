@@ -1444,6 +1444,76 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_quantity(engine.bidRoot()), uint192(orderCount - 1));
     }
 
+    function test_MaxValidDepthAskNonceCombFullyMatchesAndClaims() public {
+        uint256 orderCount = 64;
+        uint192 matchQuantity = 64;
+        (bytes32[] memory orders, uint256 quoteTotal) = _buildMaxValidDepthAskNonceComb();
+
+        bytes32 node = engine.askRoot();
+        for (uint256 depth; depth < 23; ++depth) {
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+
+            assertTrue(leftNode != bytes32(0));
+            assertTrue(rightNode != bytes32(0));
+            assertEq(_commonPrefix(_askSortKey(leftNode), _askSortKey(rightNode)), depth);
+
+            node = rightNode;
+        }
+
+        for (uint256 depth = 24; depth < 64; ++depth) {
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+
+            assertTrue(leftNode != bytes32(0));
+            assertTrue(rightNode != bytes32(0));
+            assertEq(_commonPrefix(_askSortKey(leftNode), _askSortKey(rightNode)), depth);
+
+            node = rightNode;
+        }
+        assertEq(node, orders[0]);
+
+        address buyer = address(0xB0DE6A);
+        _fundAndApprove(buyer);
+        quote.mint(buyer, quoteTotal);
+
+        vm.prank(buyer);
+        bytes32 restingBid = engine.fill(_order(type(uint24).max, matchQuantity, 0), true);
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), quoteTotal);
+        assertEq(base.balanceOf(buyer), 1_000_000 + orderCount);
+        assertEq(quote.balanceOf(buyer), 1_000_000);
+
+        for (uint256 i; i < orderCount; ++i) {
+            vm.prank(alice);
+            (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(orders[i]);
+
+            assertEq(baseAmount, 0);
+            assertEq(quoteAmount, _price(orders[i]));
+            assertEq(engine.ownerOfOrder(orders[i]), address(0));
+        }
+
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_MaxValidDepthAskNonceCombCancelsRightmostOrder() public {
+        uint256 orderCount = 64;
+        (bytes32[] memory orders,) = _buildMaxValidDepthAskNonceComb();
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(orders[0]);
+
+        assertEq(baseAmount, 1);
+        assertEq(quoteAmount, 0);
+        assertEq(engine.ownerOfOrder(orders[0]), address(0));
+        assertTrue(engine.askRoot() != bytes32(0));
+        // casting to uint192 is safe because the synthetic comb has 64 orders.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        assertEq(_quantity(engine.askRoot()), uint192(orderCount - 1));
+    }
+
     function test_AskPricePrefixCombFullyMatchesAndClaims() public {
         uint256 orderCount = 25;
         uint192 matchQuantity = 25;
@@ -2579,6 +2649,59 @@ contract RadixMatchingEngineTest is Test {
             assertEq(_pathKey(orders[depth + 1]), siblingKey);
             quoteTotal += price;
         }
+    }
+
+    function _buildMaxValidDepthAskNonceComb() internal returns (bytes32[] memory orders, uint256 quoteTotal) {
+        uint256 orderCount = 64;
+        uint24 targetSortPrice = type(uint24).max - 1;
+        uint64 targetSortKey = (uint64(targetSortPrice) << 40) | uint64(MAX_ORDER_NONCE);
+        orders = new bytes32[](orderCount);
+
+        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
+        vm.prank(alice);
+        orders[0] = engine.fill(_order(1, 1, 0), false);
+
+        assertEq(_askSortKey(orders[0]), targetSortKey);
+        quoteTotal += _price(orders[0]);
+
+        uint256 orderIndex = 1;
+        for (uint256 depth; depth < 23; ++depth) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            uint24 sortPrice = targetSortPrice ^ uint24(uint256(1) << (23 - depth));
+            // forge-lint: disable-next-line(unsafe-typecast)
+            uint40 nonce = MAX_ORDER_NONCE - uint40(10_000 + orderIndex);
+            uint24 price = type(uint24).max - sortPrice;
+            uint64 sortKey = (uint64(sortPrice) << 40) | uint64(nonce);
+
+            vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
+            vm.prank(alice);
+            orders[orderIndex] = engine.fill(_order(price, 1, 0), false);
+
+            assertEq(_commonPrefix(_askSortKey(orders[orderIndex]), targetSortKey), depth);
+            assertEq(_askSortKey(orders[orderIndex]), sortKey);
+            quoteTotal += price;
+            unchecked {
+                ++orderIndex;
+            }
+        }
+
+        for (uint256 depth = 24; depth < 64; ++depth) {
+            uint64 sortKey = targetSortKey ^ uint64(uint256(1) << (63 - depth));
+            // forge-lint: disable-next-line(unsafe-typecast)
+            uint40 nonce = uint40(sortKey);
+
+            vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
+            vm.prank(alice);
+            orders[orderIndex] = engine.fill(_order(1, 1, 0), false);
+
+            assertEq(_askSortKey(orders[orderIndex]), sortKey);
+            quoteTotal += _price(orders[orderIndex]);
+            unchecked {
+                ++orderIndex;
+            }
+        }
+
+        assertEq(orderIndex, orderCount);
     }
 
     function _assertBidPricePrefixCombShape() internal view {
