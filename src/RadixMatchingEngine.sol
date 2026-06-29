@@ -380,7 +380,6 @@ contract RadixMatchingEngine {
     function _branchNodeForChildren(bytes32 a, bytes32 b) private pure returns (bytes32) {
         uint64 aAddressKey = _pathKey(a);
         uint64 bAddressKey = _pathKey(b);
-        if (aAddressKey == bAddressKey) revert DuplicateOrder();
         uint64 boundaryKey = aAddressKey > bAddressKey ? aAddressKey : bAddressKey;
         return _branchNode(boundaryKey, _quantity(a) + _quantity(b));
     }
