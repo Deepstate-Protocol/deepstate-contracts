@@ -128,6 +128,26 @@ contract RadixMatchingEngineGasTest is Test {
         vm.resumeGasMetering();
     }
 
+    function testGas_FillBidConsumesSamePriceAskSubtree() public {
+        vm.pauseGasMetering();
+        bytes32 firstAsk;
+        for (uint256 i; i < 16; ++i) {
+            vm.prank(bob);
+            bytes32 restingAsk = engine.fill(_order(90, 1, 0), false);
+            if (i == 0) firstAsk = restingAsk;
+        }
+
+        vm.prank(alice);
+        vm.resumeGasMetering();
+        bytes32 restingBid = engine.fill(_order(90, 16, 0), true);
+        vm.pauseGasMetering();
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(engine.ownerOfOrder(firstAsk), bob);
+        vm.resumeGasMetering();
+    }
+
     function testGas_CancelUnfilledBid() public {
         vm.pauseGasMetering();
         vm.prank(alice);

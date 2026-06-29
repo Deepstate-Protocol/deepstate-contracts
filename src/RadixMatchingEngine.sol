@@ -44,7 +44,8 @@ contract RadixMatchingEngine {
         0xc55a21be1c6e869c49c7a5860f6c3a83187eb30a12bcd0421f3cf4f5871dccff;
 
     event OrderRested(bytes32 indexed order, address indexed owner, bool indexed isBid);
-    event OrderMatched(bytes32 indexed restingOrder, bool indexed restingIsBid, uint192 quantity, uint256 quoteAmount);
+    /// @notice Matched resting liquidity. The resting node can be a leaf order or a same-price branch aggregate.
+    event OrderMatched(bytes32 indexed restingNode, bool indexed restingIsBid, uint192 quantity, uint256 quoteAmount);
     event OrderCancelled(bytes32 indexed order, address indexed owner, uint256 baseAmount, uint256 quoteAmount);
 
     error InvalidToken();
@@ -322,8 +323,28 @@ contract RadixMatchingEngine {
             bytes32 leftNode = tree[node].leftNode;
             if (leftNode == bytes32(0)) break;
 
+            bytes32 rightNode = tree[node].rightNode;
+            if (tree[rightNode].leftNode != bytes32(0)) {
+                uint24 subtreePrice = _singlePriceSubtree(rightNode);
+                uint192 subtreeQuantity = _quantity(rightNode);
+                if (subtreePrice != 0 && subtreePrice <= limitPrice && subtreeQuantity <= remaining) {
+                    quoteAmount = _quoteValue(subtreePrice, subtreeQuantity);
+                    emit OrderMatched(rightNode, false, subtreeQuantity, quoteAmount);
+
+                    newRoot = leftNode;
+                    fillQuantity = subtreeQuantity;
+                    while (depth != 0) {
+                        unchecked {
+                            --depth;
+                        }
+                        newRoot = _replaceBranch(leftSiblings[depth], newRoot);
+                    }
+                    return (newRoot, fillQuantity, quoteAmount);
+                }
+            }
+
             leftSiblings[depth] = leftNode;
-            node = tree[node].rightNode;
+            node = rightNode;
             unchecked {
                 ++depth;
             }
@@ -352,8 +373,28 @@ contract RadixMatchingEngine {
             bytes32 leftNode = tree[node].leftNode;
             if (leftNode == bytes32(0)) break;
 
+            bytes32 rightNode = tree[node].rightNode;
+            if (tree[rightNode].leftNode != bytes32(0)) {
+                uint24 subtreePrice = _singlePriceSubtree(rightNode);
+                uint192 subtreeQuantity = _quantity(rightNode);
+                if (subtreePrice != 0 && subtreePrice >= limitPrice && subtreeQuantity <= remaining) {
+                    quoteAmount = _quoteValue(subtreePrice, subtreeQuantity);
+                    emit OrderMatched(rightNode, true, subtreeQuantity, quoteAmount);
+
+                    newRoot = leftNode;
+                    fillQuantity = subtreeQuantity;
+                    while (depth != 0) {
+                        unchecked {
+                            --depth;
+                        }
+                        newRoot = _replaceBranch(leftSiblings[depth], newRoot);
+                    }
+                    return (newRoot, fillQuantity, quoteAmount);
+                }
+            }
+
             leftSiblings[depth] = leftNode;
-            node = tree[node].rightNode;
+            node = rightNode;
             unchecked {
                 ++depth;
             }
@@ -507,6 +548,25 @@ contract RadixMatchingEngine {
         // forge-lint: disable-next-line(unsafe-typecast)
         uint40 prefixNonce = uint40(key);
         return _pack(prefixPrice, quantity, prefixNonce);
+    }
+
+    function _singlePriceSubtree(bytes32 node) private view returns (uint24 price) {
+        bytes32 leftmost = node;
+        while (true) {
+            bytes32 leftNode = tree[leftmost].leftNode;
+            if (leftNode == bytes32(0)) break;
+            leftmost = leftNode;
+        }
+
+        bytes32 rightmost = node;
+        while (true) {
+            bytes32 rightNode = tree[rightmost].rightNode;
+            if (rightNode == bytes32(0)) break;
+            rightmost = rightNode;
+        }
+
+        price = _price(leftmost);
+        if (price != _price(rightmost)) return 0;
     }
 
     function _bidSortKey(bytes32 order) private pure returns (uint64) {
