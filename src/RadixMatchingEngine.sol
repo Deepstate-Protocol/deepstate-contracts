@@ -398,17 +398,17 @@ contract RadixMatchingEngine {
     }
 
     function _sortKey(bytes32 order, bool isBidTree) private pure returns (uint64) {
-        uint24 price = _price(order);
-        uint40 nonce = _nonce(order);
-        uint24 sortablePrice;
+        uint256 packed = uint256(order);
+        uint256 sortablePrice = packed >> _PRICE_SHIFT;
         unchecked {
-            sortablePrice = isBidTree ? price : _MAX_PRICE - price;
+            if (!isBidTree) sortablePrice = _MAX_PRICE - sortablePrice;
         }
-        return (uint64(sortablePrice) << 40) | uint64(nonce);
+        return uint64((sortablePrice << _QUANTITY_SHIFT) | (packed & _NONCE_MASK));
     }
 
     function _pathKey(bytes32 order) private pure returns (uint64) {
-        return (uint64(_price(order)) << 40) | uint64(_nonce(order));
+        uint256 packed = uint256(order);
+        return uint64(((packed >> _PRICE_SHIFT) << _QUANTITY_SHIFT) | (packed & _NONCE_MASK));
     }
 
     function _commonPrefix(uint64 a, uint64 b) private pure returns (uint8 prefixLength) {
