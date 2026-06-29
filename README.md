@@ -59,8 +59,8 @@ forge lint
 forge test --force -vv
 FOUNDRY_INVARIANT_RUNS=2048 FOUNDRY_INVARIANT_DEPTH=64 forge test --force --match-contract '.*RadixMatchingEngineInvariantTest.*' --match-test 'invariant_.*'
 forge test --force --match-contract RadixMatchingEngineGasTest --gas-report
-forge snapshot --match-contract RadixMatchingEngineGasTest --snap .gas-snapshot.runtime
-forge snapshot --match-contract RadixMatchingEngineGasTest --check .gas-snapshot.runtime
+forge snapshot --force --match-contract RadixMatchingEngineGasTest --snap .gas-snapshot.runtime
+forge snapshot --force --match-contract RadixMatchingEngineGasTest --check .gas-snapshot.runtime
 forge build --sizes
 slither src/RadixMatchingEngine.sol
 ```

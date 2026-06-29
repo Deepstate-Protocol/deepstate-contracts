@@ -23,10 +23,10 @@ gas-runtime:
 	forge test --force --match-contract RadixMatchingEngineGasTest --gas-report
 
 snapshot-runtime:
-	forge snapshot --match-contract RadixMatchingEngineGasTest --snap .gas-snapshot.runtime
+	forge snapshot --force --match-contract RadixMatchingEngineGasTest --snap .gas-snapshot.runtime
 
 snapshot-runtime-check:
-	forge snapshot --match-contract RadixMatchingEngineGasTest --check .gas-snapshot.runtime
+	forge snapshot --force --match-contract RadixMatchingEngineGasTest --check .gas-snapshot.runtime
 
 build-size:
 	forge build --sizes

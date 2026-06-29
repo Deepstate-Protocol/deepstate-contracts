@@ -1484,6 +1484,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.askRoot(), askRootBefore);
         assertEq(engine.ownerOfOrder(firstAsk), bob);
         assertEq(engine.ownerOfOrder(secondAsk), carol);
+        assertEq(engine.ownerOfOrder(_order(80, 0, _nonce(firstAsk))), address(0));
+        assertEq(engine.ownerOfOrder(_order(90, 0, _nonce(secondAsk))), address(0));
         assertEq(base.balanceOf(address(engine)), 2);
         assertEq(quote.balanceOf(address(engine)), 0);
         assertEq(base.balanceOf(poorTaker), 0);
@@ -1508,6 +1510,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.bidRoot(), bidRootBefore);
         assertEq(engine.ownerOfOrder(firstBid), alice);
         assertEq(engine.ownerOfOrder(secondBid), bob);
+        assertEq(engine.ownerOfOrder(_order(100, 0, _nonce(firstBid))), address(0));
+        assertEq(engine.ownerOfOrder(_order(90, 0, _nonce(secondBid))), address(0));
         assertEq(base.balanceOf(address(engine)), 0);
         assertEq(quote.balanceOf(address(engine)), 190);
         assertEq(base.balanceOf(poorTaker), 0);
