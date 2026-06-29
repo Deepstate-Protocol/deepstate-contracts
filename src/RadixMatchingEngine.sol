@@ -2,6 +2,7 @@
 pragma solidity 0.8.28;
 
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import {LibBit} from "solady/utils/LibBit.sol";
 
 /// @notice First-pass radix-style matching engine with strict bytes32 resting order nodes.
 contract RadixMatchingEngine {
@@ -415,29 +416,7 @@ contract RadixMatchingEngine {
         if (differingBits == 0) return 64;
 
         unchecked {
-            if (differingBits >> 32 == 0) {
-                prefixLength += 32;
-                differingBits <<= 32;
-            }
-            if (differingBits >> 48 == 0) {
-                prefixLength += 16;
-                differingBits <<= 16;
-            }
-            if (differingBits >> 56 == 0) {
-                prefixLength += 8;
-                differingBits <<= 8;
-            }
-            if (differingBits >> 60 == 0) {
-                prefixLength += 4;
-                differingBits <<= 4;
-            }
-            if (differingBits >> 62 == 0) {
-                prefixLength += 2;
-                differingBits <<= 2;
-            }
-            if (differingBits >> 63 == 0) {
-                ++prefixLength;
-            }
+            prefixLength = uint8(LibBit.clz(differingBits << 192));
         }
     }
 
