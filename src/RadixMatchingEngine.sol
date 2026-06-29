@@ -85,31 +85,30 @@ contract RadixMatchingEngine {
             bytes32 root = askRoot;
             if (root != bytes32(0)) {
                 bytes32 newRoot;
-                (newRoot, remaining, baseFilled, quoteAmount) = _match(root, limitPrice, remaining, false);
+                (newRoot, remaining, baseFilled, quoteAmount) = _matchAskTree(root, limitPrice, remaining);
                 if (newRoot != root) askRoot = newRoot;
             }
 
-            uint256 quoteCollateral = 0;
+            uint256 quoteCollateral = quoteAmount;
             if (remaining != 0) {
-                restingOrder = _rest(limitPrice, remaining, true);
-                quoteCollateral = _quoteValue(limitPrice, remaining);
-            }
-            unchecked {
-                quoteCollateral += quoteAmount;
+                restingOrder = _restBid(limitPrice, remaining);
+                unchecked {
+                    quoteCollateral += _quoteValue(limitPrice, remaining);
+                }
             }
 
-            if (quoteCollateral != 0) QUOTE_TOKEN.safeTransferFrom(msg.sender, address(this), quoteCollateral);
+            QUOTE_TOKEN.safeTransferFrom(msg.sender, address(this), quoteCollateral);
             if (baseFilled != 0) BASE_TOKEN.safeTransfer(msg.sender, baseFilled);
         } else {
             bytes32 root = bidRoot;
             if (root != bytes32(0)) {
                 bytes32 newRoot;
-                (newRoot, remaining, baseFilled, quoteAmount) = _match(root, limitPrice, remaining, true);
+                (newRoot, remaining, baseFilled, quoteAmount) = _matchBidTree(root, limitPrice, remaining);
                 if (newRoot != root) bidRoot = newRoot;
             }
 
             if (remaining != 0) {
-                restingOrder = _rest(limitPrice, remaining, false);
+                restingOrder = _restAsk(limitPrice, remaining);
             }
 
             BASE_TOKEN.safeTransferFrom(msg.sender, address(this), quantity);
@@ -184,7 +183,7 @@ contract RadixMatchingEngine {
         emit OrderCancelled(order, owner, baseAmount, quoteAmount);
     }
 
-    function _rest(uint24 price, uint192 quantity, bool isBid) private returns (bytes32 restingOrder) {
+    function _restBid(uint24 price, uint192 quantity) private returns (bytes32 restingOrder) {
         uint40 nonce = nextNonce;
         if (nonce == 0) revert NonceExhausted();
         unchecked {
@@ -193,38 +192,43 @@ contract RadixMatchingEngine {
 
         restingOrder = _pack(price, quantity, nonce);
         ownerOfOrder[restingOrder] = msg.sender;
+        bidRoot = _insertBid(bidRoot, restingOrder, (uint64(price) << 40) | uint64(nonce));
 
-        if (isBid) {
-            bidRoot = _insertBid(bidRoot, restingOrder, (uint64(price) << 40) | uint64(nonce));
-        } else {
-            unchecked {
-                askRoot = _insertAsk(askRoot, restingOrder, (uint64(_MAX_PRICE - price) << 40) | uint64(nonce));
-            }
-        }
-
-        emit OrderRested(restingOrder, msg.sender, isBid);
+        emit OrderRested(restingOrder, msg.sender, true);
     }
 
-    function _match(bytes32 root, uint24 limitPrice, uint192 remaining, bool restingIsBid)
+    function _restAsk(uint24 price, uint192 quantity) private returns (bytes32 restingOrder) {
+        uint40 nonce = nextNonce;
+        if (nonce == 0) revert NonceExhausted();
+        unchecked {
+            nextNonce = nonce - 1;
+        }
+
+        restingOrder = _pack(price, quantity, nonce);
+        ownerOfOrder[restingOrder] = msg.sender;
+        unchecked {
+            askRoot = _insertAsk(askRoot, restingOrder, (uint64(_MAX_PRICE - price) << 40) | uint64(nonce));
+        }
+
+        emit OrderRested(restingOrder, msg.sender, false);
+    }
+
+    function _matchAskTree(bytes32 root, uint24 limitPrice, uint192 remaining)
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
         bytes32 leftNode = tree[root].leftNode;
-        if (leftNode == bytes32(0)) return _matchLeaf(root, limitPrice, remaining, restingIsBid);
+        if (leftNode == bytes32(0)) return _matchAskLeaf(root, limitPrice, remaining);
 
-        return _matchBranch(root, leftNode, tree[root].rightNode, limitPrice, remaining, restingIsBid);
+        return _matchAskBranch(root, leftNode, tree[root].rightNode, limitPrice, remaining);
     }
 
-    function _matchBranch(
-        bytes32 root,
-        bytes32 leftNode,
-        bytes32 rightNode,
-        uint24 limitPrice,
-        uint192 remaining,
-        bool restingIsBid
-    ) private returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount) {
+    function _matchAskBranch(bytes32 root, bytes32 leftNode, bytes32 rightNode, uint24 limitPrice, uint192 remaining)
+        private
+        returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
+    {
         bytes32 oldRightNode = rightNode;
-        (rightNode, remaining, baseFilled, quoteAmount) = _match(rightNode, limitPrice, remaining, restingIsBid);
+        (rightNode, remaining, baseFilled, quoteAmount) = _matchAskTree(rightNode, limitPrice, remaining);
 
         if (remaining == 0 || rightNode != bytes32(0)) {
             if (rightNode == oldRightNode) return (root, remaining, baseFilled, quoteAmount);
@@ -233,8 +237,7 @@ contract RadixMatchingEngine {
 
         uint192 leftBaseFilled;
         uint256 leftQuoteAmount;
-        (leftNode, newRemaining, leftBaseFilled, leftQuoteAmount) =
-            _match(leftNode, limitPrice, remaining, restingIsBid);
+        (leftNode, newRemaining, leftBaseFilled, leftQuoteAmount) = _matchAskTree(leftNode, limitPrice, remaining);
 
         unchecked {
             baseFilled += leftBaseFilled;
@@ -244,21 +247,55 @@ contract RadixMatchingEngine {
         newRoot = _replaceBranch(leftNode, rightNode);
     }
 
-    function _matchLeaf(bytes32 root, uint24 limitPrice, uint192 remaining, bool restingIsBid)
+    function _matchBidTree(bytes32 root, uint24 limitPrice, uint192 remaining)
+        private
+        returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
+    {
+        bytes32 leftNode = tree[root].leftNode;
+        if (leftNode == bytes32(0)) return _matchBidLeaf(root, limitPrice, remaining);
+
+        return _matchBidBranch(root, leftNode, tree[root].rightNode, limitPrice, remaining);
+    }
+
+    function _matchBidBranch(bytes32 root, bytes32 leftNode, bytes32 rightNode, uint24 limitPrice, uint192 remaining)
+        private
+        returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
+    {
+        bytes32 oldRightNode = rightNode;
+        (rightNode, remaining, baseFilled, quoteAmount) = _matchBidTree(rightNode, limitPrice, remaining);
+
+        if (remaining == 0 || rightNode != bytes32(0)) {
+            if (rightNode == oldRightNode) return (root, remaining, baseFilled, quoteAmount);
+            return (_replaceBranch(leftNode, rightNode), remaining, baseFilled, quoteAmount);
+        }
+
+        uint192 leftBaseFilled;
+        uint256 leftQuoteAmount;
+        (leftNode, newRemaining, leftBaseFilled, leftQuoteAmount) = _matchBidTree(leftNode, limitPrice, remaining);
+
+        unchecked {
+            baseFilled += leftBaseFilled;
+            quoteAmount += leftQuoteAmount;
+        }
+
+        newRoot = _replaceBranch(leftNode, rightNode);
+    }
+
+    function _matchAskLeaf(bytes32 root, uint24 limitPrice, uint192 remaining)
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
         (uint24 restingPrice, uint192 restingQuantity) = _priceAndQuantity(root);
-        if (restingIsBid ? restingPrice < limitPrice : restingPrice > limitPrice) return (root, remaining, 0, 0);
+        if (restingPrice > limitPrice) return (root, remaining, 0, 0);
 
         uint192 fillQuantity = remaining < restingQuantity ? remaining : restingQuantity;
         quoteAmount = _quoteValue(restingPrice, fillQuantity);
 
-        emit OrderMatched(root, restingIsBid, fillQuantity, quoteAmount);
+        emit OrderMatched(root, false, fillQuantity, quoteAmount);
 
         unchecked {
             newRemaining = remaining - fillQuantity;
-            baseFilled += fillQuantity;
+            baseFilled = fillQuantity;
         }
 
         if (fillQuantity < restingQuantity) {
@@ -266,7 +303,33 @@ contract RadixMatchingEngine {
                 newRoot = _withQuantity(root, restingQuantity - fillQuantity);
             }
         } else {
-            ownerOfOrder[_sideKey(root)] = restingIsBid ? _BID_SENTINEL : _ASK_SENTINEL;
+            ownerOfOrder[_sideKey(root)] = _ASK_SENTINEL;
+        }
+    }
+
+    function _matchBidLeaf(bytes32 root, uint24 limitPrice, uint192 remaining)
+        private
+        returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
+    {
+        (uint24 restingPrice, uint192 restingQuantity) = _priceAndQuantity(root);
+        if (restingPrice < limitPrice) return (root, remaining, 0, 0);
+
+        uint192 fillQuantity = remaining < restingQuantity ? remaining : restingQuantity;
+        quoteAmount = _quoteValue(restingPrice, fillQuantity);
+
+        emit OrderMatched(root, true, fillQuantity, quoteAmount);
+
+        unchecked {
+            newRemaining = remaining - fillQuantity;
+            baseFilled = fillQuantity;
+        }
+
+        if (fillQuantity < restingQuantity) {
+            unchecked {
+                newRoot = _withQuantity(root, restingQuantity - fillQuantity);
+            }
+        } else {
+            ownerOfOrder[_sideKey(root)] = _BID_SENTINEL;
         }
     }
 
