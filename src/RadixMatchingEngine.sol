@@ -317,7 +317,17 @@ contract RadixMatchingEngine {
         private
         returns (bytes32)
     {
-        bytes32 newBranch = _storeBranch(leftNode, rightNode, isBidTree);
+        bytes32 newBranch;
+        if (leftNode == bytes32(0)) {
+            newBranch = rightNode;
+        } else if (rightNode == bytes32(0)) {
+            newBranch = leftNode;
+        } else {
+            newBranch = _branchNodeForChildren(leftNode, rightNode);
+            // Replacement callers preserve left/right ordering from an existing valid branch.
+            tree[newBranch] = Branch({leftNode: leftNode, rightNode: rightNode});
+        }
+
         if (newBranch != oldBranch && oldBranch != leftNode && oldBranch != rightNode) {
             if (_quantity(oldBranch) > _quantity(newBranch) || !_containsBranch(newBranch, oldBranch, isBidTree)) {
                 delete tree[oldBranch];
