@@ -221,22 +221,9 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
-        if (tree[root].leftNode == bytes32(0)) return _matchAskLeaf(root, limitPrice, remaining);
-
-        newRoot = root;
-        newRemaining = remaining;
-
-        while (newRoot != bytes32(0) && newRemaining != 0) {
-            uint192 fillQuantity;
-            uint256 fillQuoteAmount;
-            (newRoot, fillQuantity, fillQuoteAmount) = _matchBestAsk(newRoot, limitPrice, newRemaining);
-            if (fillQuantity == 0) break;
-
-            unchecked {
-                newRemaining -= fillQuantity;
-                baseFilled += fillQuantity;
-                quoteAmount += fillQuoteAmount;
-            }
+        (newRoot, baseFilled, quoteAmount) = _matchAskSubtree(root, limitPrice, remaining);
+        unchecked {
+            newRemaining = remaining - baseFilled;
         }
     }
 
@@ -244,22 +231,9 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
-        if (tree[root].leftNode == bytes32(0)) return _matchBidLeaf(root, limitPrice, remaining);
-
-        newRoot = root;
-        newRemaining = remaining;
-
-        while (newRoot != bytes32(0) && newRemaining != 0) {
-            uint192 fillQuantity;
-            uint256 fillQuoteAmount;
-            (newRoot, fillQuantity, fillQuoteAmount) = _matchBestBid(newRoot, limitPrice, newRemaining);
-            if (fillQuantity == 0) break;
-
-            unchecked {
-                newRemaining -= fillQuantity;
-                baseFilled += fillQuantity;
-                quoteAmount += fillQuoteAmount;
-            }
+        (newRoot, baseFilled, quoteAmount) = _matchBidSubtree(root, limitPrice, remaining);
+        unchecked {
+            newRemaining = remaining - baseFilled;
         }
     }
 
@@ -311,103 +285,85 @@ contract RadixMatchingEngine {
         }
     }
 
-    function _matchBestAsk(bytes32 root, uint24 limitPrice, uint192 remaining)
+    function _matchAskSubtree(bytes32 node, uint24 limitPrice, uint192 remaining)
         private
-        returns (bytes32 newRoot, uint192 fillQuantity, uint256 quoteAmount)
+        returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
     {
-        bytes32[] memory leftSiblings = new bytes32[](64);
-        uint256 depth = 0;
-        bytes32 node = root;
-
-        while (true) {
-            bytes32 leftNode = tree[node].leftNode;
-            if (leftNode == bytes32(0)) break;
-
-            bytes32 rightNode = tree[node].rightNode;
-            if (tree[rightNode].leftNode != bytes32(0)) {
-                uint24 subtreePrice = _singlePriceSubtree(rightNode);
-                uint192 subtreeQuantity = _quantity(rightNode);
-                if (subtreePrice != 0 && subtreePrice <= limitPrice && subtreeQuantity <= remaining) {
-                    quoteAmount = _quoteValue(subtreePrice, subtreeQuantity);
-                    emit OrderMatched(rightNode, false, subtreeQuantity, quoteAmount);
-
-                    newRoot = leftNode;
-                    fillQuantity = subtreeQuantity;
-                    while (depth != 0) {
-                        unchecked {
-                            --depth;
-                        }
-                        newRoot = _replaceBranch(leftSiblings[depth], newRoot);
-                    }
-                    return (newRoot, fillQuantity, quoteAmount);
-                }
-            }
-
-            leftSiblings[depth] = leftNode;
-            node = rightNode;
-            unchecked {
-                ++depth;
-            }
+        bytes32 leftNode = tree[node].leftNode;
+        if (leftNode == bytes32(0)) {
+            (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(node, limitPrice, remaining);
+            return (newNode, fillQuantity, quoteAmount);
         }
 
-        (newRoot,, fillQuantity, quoteAmount) = _matchAskLeaf(node, limitPrice, remaining);
-        if (fillQuantity == 0) return (root, 0, 0);
+        uint192 nodeQuantity = _quantity(node);
+        if (nodeQuantity <= remaining && _leftmostLeafPrice(node) <= limitPrice) {
+            quoteAmount = _consumeSubtree(node, false);
+            return (bytes32(0), nodeQuantity, quoteAmount);
+        }
 
-        while (depth != 0) {
-            unchecked {
-                --depth;
-            }
-            newRoot = _replaceBranch(leftSiblings[depth], newRoot);
+        bytes32 rightNode = tree[node].rightNode;
+        bytes32 newRightNode;
+        uint192 rightFillQuantity;
+        uint256 rightQuoteAmount;
+        (newRightNode, rightFillQuantity, rightQuoteAmount) = _matchAskSubtree(rightNode, limitPrice, remaining);
+        if (rightFillQuantity == 0) return (node, 0, 0);
+
+        uint192 leftFillQuantity = 0;
+        uint256 leftQuoteAmount = 0;
+        bytes32 newLeftNode = leftNode;
+        unchecked {
+            remaining -= rightFillQuantity;
+        }
+
+        if (remaining != 0) {
+            (newLeftNode, leftFillQuantity, leftQuoteAmount) = _matchAskSubtree(leftNode, limitPrice, remaining);
+        }
+
+        newNode = _replaceBranch(newLeftNode, newRightNode);
+        unchecked {
+            fillQuantity = rightFillQuantity + leftFillQuantity;
+            quoteAmount = rightQuoteAmount + leftQuoteAmount;
         }
     }
 
-    function _matchBestBid(bytes32 root, uint24 limitPrice, uint192 remaining)
+    function _matchBidSubtree(bytes32 node, uint24 limitPrice, uint192 remaining)
         private
-        returns (bytes32 newRoot, uint192 fillQuantity, uint256 quoteAmount)
+        returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
     {
-        bytes32[] memory leftSiblings = new bytes32[](64);
-        uint256 depth = 0;
-        bytes32 node = root;
-
-        while (true) {
-            bytes32 leftNode = tree[node].leftNode;
-            if (leftNode == bytes32(0)) break;
-
-            bytes32 rightNode = tree[node].rightNode;
-            if (tree[rightNode].leftNode != bytes32(0)) {
-                uint24 subtreePrice = _singlePriceSubtree(rightNode);
-                uint192 subtreeQuantity = _quantity(rightNode);
-                if (subtreePrice != 0 && subtreePrice >= limitPrice && subtreeQuantity <= remaining) {
-                    quoteAmount = _quoteValue(subtreePrice, subtreeQuantity);
-                    emit OrderMatched(rightNode, true, subtreeQuantity, quoteAmount);
-
-                    newRoot = leftNode;
-                    fillQuantity = subtreeQuantity;
-                    while (depth != 0) {
-                        unchecked {
-                            --depth;
-                        }
-                        newRoot = _replaceBranch(leftSiblings[depth], newRoot);
-                    }
-                    return (newRoot, fillQuantity, quoteAmount);
-                }
-            }
-
-            leftSiblings[depth] = leftNode;
-            node = rightNode;
-            unchecked {
-                ++depth;
-            }
+        bytes32 leftNode = tree[node].leftNode;
+        if (leftNode == bytes32(0)) {
+            (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(node, limitPrice, remaining);
+            return (newNode, fillQuantity, quoteAmount);
         }
 
-        (newRoot,, fillQuantity, quoteAmount) = _matchBidLeaf(node, limitPrice, remaining);
-        if (fillQuantity == 0) return (root, 0, 0);
+        uint192 nodeQuantity = _quantity(node);
+        if (nodeQuantity <= remaining && _leftmostLeafPrice(node) >= limitPrice) {
+            quoteAmount = _consumeSubtree(node, true);
+            return (bytes32(0), nodeQuantity, quoteAmount);
+        }
 
-        while (depth != 0) {
-            unchecked {
-                --depth;
-            }
-            newRoot = _replaceBranch(leftSiblings[depth], newRoot);
+        bytes32 rightNode = tree[node].rightNode;
+        bytes32 newRightNode;
+        uint192 rightFillQuantity;
+        uint256 rightQuoteAmount;
+        (newRightNode, rightFillQuantity, rightQuoteAmount) = _matchBidSubtree(rightNode, limitPrice, remaining);
+        if (rightFillQuantity == 0) return (node, 0, 0);
+
+        uint192 leftFillQuantity = 0;
+        uint256 leftQuoteAmount = 0;
+        bytes32 newLeftNode = leftNode;
+        unchecked {
+            remaining -= rightFillQuantity;
+        }
+
+        if (remaining != 0) {
+            (newLeftNode, leftFillQuantity, leftQuoteAmount) = _matchBidSubtree(leftNode, limitPrice, remaining);
+        }
+
+        newNode = _replaceBranch(newLeftNode, newRightNode);
+        unchecked {
+            fillQuantity = rightFillQuantity + leftFillQuantity;
+            quoteAmount = rightQuoteAmount + leftQuoteAmount;
         }
     }
 
@@ -567,6 +523,39 @@ contract RadixMatchingEngine {
 
         price = _price(leftmost);
         if (price != _price(rightmost)) return 0;
+    }
+
+    function _leftmostLeafPrice(bytes32 node) private view returns (uint24 price) {
+        while (true) {
+            bytes32 leftNode = tree[node].leftNode;
+            if (leftNode == bytes32(0)) {
+                price = _price(node);
+                break;
+            }
+            node = leftNode;
+        }
+    }
+
+    function _consumeSubtree(bytes32 node, bool restingIsBid) private returns (uint256 quoteAmount) {
+        uint192 quantity = _quantity(node);
+        bytes32 leftNode = tree[node].leftNode;
+        if (leftNode == bytes32(0)) {
+            quoteAmount = _quoteValue(_price(node), quantity);
+            emit OrderMatched(node, restingIsBid, quantity, quoteAmount);
+            return quoteAmount;
+        }
+
+        uint24 price = _singlePriceSubtree(node);
+        if (price != 0) {
+            quoteAmount = _quoteValue(price, quantity);
+            emit OrderMatched(node, restingIsBid, quantity, quoteAmount);
+            return quoteAmount;
+        }
+
+        quoteAmount = _consumeSubtree(tree[node].rightNode, restingIsBid);
+        unchecked {
+            quoteAmount += _consumeSubtree(leftNode, restingIsBid);
+        }
     }
 
     function _bidSortKey(bytes32 order) private pure returns (uint64) {
