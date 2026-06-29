@@ -2004,6 +2004,58 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.askRoot(), bytes32(0));
     }
 
+    function test_ManySamePriceBidsPreserveTimePriority() public {
+        uint256 orderCount = 32;
+        uint192 fillQuantity = 16;
+        uint256 fillCount = fillQuantity;
+        uint24 price = 77;
+
+        bytes32[] memory bids = new bytes32[](orderCount);
+        address[] memory makers = new address[](orderCount);
+
+        for (uint256 i; i < orderCount; ++i) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            makers[i] = address(uint160(0x2000 + i));
+            _fundAndApprove(makers[i]);
+
+            vm.prank(makers[i]);
+            bids[i] = engine.fill(_order(price, 1, 0), true);
+
+            assertEq(uint256(_nonce(bids[i])), uint256(MAX_ORDER_NONCE) - i);
+            assertEq(engine.ownerOfOrder(bids[i]), makers[i]);
+        }
+
+        address taker = address(0xA5C);
+        _fundAndApprove(taker);
+
+        vm.prank(taker);
+        bytes32 restingAsk = engine.fill(_order(price, fillQuantity, 0), false);
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(base.balanceOf(taker), 1_000_000 - fillCount);
+        assertEq(quote.balanceOf(taker), 1_000_000 + price * fillCount);
+
+        for (uint256 i; i < fillCount; ++i) {
+            vm.prank(makers[i]);
+            (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(bids[i]);
+
+            assertEq(baseAmount, 1);
+            assertEq(quoteAmount, 0);
+            assertEq(engine.ownerOfOrder(bids[i]), address(0));
+        }
+
+        for (uint256 i = fillCount; i < orderCount; ++i) {
+            vm.prank(makers[i]);
+            (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(bids[i]);
+
+            assertEq(baseAmount, 0);
+            assertEq(quoteAmount, price);
+            assertEq(engine.ownerOfOrder(bids[i]), address(0));
+        }
+
+        assertEq(engine.bidRoot(), bytes32(0));
+    }
+
     function test_MatchingStopsWhenNextBestPriceDoesNotCross() public {
         vm.prank(alice);
         bytes32 highBid = engine.fill(_order(100, 1, 0), true);
