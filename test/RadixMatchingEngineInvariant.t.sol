@@ -656,6 +656,23 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         _assertUniqueLiveLeafSideKeys(engine.askRoot(), seenSideKeys, seenCount);
     }
 
+    function invariant_ActiveOrderSideKeysAreUnique() public view {
+        uint256 length = handler.orderCount();
+        bytes32[] memory seenSideKeys = new bytes32[](length);
+        uint256 seenCount;
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,,, bool active) = handler.orderAt(i);
+            if (!active) continue;
+
+            bytes32 sideKey = _sideKey(order);
+            for (uint256 j; j < seenCount; ++j) {
+                assertTrue(seenSideKeys[j] != sideKey, "duplicate active side key");
+            }
+            seenSideKeys[seenCount++] = sideKey;
+        }
+    }
+
     function invariant_BooksAreNotCrossed() public view {
         SubtreeStats memory bidStats = _assertSubtree(engine.bidRoot(), 0, true);
         SubtreeStats memory askStats = _assertSubtree(engine.askRoot(), 0, false);
