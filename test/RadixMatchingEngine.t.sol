@@ -494,6 +494,52 @@ contract RadixMatchingEngineTest is Test {
         assertTrue(rightNode != bytes32(0));
     }
 
+    function test_DuplicateBidNonceCorruptionRevertsWithoutOverwritingOwner() public {
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(10, 1, 0), true);
+
+        assertEq(restingBid, _order(10, 1, MAX_ORDER_NONCE));
+
+        bytes32 nextNonceSlot = bytes32(uint256(4));
+        vm.store(address(engine), nextNonceSlot, bytes32(uint256(MAX_ORDER_NONCE)));
+
+        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
+        uint256 bobQuoteBefore = quote.balanceOf(bob);
+
+        vm.prank(bob);
+        vm.expectRevert(RadixMatchingEngine.DuplicateOrder.selector);
+        engine.fill(_order(10, 1, 0), true);
+
+        assertEq(engine.bidRoot(), restingBid);
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertEq(engine.nextNonce(), MAX_ORDER_NONCE);
+        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
+        assertEq(quote.balanceOf(bob), bobQuoteBefore);
+    }
+
+    function test_DuplicateAskNonceCorruptionRevertsWithoutOverwritingOwner() public {
+        vm.prank(alice);
+        bytes32 restingAsk = engine.fill(_order(10, 1, 0), false);
+
+        assertEq(restingAsk, _order(10, 1, MAX_ORDER_NONCE));
+
+        bytes32 nextNonceSlot = bytes32(uint256(4));
+        vm.store(address(engine), nextNonceSlot, bytes32(uint256(MAX_ORDER_NONCE)));
+
+        uint256 engineBaseBefore = base.balanceOf(address(engine));
+        uint256 bobBaseBefore = base.balanceOf(bob);
+
+        vm.prank(bob);
+        vm.expectRevert(RadixMatchingEngine.DuplicateOrder.selector);
+        engine.fill(_order(10, 1, 0), false);
+
+        assertEq(engine.askRoot(), restingAsk);
+        assertEq(engine.ownerOfOrder(restingAsk), alice);
+        assertEq(engine.nextNonce(), MAX_ORDER_NONCE);
+        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
+        assertEq(base.balanceOf(bob), bobBaseBefore);
+    }
+
     function test_NonceExhaustionRevertsWithoutMutatingBook() public {
         bytes32 nextNonceSlot = bytes32(uint256(4));
         vm.store(address(engine), nextNonceSlot, bytes32(uint256(1)));
