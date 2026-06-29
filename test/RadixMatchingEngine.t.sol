@@ -671,6 +671,42 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.bidRoot(), bytes32(0));
     }
 
+    function test_MaxBidPartialMatchAndRestDoesNotOverflowCollateral() public {
+        uint24 price = type(uint24).max;
+        uint192 quantity = type(uint192).max;
+        uint192 restingQuantity = quantity - 1;
+        uint256 totalQuote = uint256(price) * uint256(quantity);
+
+        quote.mint(alice, type(uint216).max);
+
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(price, 1, 0), false);
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(price, quantity, 0), true);
+
+        assertEq(restingBid, _order(price, restingQuantity, MAX_ORDER_NONCE - 1));
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(engine.bidRoot(), restingBid);
+        assertEq(base.balanceOf(alice), 1_000_001);
+        assertEq(quote.balanceOf(address(engine)), totalQuote);
+
+        vm.prank(bob);
+        (uint256 bobBaseAmount, uint256 bobQuoteAmount) = engine.cancel(restingAsk);
+
+        assertEq(bobBaseAmount, 0);
+        assertEq(bobQuoteAmount, price);
+        assertEq(quote.balanceOf(address(engine)), uint256(price) * uint256(restingQuantity));
+
+        vm.prank(alice);
+        (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = engine.cancel(restingBid);
+
+        assertEq(aliceBaseAmount, 0);
+        assertEq(aliceQuoteAmount, uint256(price) * uint256(restingQuantity));
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
     function test_MaxPriceAndQuantityAskCancels() public {
         uint24 price = type(uint24).max;
         uint192 quantity = type(uint192).max;
