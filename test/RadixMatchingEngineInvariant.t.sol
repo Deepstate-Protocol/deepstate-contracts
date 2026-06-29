@@ -45,6 +45,8 @@ contract RadixMatchingEngineHandler is Test {
         QUOTE = quote_;
         ENGINE = engine_;
 
+        actors.push(address(1));
+        actors.push(address(2));
         actors.push(address(0xA11CE));
         actors.push(address(0xB0B));
         actors.push(address(0xCA201));
