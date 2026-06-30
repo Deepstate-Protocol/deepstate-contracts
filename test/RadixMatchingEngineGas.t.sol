@@ -150,6 +150,52 @@ contract RadixMatchingEngineGasTest is Test {
         vm.resumeGasMetering();
     }
 
+    function testGas_FillBidConsumesDirtySamePriceAskSubtree() public {
+        vm.pauseGasMetering();
+        bytes32 firstAsk;
+        for (uint256 i; i < 16; ++i) {
+            vm.prank(bob);
+            bytes32 restingAsk = engine.fill(_order(90, 1, 0), false);
+            if (i == 0) firstAsk = restingAsk;
+        }
+
+        vm.prank(alice);
+        engine.fill(_order(90, 1, 0), true);
+
+        vm.prank(alice);
+        vm.resumeGasMetering();
+        bytes32 restingBid = engine.fill(_order(90, 15, 0), true);
+        vm.pauseGasMetering();
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(engine.ownerOfOrder(firstAsk), bob);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_FillAskConsumesDirtySamePriceBidSubtree() public {
+        vm.pauseGasMetering();
+        bytes32 firstBid;
+        for (uint256 i; i < 16; ++i) {
+            vm.prank(bob);
+            bytes32 restingBid = engine.fill(_order(90, 1, 0), true);
+            if (i == 0) firstBid = restingBid;
+        }
+
+        vm.prank(alice);
+        engine.fill(_order(90, 1, 0), false);
+
+        vm.prank(alice);
+        vm.resumeGasMetering();
+        bytes32 restingAsk = engine.fill(_order(90, 15, 0), false);
+        vm.pauseGasMetering();
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(engine.ownerOfOrder(firstBid), bob);
+        vm.resumeGasMetering();
+    }
+
     function testGas_FillAskConsumesFullDepthBidComb() public {
         vm.pauseGasMetering();
         _buildFullDepthBidNonceComb();

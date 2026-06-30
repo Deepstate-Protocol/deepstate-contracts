@@ -385,7 +385,7 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
-        (newRoot, baseFilled, quoteAmount) = _matchAskRightSpine(root, limitPrice, remaining);
+        (newRoot, baseFilled, quoteAmount) = _matchAskRightSpine(root, limitPrice, remaining, _rightSpineDirty(false));
         unchecked {
             newRemaining = remaining - baseFilled;
         }
@@ -403,7 +403,7 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
-        (newRoot, baseFilled, quoteAmount) = _matchBidRightSpine(root, limitPrice, remaining);
+        (newRoot, baseFilled, quoteAmount) = _matchBidRightSpine(root, limitPrice, remaining, _rightSpineDirty(true));
         unchecked {
             newRemaining = remaining - baseFilled;
         }
@@ -483,9 +483,10 @@ contract RadixMatchingEngine {
     /// @dev
     /// The ask tree's rightmost path is best because ask prices are inverted in the sort key.
     /// Right-spine branch words may be stale after previous optimized updates, so this function
-    /// walks the right spine explicitly and only uses aggregate consumption after it turns into an
-    /// exact left subtree.
-    function _matchAskRightSpine(bytes32 node, uint24 limitPrice, uint192 remaining)
+    /// only aggregate-consumes same-price right-spine subtrees. Mixed-price aggregate consumption
+    /// remains reserved for exact off-spine subtrees to avoid reintroducing the branch rewrite
+    /// cascade this path is designed to skip.
+    function _matchAskRightSpine(bytes32 node, uint24 limitPrice, uint192 remaining, bool dirty)
         private
         returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
     {
@@ -496,10 +497,20 @@ contract RadixMatchingEngine {
         }
 
         bytes32 rightNode = tree[node].rightNode;
+        if (_price(leftNode) == _price(rightNode)) {
+            fillQuantity = _samePriceRightSpineFillQuantity(node, limitPrice, remaining, false, dirty);
+            if (fillQuantity != 0) {
+                quoteAmount = _quoteValue(_price(node), fillQuantity);
+                emit OrderMatched(dirty ? _withQuantity(node, fillQuantity) : node, false, fillQuantity, quoteAmount);
+                return (bytes32(0), fillQuantity, quoteAmount);
+            }
+        }
+
         bytes32 newRightNode;
         uint192 rightFillQuantity;
         uint256 rightQuoteAmount;
-        (newRightNode, rightFillQuantity, rightQuoteAmount) = _matchAskRightSpine(rightNode, limitPrice, remaining);
+        (newRightNode, rightFillQuantity, rightQuoteAmount) =
+            _matchAskRightSpine(rightNode, limitPrice, remaining, dirty);
         if (rightFillQuantity == 0) return (node, 0, 0);
 
         uint192 leftFillQuantity = 0;
@@ -579,9 +590,11 @@ contract RadixMatchingEngine {
     /// @return quoteAmount Quote value consumed from this subtree.
     /// @dev
     /// The bid tree's rightmost path is best because higher prices sort later. Right-spine branch
-    /// words may be stale after previous optimized updates, so this function walks the right spine
-    /// explicitly and only uses aggregate consumption after it turns into an exact left subtree.
-    function _matchBidRightSpine(bytes32 node, uint24 limitPrice, uint192 remaining)
+    /// words may be stale after previous optimized updates, so this function only aggregate-consumes
+    /// same-price right-spine subtrees. Mixed-price aggregate consumption remains reserved for exact
+    /// off-spine subtrees to avoid reintroducing the branch rewrite cascade this path is designed
+    /// to skip.
+    function _matchBidRightSpine(bytes32 node, uint24 limitPrice, uint192 remaining, bool dirty)
         private
         returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
     {
@@ -592,10 +605,20 @@ contract RadixMatchingEngine {
         }
 
         bytes32 rightNode = tree[node].rightNode;
+        if (_price(leftNode) == _price(rightNode)) {
+            fillQuantity = _samePriceRightSpineFillQuantity(node, limitPrice, remaining, true, dirty);
+            if (fillQuantity != 0) {
+                quoteAmount = _quoteValue(_price(node), fillQuantity);
+                emit OrderMatched(dirty ? _withQuantity(node, fillQuantity) : node, true, fillQuantity, quoteAmount);
+                return (bytes32(0), fillQuantity, quoteAmount);
+            }
+        }
+
         bytes32 newRightNode;
         uint192 rightFillQuantity;
         uint256 rightQuoteAmount;
-        (newRightNode, rightFillQuantity, rightQuoteAmount) = _matchBidRightSpine(rightNode, limitPrice, remaining);
+        (newRightNode, rightFillQuantity, rightQuoteAmount) =
+            _matchBidRightSpine(rightNode, limitPrice, remaining, dirty);
         if (rightFillQuantity == 0) return (node, 0, 0);
 
         uint192 leftFillQuantity = 0;
@@ -855,6 +878,50 @@ contract RadixMatchingEngine {
 
         bytes32 rightNode = _materializeRightSpine(tree[node].rightNode);
         return _replaceBranch(leftNode, rightNode);
+    }
+
+    /// @notice Return the aggregate quantity for a fully crossing same-price subtree on the global right spine.
+    /// @param node Right-spine branch to inspect.
+    /// @param limitPrice Incoming order limit price.
+    /// @param remaining Incoming base quantity available.
+    /// @param restingIsBid True if the resting subtree is from the bid tree.
+    /// @param dirty True if right-spine branch words may have stale aggregate quantity/path fields.
+    /// @return fillQuantity Actual base quantity consumable as one same-price aggregate, or zero.
+    /// @dev
+    /// Dirty right-spine anchors keep correct child pointers but stale packed aggregate fields. For
+    /// same-price subtrees the quote value is still price * actual quantity, so this helper recovers
+    /// the one-event aggregate path without rewriting every ancestor branch. Mixed-price dirty
+    /// subtrees intentionally fall back to the recursive matcher because their quote value cannot be
+    /// computed from one price.
+    function _samePriceRightSpineFillQuantity(
+        bytes32 node,
+        uint24 limitPrice,
+        uint192 remaining,
+        bool restingIsBid,
+        bool dirty
+    ) private view returns (uint192 fillQuantity) {
+        uint24 price = _singlePriceSubtree(node);
+        if (price == 0) return 0;
+        if (restingIsBid ? price < limitPrice : price > limitPrice) return 0;
+
+        fillQuantity = dirty ? _actualSubtreeQuantity(node) : _quantity(node);
+        if (fillQuantity > remaining) return 0;
+    }
+
+    /// @notice Compute the live leaf quantity under a subtree by following child pointers.
+    /// @param node Subtree root.
+    /// @return quantity Sum of live leaf quantities.
+    /// @dev Used only when a right-spine anchor may be stale and its packed quantity cannot be
+    /// trusted. Left subtrees below a dirty right spine are exact, but recursion is simpler and
+    /// still bounded by the radix tree depth plus the consumed same-price subtree size.
+    function _actualSubtreeQuantity(bytes32 node) private view returns (uint192 quantity) {
+        bytes32 leftNode = tree[node].leftNode;
+        if (leftNode == bytes32(0)) return _quantity(node);
+
+        quantity = _actualSubtreeQuantity(leftNode);
+        unchecked {
+            quantity += _actualSubtreeQuantity(tree[node].rightNode);
+        }
     }
 
     /// @notice Create and store a two-child branch for two nonzero nodes.

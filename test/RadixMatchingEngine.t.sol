@@ -2013,9 +2013,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.askRoot(), aggregate);
 
         vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(firstAsk, false, 2, 100);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(secondAsk, false, 3, 150);
+        emit OrderMatched(aggregate, false, 5, 250);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(price, 5, 0), true);
@@ -2060,9 +2058,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.bidRoot(), aggregate);
 
         vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(firstBid, true, 2, 140);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(secondBid, true, 3, 210);
+        emit OrderMatched(aggregate, true, 5, 350);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(price, 5, 0), false);
@@ -2092,6 +2088,86 @@ contract RadixMatchingEngineTest is Test {
         assertEq(secondQuoteAmount, 0);
         assertEq(engine.ownerOfOrder(secondBid), address(0));
         assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(secondBid))), address(0));
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_DirtySamePriceAskRightSpineAggregatesAndClaims() public {
+        uint24 price = 60;
+
+        vm.prank(alice);
+        bytes32 firstAsk = engine.fill(_order(price, 2, 0), false);
+        vm.prank(bob);
+        bytes32 secondAsk = engine.fill(_order(price, 3, 0), false);
+
+        bytes32 aggregate = _branchFor(firstAsk, secondAsk);
+        assertEq(engine.askRoot(), aggregate);
+
+        vm.prank(carol);
+        engine.fill(_order(price, 1, 0), true);
+
+        assertEq(engine.askRoot(), aggregate);
+        assertEq(_subtreeQuantity(engine.askRoot()), 4);
+
+        bytes32 dirtyAggregate = _order(price, 4, _nonce(firstAsk));
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(dirtyAggregate, false, 4, 240);
+
+        vm.prank(carol);
+        bytes32 restingBid = engine.fill(_order(price, 4, 0), true);
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+
+        vm.prank(alice);
+        (uint256 firstBaseAmount, uint256 firstQuoteAmount) = engine.cancel(firstAsk);
+        vm.prank(bob);
+        (uint256 secondBaseAmount, uint256 secondQuoteAmount) = engine.cancel(secondAsk);
+
+        assertEq(firstBaseAmount, 0);
+        assertEq(firstQuoteAmount, 120);
+        assertEq(secondBaseAmount, 0);
+        assertEq(secondQuoteAmount, 180);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_DirtySamePriceBidRightSpineAggregatesAndClaims() public {
+        uint24 price = 80;
+
+        vm.prank(alice);
+        bytes32 firstBid = engine.fill(_order(price, 2, 0), true);
+        vm.prank(bob);
+        bytes32 secondBid = engine.fill(_order(price, 3, 0), true);
+
+        bytes32 aggregate = _branchFor(firstBid, secondBid);
+        assertEq(engine.bidRoot(), aggregate);
+
+        vm.prank(carol);
+        engine.fill(_order(price, 1, 0), false);
+
+        assertEq(engine.bidRoot(), aggregate);
+        assertEq(_subtreeQuantity(engine.bidRoot()), 4);
+
+        bytes32 dirtyAggregate = _order(price, 4, _nonce(firstBid));
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(dirtyAggregate, true, 4, 320);
+
+        vm.prank(carol);
+        bytes32 restingAsk = engine.fill(_order(price, 4, 0), false);
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(engine.bidRoot(), bytes32(0));
+
+        vm.prank(alice);
+        (uint256 firstBaseAmount, uint256 firstQuoteAmount) = engine.cancel(firstBid);
+        vm.prank(bob);
+        (uint256 secondBaseAmount, uint256 secondQuoteAmount) = engine.cancel(secondBid);
+
+        assertEq(firstBaseAmount, 2);
+        assertEq(firstQuoteAmount, 0);
+        assertEq(secondBaseAmount, 3);
+        assertEq(secondQuoteAmount, 0);
         assertEq(base.balanceOf(address(engine)), 0);
         assertEq(quote.balanceOf(address(engine)), 0);
     }
