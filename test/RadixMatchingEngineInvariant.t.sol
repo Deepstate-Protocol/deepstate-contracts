@@ -357,11 +357,14 @@ contract RadixMatchingEngineHandler is Test {
             } else if (topic == ORDER_MATCHED_TOPIC) {
                 ++matchedEventCount;
                 assertEq(entry.topics.length, 3, "matched topic count");
-                assertTrue(entry.topics[1] != bytes32(0), "matched node log");
+                bytes32 restingNode = entry.topics[1];
+                assertTrue(restingNode != bytes32(0), "matched node log");
                 assertEq(entry.topics[2], _boolTopic(!isBid), "matched side log");
 
                 (uint192 eventQuantity, uint256 eventQuoteAmount) = abi.decode(entry.data, (uint192, uint256));
                 assertGt(eventQuantity, 0, "matched quantity log");
+                assertLe(eventQuantity, _quantity(restingNode), "matched node quantity log");
+                assertEq(eventQuoteAmount, _quoteValue(_price(restingNode), eventQuantity), "matched quote price log");
                 matchedQuantity += eventQuantity;
                 matchedQuoteAmount += eventQuoteAmount;
             } else if (topic == ORDER_CANCELLED_TOPIC) {
@@ -376,6 +379,7 @@ contract RadixMatchingEngineHandler is Test {
         assertEq(matchedQuoteAmount, quoteAmount, "matched quote sum");
         assertEq(matchedEventCount == 0, baseFilled == 0, "matched event count");
         assertEq(remaining == 0, restingOrder == bytes32(0), "resting event remainder");
+        assertTrue(restedEventCount != 0 || matchedEventCount != 0, "fill event count");
     }
 
     function _assertCancelLogs(
@@ -402,6 +406,7 @@ contract RadixMatchingEngineHandler is Test {
                 (uint256 eventBaseAmount, uint256 eventQuoteAmount) = abi.decode(entry.data, (uint256, uint256));
                 assertEq(eventBaseAmount, baseAmount, "cancel base log");
                 assertEq(eventQuoteAmount, quoteAmount, "cancel quote log");
+                assertTrue(eventBaseAmount != 0 || eventQuoteAmount != 0, "cancel empty log");
             } else if (topic == ORDER_RESTED_TOPIC || topic == ORDER_MATCHED_TOPIC) {
                 fail("fill event during cancel");
             } else {
