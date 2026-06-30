@@ -460,6 +460,37 @@ contract RadixMatchingEngineTest is Test {
         vm.stopPrank();
     }
 
+    function test_ReentrancyGuardClearsAfterFillRevert() public {
+        vm.startPrank(alice);
+
+        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        engine.fill(_order(0, 1, 0), true);
+
+        bytes32 restingBid = engine.fill(_order(10, 1, 0), true);
+        vm.stopPrank();
+
+        assertEq(restingBid, _order(10, 1, MAX_ORDER_NONCE));
+        assertEq(engine.bidRoot(), restingBid);
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+    }
+
+    function test_ReentrancyGuardClearsAfterCancelRevert() public {
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(10, 1, 0), true);
+
+        vm.startPrank(alice);
+        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        engine.cancel(_order(10, 0, _nonce(restingBid)));
+
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(restingBid);
+        vm.stopPrank();
+
+        assertEq(baseAmount, 0);
+        assertEq(quoteAmount, 10);
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(engine.ownerOfOrder(restingBid), address(0));
+    }
+
     function testFuzz_InvalidFillDoesNotMutate(bytes32 order, bool isBid) public {
         vm.assume(_price(order) == 0 || _quantity(order) == 0 || _nonce(order) != 0);
 
