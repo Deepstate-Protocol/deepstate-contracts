@@ -802,6 +802,28 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
     }
 
+    function invariant_ActiveOrdersHaveExpectedCancelRouting() public view {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,, bool isBid, bool active) = handler.orderAt(i);
+            if (!active) continue;
+
+            bytes32 root = isBid ? engine.bidRoot() : engine.askRoot();
+            bytes32 liveLeaf = _findByContractRouting(root, order, isBid);
+            uint192 remainingQuantity = handler.remainingQuantityAt(i);
+
+            if (remainingQuantity == 0) {
+                assertEq(liveLeaf, bytes32(0), "filled order cancel route");
+                continue;
+            }
+
+            assertTrue(liveLeaf != bytes32(0), "cancel route missing order");
+            assertEq(_sideKey(liveLeaf), _sideKey(order), "cancel route side key");
+            assertEq(_quantity(liveLeaf), remainingQuantity, "cancel route quantity");
+        }
+    }
+
     function invariant_LiveLeavesAreBackedByActiveOrders() public view {
         _assertLeavesBackedByActiveOrders(engine.bidRoot(), true);
         _assertLeavesBackedByActiveOrders(engine.askRoot(), false);
@@ -1149,6 +1171,23 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
 
         return root != bytes32(0) && _sortKey(root, isBidTree) == targetKey ? root : bytes32(0);
+    }
+
+    function _findByContractRouting(bytes32 root, bytes32 order, bool isBidTree) private view returns (bytes32) {
+        uint64 targetKey = _sortKey(order, isBidTree);
+
+        while (root != bytes32(0)) {
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(root);
+            if (leftNode == bytes32(0)) return _sortKey(root, isBidTree) == targetKey ? root : bytes32(0);
+
+            uint64 leftKey = _sortKey(leftNode, isBidTree);
+            uint8 branchDepth = _commonPrefix(leftKey, _sortKey(rightNode, isBidTree));
+            if (_commonPrefix(targetKey, leftKey) < branchDepth) return bytes32(0);
+
+            root = _bit(targetKey, branchDepth) ? rightNode : leftNode;
+        }
+
+        return bytes32(0);
     }
 
     function _isBranch(bytes32 node) private view returns (bool) {
