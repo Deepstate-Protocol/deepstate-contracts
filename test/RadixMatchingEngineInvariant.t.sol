@@ -1086,6 +1086,10 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         assertFalse(_bit(leftStats.maxKey, branchDepth), "left max bit");
         assertTrue(_bit(rightStats.minKey, branchDepth), "right min bit");
         assertTrue(_bit(rightStats.maxKey, branchDepth), "right max bit");
+        assertEq(_commonPrefix(leftStats.minKey, rightStats.minKey), branchDepth, "branch min split");
+        assertEq(_commonPrefix(leftStats.minKey, rightStats.maxKey), branchDepth, "branch outer split");
+        assertEq(_commonPrefix(leftStats.maxKey, rightStats.minKey), branchDepth, "branch inner split");
+        assertEq(_commonPrefix(leftStats.maxKey, rightStats.maxKey), branchDepth, "branch max split");
         if (leftStats.minKey != leftStats.maxKey) {
             assertGe(_commonPrefix(leftStats.minKey, leftStats.maxKey), branchDepth + 1, "left prefix");
         }
