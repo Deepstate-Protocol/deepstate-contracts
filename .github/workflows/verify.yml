@@ -33,7 +33,7 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: nightly
+          version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
 
       - name: Install Python
         uses: actions/setup-python@v5

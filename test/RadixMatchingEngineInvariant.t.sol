@@ -744,6 +744,12 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
     }
 
+    function invariant_AllActiveOrdersCanCancelAndClaimSequentially() public {
+        uint256 snapshotId = vm.snapshotState();
+        _assertAllActiveOrdersCanCancelAndClaimSequentially();
+        assertTrue(vm.revertToState(snapshotId), "restore after sequential cancel simulation");
+    }
+
     function invariant_TotalTokenSupplyConserved() public view {
         assertEq(_trackedBalanceSum(base), base.totalSupply(), "base supply");
         assertEq(_trackedBalanceSum(quote), quote.totalSupply(), "quote supply");
@@ -1095,6 +1101,44 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
 
         assertTrue(vm.revertToState(snapshotId), "restore after cancel simulation");
+    }
+
+    function _assertAllActiveOrdersCanCancelAndClaimSequentially() private {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order, address owner, bool isBid, bool active) = handler.orderAt(i);
+            if (!active) continue;
+
+            (uint256 expectedBaseAmount, uint256 expectedQuoteAmount) = _expectedCancelAmounts(i, isBid);
+            uint256 ownerBaseBefore = base.balanceOf(owner);
+            uint256 ownerQuoteBefore = quote.balanceOf(owner);
+            uint256 engineBaseBefore = base.balanceOf(address(engine));
+            uint256 engineQuoteBefore = quote.balanceOf(address(engine));
+
+            vm.prank(owner);
+            try engine.cancel(order) returns (uint256 baseAmount, uint256 quoteAmount) {
+                assertEq(baseAmount, expectedBaseAmount, "sequential cancel base amount");
+                assertEq(quoteAmount, expectedQuoteAmount, "sequential cancel quote amount");
+                assertEq(base.balanceOf(owner), ownerBaseBefore + expectedBaseAmount, "sequential owner base");
+                assertEq(quote.balanceOf(owner), ownerQuoteBefore + expectedQuoteAmount, "sequential owner quote");
+                assertEq(
+                    base.balanceOf(address(engine)), engineBaseBefore - expectedBaseAmount, "sequential engine base"
+                );
+                assertEq(
+                    quote.balanceOf(address(engine)), engineQuoteBefore - expectedQuoteAmount, "sequential engine quote"
+                );
+                assertEq(engine.ownerOfOrder(order), address(0), "sequential owner delete");
+                assertEq(engine.ownerOfOrder(_sideKey(order)), address(0), "sequential marker delete");
+            } catch {
+                fail("active order sequential cancel reverted");
+            }
+        }
+
+        assertEq(engine.bidRoot(), bytes32(0), "sequential empty bid root");
+        assertEq(engine.askRoot(), bytes32(0), "sequential empty ask root");
+        assertEq(base.balanceOf(address(engine)), 0, "sequential empty base collateral");
+        assertEq(quote.balanceOf(address(engine)), 0, "sequential empty quote collateral");
     }
 
     function _trackedBalanceSum(TestERC20 token) private view returns (uint256 sum) {
