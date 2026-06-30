@@ -2512,6 +2512,51 @@ contract RadixMatchingEngineTest is Test {
         assertEq(reentrantQuote.balanceOf(address(reentrantEngine)), 10);
     }
 
+    function test_ReentrantQuoteCollateralPullDuringBidPartialRestCannotCancelRemainder() public {
+        TestERC20 plainBase = new TestERC20("Plain", "PLAIN");
+        ReentrantTransferFromERC20 reentrantQuote = new ReentrantTransferFromERC20();
+        RadixMatchingEngine reentrantEngine = new RadixMatchingEngine(address(plainBase), address(reentrantQuote));
+
+        plainBase.mint(bob, 1_000);
+        reentrantQuote.mint(alice, 1_000);
+
+        vm.startPrank(bob);
+        plainBase.approve(address(reentrantEngine), type(uint256).max);
+        bytes32 restingAsk = reentrantEngine.fill(_order(10, 1, 0), false);
+        vm.stopPrank();
+
+        bytes32 expectedBid = _order(10, 1, MAX_ORDER_NONCE - 1);
+
+        vm.startPrank(alice);
+        reentrantQuote.approve(address(reentrantEngine), type(uint256).max);
+        reentrantQuote.arm(reentrantEngine, expectedBid);
+        bytes32 restingBid = reentrantEngine.fill(_order(10, 2, 0), true);
+        vm.stopPrank();
+
+        assertEq(restingBid, expectedBid);
+        assertFalse(reentrantQuote.reentrySucceeded());
+        assertEq(reentrantQuote.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantEngine.askRoot(), bytes32(0));
+        assertEq(reentrantEngine.bidRoot(), expectedBid);
+        assertEq(reentrantEngine.ownerOfOrder(restingAsk), bob);
+        assertEq(reentrantEngine.ownerOfOrder(expectedBid), alice);
+        assertEq(plainBase.balanceOf(alice), 1);
+        assertEq(reentrantQuote.balanceOf(address(reentrantEngine)), 20);
+
+        vm.prank(bob);
+        (uint256 bobBaseAmount, uint256 bobQuoteAmount) = reentrantEngine.cancel(restingAsk);
+
+        assertEq(bobBaseAmount, 0);
+        assertEq(bobQuoteAmount, 10);
+
+        vm.prank(alice);
+        (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = reentrantEngine.cancel(expectedBid);
+
+        assertEq(aliceBaseAmount, 0);
+        assertEq(aliceQuoteAmount, 10);
+        assertEq(reentrantEngine.bidRoot(), bytes32(0));
+    }
+
     function test_ReentrantBaseCollateralPullReverts() public {
         ReentrantTransferFromERC20 reentrantBase = new ReentrantTransferFromERC20();
         TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
@@ -2532,6 +2577,51 @@ contract RadixMatchingEngineTest is Test {
         assertEq(reentrantEngine.askRoot(), restingAsk);
         assertEq(reentrantEngine.ownerOfOrder(restingAsk), alice);
         assertEq(reentrantBase.balanceOf(address(reentrantEngine)), 1);
+    }
+
+    function test_ReentrantBaseCollateralPullDuringAskPartialRestCannotCancelRemainder() public {
+        ReentrantTransferFromERC20 reentrantBase = new ReentrantTransferFromERC20();
+        TestERC20 plainQuote = new TestERC20("Plain", "PLAIN");
+        RadixMatchingEngine reentrantEngine = new RadixMatchingEngine(address(reentrantBase), address(plainQuote));
+
+        plainQuote.mint(alice, 1_000);
+        reentrantBase.mint(bob, 1_000);
+
+        vm.startPrank(alice);
+        plainQuote.approve(address(reentrantEngine), type(uint256).max);
+        bytes32 restingBid = reentrantEngine.fill(_order(10, 1, 0), true);
+        vm.stopPrank();
+
+        bytes32 expectedAsk = _order(10, 1, MAX_ORDER_NONCE - 1);
+
+        vm.startPrank(bob);
+        reentrantBase.approve(address(reentrantEngine), type(uint256).max);
+        reentrantBase.arm(reentrantEngine, expectedAsk);
+        bytes32 restingAsk = reentrantEngine.fill(_order(10, 2, 0), false);
+        vm.stopPrank();
+
+        assertEq(restingAsk, expectedAsk);
+        assertFalse(reentrantBase.reentrySucceeded());
+        assertEq(reentrantBase.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantEngine.bidRoot(), bytes32(0));
+        assertEq(reentrantEngine.askRoot(), expectedAsk);
+        assertEq(reentrantEngine.ownerOfOrder(restingBid), alice);
+        assertEq(reentrantEngine.ownerOfOrder(expectedAsk), bob);
+        assertEq(plainQuote.balanceOf(bob), 10);
+        assertEq(reentrantBase.balanceOf(address(reentrantEngine)), 2);
+
+        vm.prank(alice);
+        (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = reentrantEngine.cancel(restingBid);
+
+        assertEq(aliceBaseAmount, 1);
+        assertEq(aliceQuoteAmount, 0);
+
+        vm.prank(bob);
+        (uint256 bobBaseAmount, uint256 bobQuoteAmount) = reentrantEngine.cancel(expectedAsk);
+
+        assertEq(bobBaseAmount, 1);
+        assertEq(bobQuoteAmount, 0);
+        assertEq(reentrantEngine.askRoot(), bytes32(0));
     }
 
     function test_ReentrantBaseCollateralPullCannotFill() public {
