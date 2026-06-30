@@ -18,7 +18,7 @@ contract RadixMatchingEngine {
 
     /// @notice Owner lookup by order node. Zero-quantity keys store side metadata for claims.
     /// Fill/cancel state is derived by searching trees.
-    mapping(bytes32 => address) public ownerOfOrder;
+    mapping(bytes32 order => address owner) public ownerOfOrder;
 
     bytes32 public bidRoot;
 
