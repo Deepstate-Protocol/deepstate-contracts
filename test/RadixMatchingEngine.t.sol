@@ -2071,6 +2071,7 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(falseEngine.bidRoot(), bytes32(0));
         assertEq(falseEngine.ownerOfOrder(expectedBid), address(0));
+        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(expectedBid))), address(0));
         assertEq(falseEngine.nextNonce(), MAX_ORDER_NONCE);
         assertEq(falseQuote.balanceOf(address(falseEngine)), 0);
         assertEq(falseQuote.balanceOf(alice), 1_000);
@@ -2094,6 +2095,7 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(falseEngine.askRoot(), bytes32(0));
         assertEq(falseEngine.ownerOfOrder(expectedAsk), address(0));
+        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(expectedAsk))), address(0));
         assertEq(falseEngine.nextNonce(), MAX_ORDER_NONCE);
         assertEq(falseBase.balanceOf(address(falseEngine)), 0);
         assertEq(falseBase.balanceOf(alice), 1_000);
@@ -2125,7 +2127,9 @@ contract RadixMatchingEngineTest is Test {
         assertEq(falseEngine.askRoot(), restingAsk);
         assertEq(falseEngine.bidRoot(), bytes32(0));
         assertEq(falseEngine.ownerOfOrder(restingAsk), bob);
+        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(restingAsk))), address(2));
         assertEq(falseEngine.ownerOfOrder(expectedBid), address(0));
+        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(expectedBid))), address(0));
         assertEq(falseEngine.nextNonce(), MAX_ORDER_NONCE - 1);
         assertEq(plainBase.balanceOf(address(falseEngine)), 1);
         assertEq(falseQuote.balanceOf(address(falseEngine)), 0);
@@ -2157,7 +2161,9 @@ contract RadixMatchingEngineTest is Test {
         assertEq(falseEngine.bidRoot(), restingBid);
         assertEq(falseEngine.askRoot(), bytes32(0));
         assertEq(falseEngine.ownerOfOrder(restingBid), bob);
+        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(restingBid))), address(1));
         assertEq(falseEngine.ownerOfOrder(expectedAsk), address(0));
+        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(expectedAsk))), address(0));
         assertEq(falseEngine.nextNonce(), MAX_ORDER_NONCE - 1);
         assertEq(falseBase.balanceOf(address(falseEngine)), 0);
         assertEq(plainQuote.balanceOf(address(falseEngine)), 10);
@@ -2191,6 +2197,7 @@ contract RadixMatchingEngineTest is Test {
         falseEngine.cancel(restingBid);
 
         assertEq(falseEngine.ownerOfOrder(restingBid), alice);
+        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(restingBid))), address(1));
         assertEq(falseBase.balanceOf(address(falseEngine)), 2);
         assertEq(falseBase.balanceOf(alice), 0);
     }
@@ -2223,6 +2230,7 @@ contract RadixMatchingEngineTest is Test {
         falseEngine.cancel(restingAsk);
 
         assertEq(falseEngine.ownerOfOrder(restingAsk), alice);
+        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(restingAsk))), address(2));
         assertEq(falseQuote.balanceOf(address(falseEngine)), 20);
         assertEq(falseQuote.balanceOf(alice), 0);
     }
@@ -2267,6 +2275,7 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(falseEngine.bidRoot(), bidRootBefore);
         assertEq(falseEngine.ownerOfOrder(restingBid), alice);
+        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(restingBid))), address(1));
         assertEq(plainBase.balanceOf(address(falseEngine)), engineBaseBefore);
         assertEq(falseQuote.balanceOf(address(falseEngine)), engineQuoteBefore);
         assertEq(plainBase.balanceOf(alice), aliceBaseBefore);
@@ -2313,6 +2322,7 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(falseEngine.askRoot(), askRootBefore);
         assertEq(falseEngine.ownerOfOrder(restingAsk), alice);
+        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(restingAsk))), address(2));
         assertEq(plainBase.balanceOf(address(falseEngine)), engineBaseBefore);
         assertEq(falseQuote.balanceOf(address(falseEngine)), engineQuoteBefore);
         assertEq(plainBase.balanceOf(alice), aliceBaseBefore);
