@@ -563,6 +563,51 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         assertEq(quote.balanceOf(address(engine)), expectedQuote, "quote collateral");
     }
 
+    function invariant_EachActiveOrderClaimIsIndividuallyCollateralized() public view {
+        uint256 engineBase = base.balanceOf(address(engine));
+        uint256 engineQuote = quote.balanceOf(address(engine));
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (,, bool isBid, bool active) = handler.orderAt(i);
+            if (!active) continue;
+
+            (uint256 baseAmount, uint256 quoteAmount) = _expectedCancelAmounts(i, isBid);
+            assertLe(baseAmount, engineBase, "individual base claim");
+            assertLe(quoteAmount, engineQuote, "individual quote claim");
+        }
+    }
+
+    function invariant_RepresentativeActiveOrdersCanCancelAndClaim() public {
+        uint256 length = handler.orderCount();
+        bool checkedOpen;
+        bool checkedPartial;
+        bool checkedFilled;
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,, bool isBid, bool active) = handler.orderAt(i);
+            if (!active) continue;
+
+            uint192 remainingQuantity = handler.remainingQuantityAt(i);
+            uint192 originalQuantity = _quantity(order);
+            assertLe(remainingQuantity, originalQuantity, "representative remaining");
+            if (remainingQuantity == originalQuantity && !checkedOpen) {
+                _assertActiveOrderCanCancelAndClaim(i, isBid);
+                checkedOpen = true;
+            }
+            if (remainingQuantity != 0 && remainingQuantity < originalQuantity && !checkedPartial) {
+                _assertActiveOrderCanCancelAndClaim(i, isBid);
+                checkedPartial = true;
+            }
+            if (remainingQuantity == 0 && !checkedFilled) {
+                _assertActiveOrderCanCancelAndClaim(i, isBid);
+                checkedFilled = true;
+            }
+
+            if (checkedOpen && checkedPartial && checkedFilled) break;
+        }
+    }
+
     function invariant_TotalTokenSupplyConserved() public view {
         assertEq(_trackedBalanceSum(base), base.totalSupply(), "base supply");
         assertEq(_trackedBalanceSum(quote), quote.totalSupply(), "quote supply");
@@ -862,6 +907,58 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         bytes32 root = isBid ? engine.bidRoot() : engine.askRoot();
         bytes32 current = _find(root, order, isBid);
         return current == bytes32(0) ? 0 : _quantity(current);
+    }
+
+    function _expectedCancelAmounts(uint256 index, bool isBid)
+        private
+        view
+        returns (uint256 baseAmount, uint256 quoteAmount)
+    {
+        (bytes32 order,,,) = handler.orderAt(index);
+        uint192 originalQuantity = _quantity(order);
+        uint192 remainingQuantity = handler.remainingQuantityAt(index);
+        assertLe(remainingQuantity, originalQuantity, "expected cancel remaining");
+        uint192 filledQuantity = originalQuantity - remainingQuantity;
+        uint24 price = _price(order);
+
+        if (isBid) {
+            baseAmount = filledQuantity;
+            quoteAmount = _quoteValue(price, remainingQuantity);
+        } else {
+            baseAmount = remainingQuantity;
+            quoteAmount = _quoteValue(price, filledQuantity);
+        }
+    }
+
+    function _assertActiveOrderCanCancelAndClaim(uint256 index, bool isBid) private {
+        (bytes32 order, address owner,, bool active) = handler.orderAt(index);
+        assertTrue(active, "cancelable active order");
+
+        (uint256 expectedBaseAmount, uint256 expectedQuoteAmount) = _expectedCancelAmounts(index, isBid);
+        uint256 ownerBaseBefore = base.balanceOf(owner);
+        uint256 ownerQuoteBefore = quote.balanceOf(owner);
+        uint256 engineBaseBefore = base.balanceOf(address(engine));
+        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
+
+        uint256 snapshotId = vm.snapshotState();
+        vm.prank(owner);
+        try engine.cancel(order) returns (uint256 baseAmount, uint256 quoteAmount) {
+            assertEq(baseAmount, expectedBaseAmount, "simulated cancel base amount");
+            assertEq(quoteAmount, expectedQuoteAmount, "simulated cancel quote amount");
+            assertEq(base.balanceOf(owner), ownerBaseBefore + expectedBaseAmount, "simulated owner base");
+            assertEq(quote.balanceOf(owner), ownerQuoteBefore + expectedQuoteAmount, "simulated owner quote");
+            assertEq(base.balanceOf(address(engine)), engineBaseBefore - expectedBaseAmount, "simulated engine base");
+            assertEq(
+                quote.balanceOf(address(engine)), engineQuoteBefore - expectedQuoteAmount, "simulated engine quote"
+            );
+            assertEq(engine.ownerOfOrder(order), address(0), "simulated owner delete");
+            assertEq(engine.ownerOfOrder(_sideKey(order)), address(0), "simulated marker delete");
+        } catch {
+            assertTrue(vm.revertToState(snapshotId), "restore after cancel revert");
+            fail("active order cancel reverted");
+        }
+
+        assertTrue(vm.revertToState(snapshotId), "restore after cancel simulation");
     }
 
     function _trackedBalanceSum(TestERC20 token) private view returns (uint256 sum) {
