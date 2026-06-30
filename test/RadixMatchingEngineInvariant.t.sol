@@ -435,6 +435,8 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         uint64 minKey;
         uint64 maxKey;
         uint24 bestPrice;
+        uint24 leftmostPrice;
+        uint24 rightmostPrice;
         bool exists;
     }
 
@@ -1043,6 +1045,8 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
             stats.minKey = key;
             stats.maxKey = key;
             stats.bestPrice = _price(node);
+            stats.leftmostPrice = stats.bestPrice;
+            stats.rightmostPrice = stats.bestPrice;
             stats.exists = true;
             return stats;
         }
@@ -1062,9 +1066,12 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         stats.minKey = leftStats.minKey;
         stats.maxKey = rightStats.maxKey;
         stats.bestPrice = rightStats.bestPrice;
+        stats.leftmostPrice = leftStats.leftmostPrice;
+        stats.rightmostPrice = rightStats.rightmostPrice;
         stats.exists = true;
         assertEq(_quantity(node), stats.quantity, "branch quantity");
         _assertStoredNodeKeyRepresentsSubtree(node, stats, isBidTree);
+        _assertSinglePriceFastPathCoversSubtree(stats, leftStats, rightStats);
     }
 
     function _assertBranchOrder(uint8 branchDepth, SubtreeStats memory leftStats, SubtreeStats memory rightStats)
@@ -1093,6 +1100,20 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         uint64 storedKey = _storedNodeKey(node, isBidTree);
         assertGe(storedKey, stats.minKey, "node key below subtree");
         assertLe(storedKey, stats.maxKey, "node key above subtree");
+    }
+
+    function _assertSinglePriceFastPathCoversSubtree(
+        SubtreeStats memory stats,
+        SubtreeStats memory leftStats,
+        SubtreeStats memory rightStats
+    ) private pure {
+        if (stats.leftmostPrice != stats.rightmostPrice) return;
+
+        uint24 price = stats.leftmostPrice;
+        assertEq(leftStats.leftmostPrice, price, "single-price left min");
+        assertEq(leftStats.rightmostPrice, price, "single-price left max");
+        assertEq(rightStats.leftmostPrice, price, "single-price right min");
+        assertEq(rightStats.rightmostPrice, price, "single-price right max");
     }
 
     function _assertNoSharedBranches(bytes32 bidNode, bytes32 askRoot) private view {
