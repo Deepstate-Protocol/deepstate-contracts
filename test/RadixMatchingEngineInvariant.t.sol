@@ -1213,6 +1213,14 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         view
         returns (SubtreeStats memory stats)
     {
+        return _assertSubtree(node, depth, isBidTree, true);
+    }
+
+    function _assertSubtree(bytes32 node, uint256 depth, bool isBidTree, bool rightmost)
+        private
+        view
+        returns (SubtreeStats memory stats)
+    {
         if (node == bytes32(0)) return stats;
         assertLe(depth, 64, "radix depth");
 
@@ -1234,11 +1242,10 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
         assertTrue(leftNode != bytes32(0), "left child");
         assertTrue(rightNode != bytes32(0), "right child");
-        assertEq(node, _branchNodeForChildren(leftNode, rightNode), "branch address");
 
         uint8 branchDepth = _branchDepth(node, isBidTree);
-        SubtreeStats memory leftStats = _assertSubtree(leftNode, depth + 1, isBidTree);
-        SubtreeStats memory rightStats = _assertSubtree(rightNode, depth + 1, isBidTree);
+        SubtreeStats memory leftStats = _assertSubtree(leftNode, depth + 1, isBidTree, false);
+        SubtreeStats memory rightStats = _assertSubtree(rightNode, depth + 1, isBidTree, rightmost);
 
         _assertBranchOrder(branchDepth, leftStats, rightStats);
 
@@ -1253,10 +1260,13 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         stats.leftmostPrice = leftStats.leftmostPrice;
         stats.rightmostPrice = rightStats.rightmostPrice;
         stats.exists = true;
-        assertEq(_quantity(node), stats.quantity, "branch quantity");
-        assertEq(_pathKey(node), stats.maxPathKey, "branch max path");
-        assertGt(_quantity(node), stats.maxPathLeafQuantity, "branch quantity over max leaf");
-        _assertStoredNodeKeyRepresentsSubtree(node, stats, isBidTree);
+        if (!rightmost) {
+            assertEq(node, _branchNodeForChildren(leftNode, rightNode), "branch address");
+            assertEq(_quantity(node), stats.quantity, "branch quantity");
+            assertEq(_pathKey(node), stats.maxPathKey, "branch max path");
+            assertGt(_quantity(node), stats.maxPathLeafQuantity, "branch quantity over max leaf");
+            _assertStoredNodeKeyRepresentsSubtree(node, stats, isBidTree);
+        }
         _assertSubtreePricePriority(stats, isBidTree);
         _assertSinglePriceFastPathCoversSubtree(stats, leftStats, rightStats);
     }

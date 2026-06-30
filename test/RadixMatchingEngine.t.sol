@@ -1836,10 +1836,10 @@ contract RadixMatchingEngineTest is Test {
         assertEq(baseAmount, 0);
         assertEq(quoteAmount, type(uint24).max);
         assertEq(engine.ownerOfOrder(orders[0]), address(0));
-        assertEq(_pathKey(engine.bidRoot()), targetKey - 1);
+        assertEq(_pathKey(_rightmostLeaf(engine.bidRoot())), targetKey - 1);
         // casting to uint192 is safe because the synthetic comb has 65 orders.
         // forge-lint: disable-next-line(unsafe-typecast)
-        assertEq(_quantity(engine.bidRoot()), uint192(orderCount - 1));
+        assertEq(_subtreeQuantity(engine.bidRoot()), uint192(orderCount - 1));
     }
 
     function test_MaxValidDepthAskNonceCombFullyMatchesAndClaims() public {
@@ -1909,7 +1909,7 @@ contract RadixMatchingEngineTest is Test {
         assertTrue(engine.askRoot() != bytes32(0));
         // casting to uint192 is safe because the synthetic comb has 64 orders.
         // forge-lint: disable-next-line(unsafe-typecast)
-        assertEq(_quantity(engine.askRoot()), uint192(orderCount - 1));
+        assertEq(_subtreeQuantity(engine.askRoot()), uint192(orderCount - 1));
     }
 
     function test_AskPricePrefixCombFullyMatchesAndClaims() public {
@@ -2013,7 +2013,9 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.askRoot(), aggregate);
 
         vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(aggregate, false, 5, 250);
+        emit OrderMatched(firstAsk, false, 2, 100);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(secondAsk, false, 3, 150);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(price, 5, 0), true);
@@ -2058,7 +2060,9 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.bidRoot(), aggregate);
 
         vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(aggregate, true, 5, 350);
+        emit OrderMatched(firstBid, true, 2, 140);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(secondBid, true, 3, 210);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(price, 5, 0), false);
@@ -3395,6 +3399,23 @@ contract RadixMatchingEngineTest is Test {
         // forge-lint: disable-next-line(unsafe-typecast)
         uint40 prefixNonce = uint40(boundaryKey);
         return _order(prefixPrice, _quantity(a) + _quantity(b), prefixNonce);
+    }
+
+    function _rightmostLeaf(bytes32 node) internal view returns (bytes32 leaf) {
+        while (true) {
+            (, bytes32 rightNode) = engine.tree(node);
+            if (rightNode == bytes32(0)) return node;
+            node = rightNode;
+        }
+    }
+
+    function _subtreeQuantity(bytes32 node) internal view returns (uint192) {
+        if (node == bytes32(0)) return 0;
+
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+        if (leftNode == bytes32(0)) return _quantity(node);
+
+        return _subtreeQuantity(leftNode) + _subtreeQuantity(rightNode);
     }
 
     function _pathKey(bytes32 order) internal pure returns (uint64) {

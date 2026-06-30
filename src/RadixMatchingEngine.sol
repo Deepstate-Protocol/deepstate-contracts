@@ -82,7 +82,9 @@ contract RadixMatchingEngine {
     /// @notice Decrementing nonce. Higher nonce means earlier time priority at the same price.
     /// @dev
     /// The first resting order receives `type(uint40).max`, then the counter decrements. Nonce zero
-    /// is reserved as the exhaustion sentinel and is never assigned to a resting order.
+    /// is reserved as the exhaustion sentinel and is never assigned to a resting order. Private
+    /// right-spine dirty flags live above the low 40 bits in this storage slot; the public getter
+    /// still returns only the declared `uint40` nonce.
     uint40 public nextNonce = type(uint40).max;
 
     /// @notice Token sold by asks and received by bid makers when bids fill.
@@ -102,6 +104,10 @@ contract RadixMatchingEngine {
     uint256 private constant _PATH_MASK = ~(_QUANTITY_MASK << _QUANTITY_SHIFT);
     /// @dev Maximum valid 24-bit price. Also used to invert ask prices into ascending sort order.
     uint24 private constant _MAX_PRICE = type(uint24).max;
+    /// @dev Dirty bit stored above the 40-bit `nextNonce` field when bid right-spine anchors are stale.
+    uint256 private constant _BID_RIGHT_SPINE_DIRTY = uint256(1) << 40;
+    /// @dev Dirty bit stored above the 40-bit `nextNonce` field when ask right-spine anchors are stale.
+    uint256 private constant _ASK_RIGHT_SPINE_DIRTY = uint256(1) << 41;
 
     /// @dev Side marker stored at `_sideKey(order)` for bid orders.
     address private constant _BID_SENTINEL = address(uint160(1));
@@ -272,7 +278,7 @@ contract RadixMatchingEngine {
             bytes32 root = bidRoot;
             bytes32 newRoot;
             if (root != bytes32(0)) {
-                (newRoot, removed) = _removeBidByKey(root, _bidSortKey(order));
+                (newRoot, removed) = _removeBidByKey(root, _bidSortKey(order), true);
                 if (removed != bytes32(0) && newRoot != root) {
                     bidRoot = newRoot;
                 }
@@ -281,7 +287,7 @@ contract RadixMatchingEngine {
             bytes32 root = askRoot;
             bytes32 newRoot;
             if (root != bytes32(0)) {
-                (newRoot, removed) = _removeAskByKey(root, _askSortKey(order));
+                (newRoot, removed) = _removeAskByKey(root, _askSortKey(order), true);
                 if (removed != bytes32(0) && newRoot != root) {
                     askRoot = newRoot;
                 }
@@ -321,6 +327,11 @@ contract RadixMatchingEngine {
     /// @dev Stores both owner and side marker before insertion. A revert during insertion rolls the
     /// entire rest operation back, including nonce decrement and metadata writes.
     function _restBid(uint24 price, uint192 quantity) private returns (bytes32 restingOrder) {
+        if (_rightSpineDirty(true)) {
+            bidRoot = _materializeRightSpine(bidRoot);
+            _clearRightSpineDirty(true);
+        }
+
         uint40 nonce = nextNonce;
         if (nonce == 0) revert NonceExhausted();
         unchecked {
@@ -341,6 +352,11 @@ contract RadixMatchingEngine {
     /// @return restingOrder Packed resting ask with assigned nonce.
     /// @dev Uses an inverted price sort key so lower ask prices live on the rightmost path.
     function _restAsk(uint24 price, uint192 quantity) private returns (bytes32 restingOrder) {
+        if (_rightSpineDirty(false)) {
+            askRoot = _materializeRightSpine(askRoot);
+            _clearRightSpineDirty(false);
+        }
+
         uint40 nonce = nextNonce;
         if (nonce == 0) revert NonceExhausted();
         unchecked {
@@ -369,7 +385,7 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
-        (newRoot, baseFilled, quoteAmount) = _matchAskSubtree(root, limitPrice, remaining);
+        (newRoot, baseFilled, quoteAmount) = _matchAskRightSpine(root, limitPrice, remaining);
         unchecked {
             newRemaining = remaining - baseFilled;
         }
@@ -387,7 +403,7 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
-        (newRoot, baseFilled, quoteAmount) = _matchBidSubtree(root, limitPrice, remaining);
+        (newRoot, baseFilled, quoteAmount) = _matchBidRightSpine(root, limitPrice, remaining);
         unchecked {
             newRemaining = remaining - baseFilled;
         }
@@ -466,9 +482,53 @@ contract RadixMatchingEngine {
     /// @return quoteAmount Quote value consumed from this subtree.
     /// @dev
     /// The ask tree's rightmost path is best because ask prices are inverted in the sort key.
-    /// `_leftmostLeafPrice(node)` returns the worst price in this ask subtree. If even that worst
-    /// ask crosses the incoming bid and the aggregate quantity fits, the whole subtree is consumed
-    /// without walking every maker order.
+    /// Right-spine branch words may be stale after previous optimized updates, so this function
+    /// walks the right spine explicitly and only uses aggregate consumption after it turns into an
+    /// exact left subtree.
+    function _matchAskRightSpine(bytes32 node, uint24 limitPrice, uint192 remaining)
+        private
+        returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
+    {
+        bytes32 leftNode = tree[node].leftNode;
+        if (leftNode == bytes32(0)) {
+            (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(node, limitPrice, remaining);
+            return (newNode, fillQuantity, quoteAmount);
+        }
+
+        bytes32 rightNode = tree[node].rightNode;
+        bytes32 newRightNode;
+        uint192 rightFillQuantity;
+        uint256 rightQuoteAmount;
+        (newRightNode, rightFillQuantity, rightQuoteAmount) = _matchAskRightSpine(rightNode, limitPrice, remaining);
+        if (rightFillQuantity == 0) return (node, 0, 0);
+
+        uint192 leftFillQuantity = 0;
+        uint256 leftQuoteAmount = 0;
+        bytes32 newLeftNode = leftNode;
+        unchecked {
+            remaining -= rightFillQuantity;
+        }
+
+        if (remaining != 0) {
+            (newLeftNode, leftFillQuantity, leftQuoteAmount) = _matchAskSubtree(leftNode, limitPrice, remaining);
+        }
+
+        newNode = leftFillQuantity == 0
+            ? _replaceRightmostRightChild(node, newLeftNode, newRightNode, false)
+            : _replaceBranch(newLeftNode, newRightNode);
+        unchecked {
+            fillQuantity = rightFillQuantity + leftFillQuantity;
+            quoteAmount = rightQuoteAmount + leftQuoteAmount;
+        }
+    }
+
+    /// @notice Recursively match an incoming bid against an exact ask subtree.
+    /// @param node Ask leaf or exact aggregate branch to inspect.
+    /// @param limitPrice Bid limit price.
+    /// @param remaining Incoming bid quantity available to spend in this subtree.
+    /// @return newNode Replacement node for this subtree after matching.
+    /// @return fillQuantity Base quantity consumed from this subtree.
+    /// @return quoteAmount Quote value consumed from this subtree.
     function _matchAskSubtree(bytes32 node, uint24 limitPrice, uint192 remaining)
         private
         returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
@@ -518,9 +578,53 @@ contract RadixMatchingEngine {
     /// @return fillQuantity Base quantity consumed from this subtree.
     /// @return quoteAmount Quote value consumed from this subtree.
     /// @dev
-    /// The bid tree's rightmost path is best because higher prices sort later. `_leftmostLeafPrice`
-    /// returns the worst price in this bid subtree. If even that worst bid crosses the incoming ask
-    /// and the aggregate quantity fits, the whole subtree is consumed in one step.
+    /// The bid tree's rightmost path is best because higher prices sort later. Right-spine branch
+    /// words may be stale after previous optimized updates, so this function walks the right spine
+    /// explicitly and only uses aggregate consumption after it turns into an exact left subtree.
+    function _matchBidRightSpine(bytes32 node, uint24 limitPrice, uint192 remaining)
+        private
+        returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
+    {
+        bytes32 leftNode = tree[node].leftNode;
+        if (leftNode == bytes32(0)) {
+            (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(node, limitPrice, remaining);
+            return (newNode, fillQuantity, quoteAmount);
+        }
+
+        bytes32 rightNode = tree[node].rightNode;
+        bytes32 newRightNode;
+        uint192 rightFillQuantity;
+        uint256 rightQuoteAmount;
+        (newRightNode, rightFillQuantity, rightQuoteAmount) = _matchBidRightSpine(rightNode, limitPrice, remaining);
+        if (rightFillQuantity == 0) return (node, 0, 0);
+
+        uint192 leftFillQuantity = 0;
+        uint256 leftQuoteAmount = 0;
+        bytes32 newLeftNode = leftNode;
+        unchecked {
+            remaining -= rightFillQuantity;
+        }
+
+        if (remaining != 0) {
+            (newLeftNode, leftFillQuantity, leftQuoteAmount) = _matchBidSubtree(leftNode, limitPrice, remaining);
+        }
+
+        newNode = leftFillQuantity == 0
+            ? _replaceRightmostRightChild(node, newLeftNode, newRightNode, true)
+            : _replaceBranch(newLeftNode, newRightNode);
+        unchecked {
+            fillQuantity = rightFillQuantity + leftFillQuantity;
+            quoteAmount = rightQuoteAmount + leftQuoteAmount;
+        }
+    }
+
+    /// @notice Recursively match an incoming ask against an exact bid subtree.
+    /// @param node Bid leaf or exact aggregate branch to inspect.
+    /// @param limitPrice Ask limit price.
+    /// @param remaining Incoming ask quantity available to sell in this subtree.
+    /// @return newNode Replacement node for this subtree after matching.
+    /// @return fillQuantity Base quantity consumed from this subtree.
+    /// @return quoteAmount Quote value consumed from this subtree.
     function _matchBidSubtree(bytes32 node, uint24 limitPrice, uint192 remaining)
         private
         returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
@@ -629,7 +733,10 @@ contract RadixMatchingEngine {
     /// @dev
     /// Cancel searches by price/nonce, not by full order word, because a partially filled live leaf
     /// has the same price/nonce as the original order but a smaller quantity.
-    function _removeBidByKey(bytes32 root, uint64 targetKey) private returns (bytes32 newRoot, bytes32 removed) {
+    function _removeBidByKey(bytes32 root, uint64 targetKey, bool rightmost)
+        private
+        returns (bytes32 newRoot, bytes32 removed)
+    {
         if (root == bytes32(0)) return (bytes32(0), bytes32(0));
 
         bytes32 leftNode = tree[root].leftNode;
@@ -643,12 +750,15 @@ contract RadixMatchingEngine {
         if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0));
 
         if (_bit(targetKey, branchDepth)) {
-            (rightNode, removed) = _removeBidByKey(rightNode, targetKey);
+            (rightNode, removed) = _removeBidByKey(rightNode, targetKey, rightmost);
         } else {
-            (leftNode, removed) = _removeBidByKey(leftNode, targetKey);
+            (leftNode, removed) = _removeBidByKey(leftNode, targetKey, false);
         }
 
         if (removed == bytes32(0)) return (root, bytes32(0));
+        if (rightmost && _bit(targetKey, branchDepth)) {
+            return (_replaceRightmostRightChild(root, leftNode, rightNode, true), removed);
+        }
         return (_replaceBranch(leftNode, rightNode), removed);
     }
 
@@ -658,7 +768,10 @@ contract RadixMatchingEngine {
     /// @return newRoot Updated subtree root.
     /// @return removed Live leaf that was removed, or zero if absent.
     /// @dev Mirrors `_removeBidByKey` using inverted-price ask keys.
-    function _removeAskByKey(bytes32 root, uint64 targetKey) private returns (bytes32 newRoot, bytes32 removed) {
+    function _removeAskByKey(bytes32 root, uint64 targetKey, bool rightmost)
+        private
+        returns (bytes32 newRoot, bytes32 removed)
+    {
         if (root == bytes32(0)) return (bytes32(0), bytes32(0));
 
         bytes32 leftNode = tree[root].leftNode;
@@ -672,13 +785,40 @@ contract RadixMatchingEngine {
         if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0));
 
         if (_bit(targetKey, branchDepth)) {
-            (rightNode, removed) = _removeAskByKey(rightNode, targetKey);
+            (rightNode, removed) = _removeAskByKey(rightNode, targetKey, rightmost);
         } else {
-            (leftNode, removed) = _removeAskByKey(leftNode, targetKey);
+            (leftNode, removed) = _removeAskByKey(leftNode, targetKey, false);
         }
 
         if (removed == bytes32(0)) return (root, bytes32(0));
+        if (rightmost && _bit(targetKey, branchDepth)) {
+            return (_replaceRightmostRightChild(root, leftNode, rightNode, false), removed);
+        }
         return (_replaceBranch(leftNode, rightNode), removed);
+    }
+
+    /// @notice Update a right-spine branch after only its right child changed.
+    /// @param branchNode Existing branch node used as the stable right-spine anchor.
+    /// @param leftNode Existing left child.
+    /// @param rightNode Replacement right child.
+    /// @param isBid True if the branch belongs to the bid tree.
+    /// @return Replacement subtree root.
+    /// @dev
+    /// This is the rightmost-branch optimization. The packed branch word is left in place when the
+    /// right child changes, so ancestors on the same right spine do not need to be rewritten. The
+    /// branch quantity/path can therefore become stale until the next same-side insertion calls
+    /// `_materializeRightSpine`.
+    function _replaceRightmostRightChild(bytes32 branchNode, bytes32 leftNode, bytes32 rightNode, bool isBid)
+        private
+        returns (bytes32)
+    {
+        if (leftNode == bytes32(0)) return rightNode;
+        if (rightNode == bytes32(0)) return leftNode;
+        if (rightNode == branchNode || rightNode == leftNode) return _replaceBranch(leftNode, rightNode);
+
+        tree[branchNode].rightNode = rightNode;
+        _setRightSpineDirty(isBid);
+        return branchNode;
     }
 
     /// @notice Collapse or rewrite a branch after one or both children changed.
@@ -702,6 +842,19 @@ contract RadixMatchingEngine {
         }
 
         return newBranch;
+    }
+
+    /// @notice Rebuild a previously optimized right spine back into exact aggregate branches.
+    /// @param node Current subtree root.
+    /// @return Exact subtree root.
+    /// @dev Only the right spine can contain stable anchors. Left subtrees remain exact because the
+    /// optimization is used only for right-child updates.
+    function _materializeRightSpine(bytes32 node) private returns (bytes32) {
+        bytes32 leftNode = tree[node].leftNode;
+        if (leftNode == bytes32(0)) return node;
+
+        bytes32 rightNode = _materializeRightSpine(tree[node].rightNode);
+        return _replaceBranch(leftNode, rightNode);
     }
 
     /// @notice Create and store a two-child branch for two nonzero nodes.
@@ -885,6 +1038,35 @@ contract RadixMatchingEngine {
     function _bit(uint64 key, uint8 depth) private pure returns (bool) {
         unchecked {
             return ((key >> (63 - depth)) & 1) == 1;
+        }
+    }
+
+    /// @notice Return whether a side has optimized right-spine anchors that need materialization before insert.
+    /// @param isBid True for the bid tree, false for the ask tree.
+    /// @return dirty True if the side's right spine contains stale branch aggregate words.
+    function _rightSpineDirty(bool isBid) private view returns (bool dirty) {
+        uint256 flag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
+        assembly {
+            dirty := iszero(iszero(and(sload(nextNonce.slot), flag)))
+        }
+    }
+
+    /// @notice Mark a side's right spine dirty.
+    /// @param isBid True for the bid tree, false for the ask tree.
+    function _setRightSpineDirty(bool isBid) private {
+        uint256 flag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
+        assembly {
+            let nonceSlot := sload(nextNonce.slot)
+            if iszero(and(nonceSlot, flag)) { sstore(nextNonce.slot, or(nonceSlot, flag)) }
+        }
+    }
+
+    /// @notice Clear a side's right-spine dirty bit after materialization.
+    /// @param isBid True for the bid tree, false for the ask tree.
+    function _clearRightSpineDirty(bool isBid) private {
+        uint256 flag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
+        assembly {
+            sstore(nextNonce.slot, and(sload(nextNonce.slot), not(flag)))
         }
     }
 
