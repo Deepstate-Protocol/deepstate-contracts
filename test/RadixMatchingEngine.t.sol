@@ -359,6 +359,54 @@ contract RadixMatchingEngineTest is Test {
         new RadixMatchingEngine(address(base), bob);
     }
 
+    function test_StorageLayoutMatchesStrictDesign() public {
+        assertEq(vm.load(address(engine), bytes32(uint256(2))), bytes32(0), "bidRoot slot");
+        assertEq(vm.load(address(engine), bytes32(uint256(3))), bytes32(0), "askRoot slot");
+        assertEq(vm.load(address(engine), _nextNonceSlot()), bytes32(uint256(MAX_ORDER_NONCE)), "nextNonce slot");
+
+        {
+            vm.prank(alice);
+            bytes32 firstBid = engine.fill(_order(100, 1, 0), true);
+            vm.prank(bob);
+            bytes32 secondBid = engine.fill(_order(99, 1, 0), true);
+            bytes32 bidBranch = _branchFor(firstBid, secondBid);
+            (bytes32 leftNode, bytes32 rightNode) = _expectedBranchChildren(firstBid, secondBid, true);
+
+            assertEq(vm.load(address(engine), _bidRootSlot()), bidBranch, "bidRoot slot after insert");
+            assertEq(
+                vm.load(address(engine), _ownerOfOrderSlot(firstBid)), bytes32(uint256(uint160(alice))), "owner slot"
+            );
+            assertEq(
+                vm.load(address(engine), _ownerOfOrderSlot(_order(100, 0, _nonce(firstBid)))),
+                bytes32(uint256(1)),
+                "bid side slot"
+            );
+            _assertTreeBranchStorage(bidBranch, leftNode, rightNode, "bid");
+        }
+
+        {
+            vm.prank(alice);
+            bytes32 firstAsk = engine.fill(_order(200, 1, 0), false);
+            vm.prank(bob);
+            bytes32 secondAsk = engine.fill(_order(201, 1, 0), false);
+            bytes32 askBranch = _branchFor(firstAsk, secondAsk);
+            (bytes32 leftNode, bytes32 rightNode) = _expectedBranchChildren(firstAsk, secondAsk, false);
+
+            assertEq(vm.load(address(engine), _askRootSlot()), askBranch, "askRoot slot after insert");
+            assertEq(
+                vm.load(address(engine), _ownerOfOrderSlot(firstAsk)),
+                bytes32(uint256(uint160(alice))),
+                "ask owner slot"
+            );
+            assertEq(
+                vm.load(address(engine), _ownerOfOrderSlot(_order(200, 0, _nonce(firstAsk)))),
+                bytes32(uint256(2)),
+                "ask side slot"
+            );
+            _assertTreeBranchStorage(askBranch, leftNode, rightNode, "ask");
+        }
+    }
+
     function test_InvalidOrdersRevert() public {
         vm.startPrank(alice);
 
@@ -2888,8 +2936,46 @@ contract RadixMatchingEngineTest is Test {
         return keccak256(abi.encode(order, uint256(1)));
     }
 
+    function _treeSlot(bytes32 node) internal pure returns (bytes32) {
+        return keccak256(abi.encode(node, uint256(0)));
+    }
+
+    function _assertTreeBranchStorage(bytes32 branch, bytes32 leftNode, bytes32 rightNode, string memory label)
+        internal
+        view
+    {
+        bytes32 branchSlot = _treeSlot(branch);
+        assertEq(vm.load(address(engine), branchSlot), leftNode, string.concat(label, " tree left slot"));
+        assertEq(
+            vm.load(address(engine), bytes32(uint256(branchSlot) + 1)),
+            rightNode,
+            string.concat(label, " tree right slot")
+        );
+    }
+
+    function _expectedBranchChildren(bytes32 a, bytes32 b, bool isBid)
+        internal
+        pure
+        returns (bytes32 left, bytes32 right)
+    {
+        uint64 aKey = isBid ? _pathKey(a) : _askSortKey(a);
+        uint64 bKey = isBid ? _pathKey(b) : _askSortKey(b);
+        uint8 branchDepth = _commonPrefix(aKey, bKey);
+
+        left = a;
+        right = b;
+        if (_bit(aKey, branchDepth)) {
+            left = b;
+            right = a;
+        }
+    }
+
     function _bidRootSlot() internal pure returns (bytes32) {
         return bytes32(uint256(2));
+    }
+
+    function _askRootSlot() internal pure returns (bytes32) {
+        return bytes32(uint256(3));
     }
 
     function _nextNonceSlot() internal pure returns (bytes32) {

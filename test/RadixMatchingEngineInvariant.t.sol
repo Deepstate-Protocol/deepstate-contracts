@@ -635,6 +635,21 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         assertEq(uint256(engine.nextNonce()), uint256(_MAX_ORDER_NONCE) - handler.orderCount(), "next nonce");
     }
 
+    function invariant_TrackedOrderNoncesAreStrictlyDecrementing() public view {
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order,,,) = handler.orderAt(i);
+            assertEq(uint256(_nonce(order)), uint256(_MAX_ORDER_NONCE) - i, "tracked nonce");
+            assertGt(_nonce(order), engine.nextNonce(), "allocated nonce");
+
+            for (uint256 j = i + 1; j < length; ++j) {
+                (bytes32 otherOrder,,,) = handler.orderAt(j);
+                assertTrue(_nonce(order) != _nonce(otherOrder), "duplicate tracked nonce");
+            }
+        }
+    }
+
     function invariant_BidAskBranchesDoNotShareStorage() public view {
         _assertNoSharedBranches(engine.bidRoot(), engine.askRoot());
     }
@@ -1096,6 +1111,11 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
             assertGe(_quantity(order), leafQuantity, "leaf over original quantity");
             assertEq(handler.remainingQuantityAt(i), leafQuantity, "leaf remaining");
             assertEq(engine.ownerOfOrder(order), owner, "leaf owner");
+            if (leafQuantity == _quantity(order)) {
+                assertEq(engine.ownerOfOrder(node), owner, "unfilled leaf owner");
+            } else {
+                assertEq(engine.ownerOfOrder(node), address(0), "partial leaf owner");
+            }
             ++matches;
         }
 
