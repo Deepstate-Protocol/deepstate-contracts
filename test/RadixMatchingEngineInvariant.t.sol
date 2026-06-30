@@ -1064,6 +1064,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         stats.bestPrice = rightStats.bestPrice;
         stats.exists = true;
         assertEq(_quantity(node), stats.quantity, "branch quantity");
+        _assertStoredNodeKeyRepresentsSubtree(node, stats, isBidTree);
     }
 
     function _assertBranchOrder(uint8 branchDepth, SubtreeStats memory leftStats, SubtreeStats memory rightStats)
@@ -1083,6 +1084,15 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         if (rightStats.minKey != rightStats.maxKey) {
             assertGe(_commonPrefix(rightStats.minKey, rightStats.maxKey), branchDepth + 1, "right prefix");
         }
+    }
+
+    function _assertStoredNodeKeyRepresentsSubtree(bytes32 node, SubtreeStats memory stats, bool isBidTree)
+        private
+        pure
+    {
+        uint64 storedKey = _storedNodeKey(node, isBidTree);
+        assertGe(storedKey, stats.minKey, "node key below subtree");
+        assertLe(storedKey, stats.maxKey, "node key above subtree");
     }
 
     function _assertNoSharedBranches(bytes32 bidNode, bytes32 askRoot) private view {
