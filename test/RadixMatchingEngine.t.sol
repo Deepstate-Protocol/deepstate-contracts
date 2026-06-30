@@ -342,6 +342,44 @@ contract RadixMatchingEngineTest is Test {
         assertEq(bobQuoteAmount, 0);
     }
 
+    function test_BidMatchEventsFollowAskPricePriority() public {
+        vm.prank(alice);
+        bytes32 lowAsk = engine.fill(_order(80, 1, 0), false);
+
+        vm.prank(bob);
+        bytes32 highAsk = engine.fill(_order(90, 1, 0), false);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(lowAsk, false, 1, 80);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(highAsk, false, 1, 90);
+
+        vm.prank(carol);
+        bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+    }
+
+    function test_AskMatchEventsFollowBidPricePriority() public {
+        vm.prank(alice);
+        bytes32 highBid = engine.fill(_order(100, 1, 0), true);
+
+        vm.prank(bob);
+        bytes32 lowBid = engine.fill(_order(90, 1, 0), true);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(highBid, true, 1, 100);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(lowBid, true, 1, 90);
+
+        vm.prank(carol);
+        bytes32 restingAsk = engine.fill(_order(80, 2, 0), false);
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(engine.bidRoot(), bytes32(0));
+    }
+
     function test_ConstructorRejectsInvalidTokens() public {
         vm.expectRevert(RadixMatchingEngine.InvalidToken.selector);
         new RadixMatchingEngine(address(0), address(quote));
