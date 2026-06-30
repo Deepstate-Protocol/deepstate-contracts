@@ -2001,6 +2001,97 @@ contract RadixMatchingEngineTest is Test {
         assertTrue(engine.askRoot() != branch);
     }
 
+    function test_SamePriceAskAggregateMatchStillLetsEachMakerClaim() public {
+        uint24 price = 50;
+
+        vm.prank(alice);
+        bytes32 firstAsk = engine.fill(_order(price, 2, 0), false);
+        vm.prank(bob);
+        bytes32 secondAsk = engine.fill(_order(price, 3, 0), false);
+
+        bytes32 aggregate = _branchFor(firstAsk, secondAsk);
+        assertEq(engine.askRoot(), aggregate);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(aggregate, false, 5, 250);
+
+        vm.prank(carol);
+        bytes32 restingBid = engine.fill(_order(price, 5, 0), true);
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(base.balanceOf(carol), 1_000_005);
+        assertEq(quote.balanceOf(address(engine)), 250);
+        assertEq(engine.ownerOfOrder(firstAsk), alice);
+        assertEq(engine.ownerOfOrder(secondAsk), bob);
+        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(firstAsk))), address(2));
+        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(secondAsk))), address(2));
+
+        vm.prank(alice);
+        (uint256 firstBaseAmount, uint256 firstQuoteAmount) = engine.cancel(firstAsk);
+
+        assertEq(firstBaseAmount, 0);
+        assertEq(firstQuoteAmount, 100);
+        assertEq(engine.ownerOfOrder(firstAsk), address(0));
+        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(firstAsk))), address(0));
+
+        vm.prank(bob);
+        (uint256 secondBaseAmount, uint256 secondQuoteAmount) = engine.cancel(secondAsk);
+
+        assertEq(secondBaseAmount, 0);
+        assertEq(secondQuoteAmount, 150);
+        assertEq(engine.ownerOfOrder(secondAsk), address(0));
+        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(secondAsk))), address(0));
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_SamePriceBidAggregateMatchStillLetsEachMakerClaim() public {
+        uint24 price = 70;
+
+        vm.prank(alice);
+        bytes32 firstBid = engine.fill(_order(price, 2, 0), true);
+        vm.prank(bob);
+        bytes32 secondBid = engine.fill(_order(price, 3, 0), true);
+
+        bytes32 aggregate = _branchFor(firstBid, secondBid);
+        assertEq(engine.bidRoot(), aggregate);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(aggregate, true, 5, 350);
+
+        vm.prank(carol);
+        bytes32 restingAsk = engine.fill(_order(price, 5, 0), false);
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(base.balanceOf(carol), 999_995);
+        assertEq(quote.balanceOf(carol), 1_000_350);
+        assertEq(base.balanceOf(address(engine)), 5);
+        assertEq(engine.ownerOfOrder(firstBid), alice);
+        assertEq(engine.ownerOfOrder(secondBid), bob);
+        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(firstBid))), address(1));
+        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(secondBid))), address(1));
+
+        vm.prank(alice);
+        (uint256 firstBaseAmount, uint256 firstQuoteAmount) = engine.cancel(firstBid);
+
+        assertEq(firstBaseAmount, 2);
+        assertEq(firstQuoteAmount, 0);
+        assertEq(engine.ownerOfOrder(firstBid), address(0));
+        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(firstBid))), address(0));
+
+        vm.prank(bob);
+        (uint256 secondBaseAmount, uint256 secondQuoteAmount) = engine.cancel(secondBid);
+
+        assertEq(secondBaseAmount, 3);
+        assertEq(secondQuoteAmount, 0);
+        assertEq(engine.ownerOfOrder(secondBid), address(0));
+        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(secondBid))), address(0));
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
     function test_BidMatchRevertsAtomicallyWhenQuotePullFails() public {
         address poorTaker = address(0xBAD);
 
