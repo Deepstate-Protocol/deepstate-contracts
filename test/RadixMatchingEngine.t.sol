@@ -2172,6 +2172,114 @@ contract RadixMatchingEngineTest is Test {
         assertEq(quote.balanceOf(address(engine)), 0);
     }
 
+    function test_AskDirtyRightSpineSurvivesBidRestAndMaterializesBeforeAskInsert() public {
+        uint24 price = 60;
+
+        vm.prank(alice);
+        bytes32 firstAsk = engine.fill(_order(price, 2, 0), false);
+        vm.prank(bob);
+        bytes32 secondAsk = engine.fill(_order(price, 3, 0), false);
+
+        bytes32 dirtyAnchor = _branchFor(firstAsk, secondAsk);
+        assertEq(engine.askRoot(), dirtyAnchor);
+
+        vm.prank(carol);
+        engine.fill(_order(price, 1, 0), true);
+
+        assertEq(engine.askRoot(), dirtyAnchor);
+        assertEq(_quantity(engine.askRoot()), 5);
+        assertEq(_subtreeQuantity(engine.askRoot()), 4);
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill(_order(price - 1, 1, 0), true);
+
+        assertEq(restingBid, _order(price - 1, 1, MAX_ORDER_NONCE - 2));
+        assertEq(engine.askRoot(), dirtyAnchor);
+        assertEq(_quantity(engine.askRoot()), 5);
+        assertEq(_subtreeQuantity(engine.askRoot()), 4);
+
+        vm.prank(carol);
+        bytes32 thirdAsk = engine.fill(_order(price + 1, 1, 0), false);
+
+        assertEq(thirdAsk, _order(price + 1, 1, MAX_ORDER_NONCE - 3));
+        assertEq(_quantity(engine.askRoot()), 5);
+        assertEq(_subtreeQuantity(engine.askRoot()), 5);
+
+        vm.prank(alice);
+        (uint256 firstBaseAmount, uint256 firstQuoteAmount) = engine.cancel(firstAsk);
+        vm.prank(bob);
+        (uint256 secondBaseAmount, uint256 secondQuoteAmount) = engine.cancel(secondAsk);
+        vm.prank(carol);
+        (uint256 thirdBaseAmount, uint256 thirdQuoteAmount) = engine.cancel(thirdAsk);
+        vm.prank(alice);
+        (uint256 bidBaseAmount, uint256 bidQuoteAmount) = engine.cancel(restingBid);
+
+        assertEq(firstBaseAmount, 1);
+        assertEq(firstQuoteAmount, 60);
+        assertEq(secondBaseAmount, 3);
+        assertEq(secondQuoteAmount, 0);
+        assertEq(thirdBaseAmount, 1);
+        assertEq(thirdQuoteAmount, 0);
+        assertEq(bidBaseAmount, 0);
+        assertEq(bidQuoteAmount, 59);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_BidDirtyRightSpineSurvivesAskRestAndMaterializesBeforeBidInsert() public {
+        uint24 price = 70;
+
+        vm.prank(alice);
+        bytes32 firstBid = engine.fill(_order(price, 2, 0), true);
+        vm.prank(bob);
+        bytes32 secondBid = engine.fill(_order(price, 3, 0), true);
+
+        bytes32 dirtyAnchor = _branchFor(firstBid, secondBid);
+        assertEq(engine.bidRoot(), dirtyAnchor);
+
+        vm.prank(carol);
+        engine.fill(_order(price, 1, 0), false);
+
+        assertEq(engine.bidRoot(), dirtyAnchor);
+        assertEq(_quantity(engine.bidRoot()), 5);
+        assertEq(_subtreeQuantity(engine.bidRoot()), 4);
+
+        vm.prank(carol);
+        bytes32 restingAsk = engine.fill(_order(price + 1, 1, 0), false);
+
+        assertEq(restingAsk, _order(price + 1, 1, MAX_ORDER_NONCE - 2));
+        assertEq(engine.bidRoot(), dirtyAnchor);
+        assertEq(_quantity(engine.bidRoot()), 5);
+        assertEq(_subtreeQuantity(engine.bidRoot()), 4);
+
+        vm.prank(alice);
+        bytes32 thirdBid = engine.fill(_order(price - 1, 1, 0), true);
+
+        assertEq(thirdBid, _order(price - 1, 1, MAX_ORDER_NONCE - 3));
+        assertEq(_quantity(engine.bidRoot()), 5);
+        assertEq(_subtreeQuantity(engine.bidRoot()), 5);
+
+        vm.prank(alice);
+        (uint256 firstBaseAmount, uint256 firstQuoteAmount) = engine.cancel(firstBid);
+        vm.prank(bob);
+        (uint256 secondBaseAmount, uint256 secondQuoteAmount) = engine.cancel(secondBid);
+        vm.prank(alice);
+        (uint256 thirdBaseAmount, uint256 thirdQuoteAmount) = engine.cancel(thirdBid);
+        vm.prank(carol);
+        (uint256 askBaseAmount, uint256 askQuoteAmount) = engine.cancel(restingAsk);
+
+        assertEq(firstBaseAmount, 1);
+        assertEq(firstQuoteAmount, 70);
+        assertEq(secondBaseAmount, 0);
+        assertEq(secondQuoteAmount, 210);
+        assertEq(thirdBaseAmount, 0);
+        assertEq(thirdQuoteAmount, 69);
+        assertEq(askBaseAmount, 1);
+        assertEq(askQuoteAmount, 0);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
     function test_BidMatchRevertsAtomicallyWhenQuotePullFails() public {
         address poorTaker = address(0xBAD);
 

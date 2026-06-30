@@ -788,6 +788,11 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         assertEq(askStats.quantity, expectedAskQuantity, "ask root quantity");
     }
 
+    function invariant_RightSpineQuantitiesNeverUnderstateLiveLeaves() public view {
+        _assertRightSpineQuantityUpperBounds(engine.bidRoot());
+        _assertRightSpineQuantityUpperBounds(engine.askRoot());
+    }
+
     function invariant_ModelRemainingQuantitiesMatchBook() public view {
         uint256 length = handler.orderCount();
 
@@ -1269,6 +1274,30 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
         _assertSubtreePricePriority(stats, isBidTree);
         _assertSinglePriceFastPathCoversSubtree(stats, leftStats, rightStats);
+    }
+
+    function _assertRightSpineQuantityUpperBounds(bytes32 node) private view {
+        while (node != bytes32(0) && _isBranch(node)) {
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+            uint192 actualQuantity = _actualSubtreeQuantity(node);
+
+            assertGe(uint256(_quantity(node)), uint256(actualQuantity), "right spine quantity bound");
+            assertTrue(leftNode != node, "right spine left self-cycle");
+            assertTrue(rightNode != node, "right spine right self-cycle");
+            assertTrue(leftNode != rightNode, "right spine duplicate children");
+
+            node = rightNode;
+        }
+    }
+
+    function _actualSubtreeQuantity(bytes32 node) private view returns (uint192 quantity) {
+        if (node == bytes32(0)) return 0;
+
+        if (!_isBranch(node)) return _quantity(node);
+
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+        quantity = _actualSubtreeQuantity(leftNode);
+        quantity += _actualSubtreeQuantity(rightNode);
     }
 
     function _assertBranchOrder(uint8 branchDepth, SubtreeStats memory leftStats, SubtreeStats memory rightStats)
