@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {RadixMatchingEngine} from "../src/RadixMatchingEngine.sol";
 import {TestERC20} from "./RadixMatchingEngine.t.sol";
 
@@ -24,6 +25,9 @@ contract RadixMatchingEngineHandler is Test {
     uint192 internal constant MAX_ORDER_QUANTITY = type(uint192).max / 96;
     uint256 internal constant INITIAL_BALANCE = type(uint216).max;
     uint24 internal constant SAME_PRICE = 777_777;
+    bytes32 internal constant ORDER_RESTED_TOPIC = keccak256("OrderRested(bytes32,address,bool)");
+    bytes32 internal constant ORDER_MATCHED_TOPIC = keccak256("OrderMatched(bytes32,bool,uint192,uint256)");
+    bytes32 internal constant ORDER_CANCELLED_TOPIC = keccak256("OrderCancelled(bytes32,address,uint256,uint256)");
 
     address[] internal actors;
     TrackedOrder[] internal trackedOrders;
@@ -99,13 +103,20 @@ contract RadixMatchingEngineHandler is Test {
         TrackedOrder storage tracked = trackedOrders[index];
         if (!tracked.active) return;
 
-        vm.prank(tracked.owner);
+        bytes32 order = tracked.order;
+        address owner = tracked.owner;
+
+        vm.recordLogs();
+        vm.prank(owner);
         try ENGINE.cancel(tracked.order) returns (uint256 baseAmount, uint256 quoteAmount) {
+            Vm.Log[] memory entries = vm.getRecordedLogs();
             (uint256 expectedBaseAmount, uint256 expectedQuoteAmount) = _cancelAmounts(index);
             assertEq(baseAmount, expectedBaseAmount, "cancel base amount");
             assertEq(quoteAmount, expectedQuoteAmount, "cancel quote amount");
+            _assertCancelLogs(entries, order, owner, baseAmount, quoteAmount);
             _applyCancel(index);
         } catch (bytes memory reason) {
+            vm.getRecordedLogs();
             ++unexpectedCancelReverts;
             if (reason.length >= 4) {
                 // forge-lint: disable-next-line(unsafe-typecast)
@@ -247,10 +258,15 @@ contract RadixMatchingEngineHandler is Test {
         uint192 quantity = uint192(bound(quantitySeed, 1, uint256(MAX_ORDER_QUANTITY)));
         bytes32 order = bytes32((uint256(price) << 232) | (uint256(quantity) << 40));
 
+        vm.recordLogs();
         vm.prank(actor);
         try ENGINE.fill(order, isBid) returns (bytes32 restingOrder) {
-            _applyFill(actorIndex, price, quantity, isBid, restingOrder);
+            Vm.Log[] memory entries = vm.getRecordedLogs();
+            (uint192 remaining, uint192 baseFilled, uint256 quoteAmount) =
+                _applyFill(actorIndex, price, quantity, isBid, restingOrder);
+            _assertFillLogs(entries, actor, isBid, restingOrder, remaining, baseFilled, quoteAmount);
         } catch (bytes memory reason) {
+            vm.getRecordedLogs();
             ++unexpectedFillReverts;
             if (reason.length >= 4) {
                 // forge-lint: disable-next-line(unsafe-typecast)
@@ -259,10 +275,11 @@ contract RadixMatchingEngineHandler is Test {
         }
     }
 
-    function _applyFill(uint256 actorIndex, uint24 price, uint192 quantity, bool isBid, bytes32 restingOrder) private {
-        uint192 remaining = quantity;
-        uint192 baseFilled;
-        uint256 quoteAmount;
+    function _applyFill(uint256 actorIndex, uint24 price, uint192 quantity, bool isBid, bytes32 restingOrder)
+        private
+        returns (uint192 remaining, uint192 baseFilled, uint256 quoteAmount)
+    {
+        remaining = quantity;
 
         while (remaining != 0) {
             (uint256 matchIndex, bool found) = _bestMatchIndex(price, isBid);
@@ -290,7 +307,7 @@ contract RadixMatchingEngineHandler is Test {
 
         if (remaining == 0) {
             assertEq(restingOrder, bytes32(0), "unexpected resting order");
-            return;
+            return (remaining, baseFilled, quoteAmount);
         }
 
         uint40 nonce = uint40(uint256(type(uint40).max) - trackedOrders.length);
@@ -307,6 +324,92 @@ contract RadixMatchingEngineHandler is Test {
                 remainingQuantity: remaining
             })
         );
+        return (remaining, baseFilled, quoteAmount);
+    }
+
+    function _assertFillLogs(
+        Vm.Log[] memory entries,
+        address actor,
+        bool isBid,
+        bytes32 restingOrder,
+        uint192 remaining,
+        uint192 baseFilled,
+        uint256 quoteAmount
+    ) private {
+        uint256 matchedEventCount;
+        uint192 matchedQuantity;
+        uint256 matchedQuoteAmount;
+        uint256 restedEventCount;
+
+        for (uint256 i; i < entries.length; ++i) {
+            Vm.Log memory entry = entries[i];
+            if (entry.emitter != address(ENGINE)) continue;
+            assertTrue(entry.topics.length != 0, "engine anonymous event");
+
+            bytes32 topic = entry.topics[0];
+            if (topic == ORDER_RESTED_TOPIC) {
+                ++restedEventCount;
+                assertEq(entry.topics.length, 4, "rested topic count");
+                assertEq(entry.topics[1], restingOrder, "rested order log");
+                assertEq(entry.topics[2], _addressTopic(actor), "rested owner log");
+                assertEq(entry.topics[3], _boolTopic(isBid), "rested side log");
+                assertEq(entry.data.length, 0, "rested data");
+            } else if (topic == ORDER_MATCHED_TOPIC) {
+                ++matchedEventCount;
+                assertEq(entry.topics.length, 3, "matched topic count");
+                assertTrue(entry.topics[1] != bytes32(0), "matched node log");
+                assertEq(entry.topics[2], _boolTopic(!isBid), "matched side log");
+
+                (uint192 eventQuantity, uint256 eventQuoteAmount) = abi.decode(entry.data, (uint192, uint256));
+                assertGt(eventQuantity, 0, "matched quantity log");
+                matchedQuantity += eventQuantity;
+                matchedQuoteAmount += eventQuoteAmount;
+            } else if (topic == ORDER_CANCELLED_TOPIC) {
+                fail("cancel event during fill");
+            } else {
+                fail("unknown engine event during fill");
+            }
+        }
+
+        assertEq(restedEventCount, restingOrder == bytes32(0) ? 0 : 1, "rested event count");
+        assertEq(matchedQuantity, baseFilled, "matched quantity sum");
+        assertEq(matchedQuoteAmount, quoteAmount, "matched quote sum");
+        assertEq(matchedEventCount == 0, baseFilled == 0, "matched event count");
+        assertEq(remaining == 0, restingOrder == bytes32(0), "resting event remainder");
+    }
+
+    function _assertCancelLogs(
+        Vm.Log[] memory entries,
+        bytes32 order,
+        address owner,
+        uint256 baseAmount,
+        uint256 quoteAmount
+    ) private {
+        uint256 cancelledEventCount;
+
+        for (uint256 i; i < entries.length; ++i) {
+            Vm.Log memory entry = entries[i];
+            if (entry.emitter != address(ENGINE)) continue;
+            assertTrue(entry.topics.length != 0, "engine anonymous event");
+
+            bytes32 topic = entry.topics[0];
+            if (topic == ORDER_CANCELLED_TOPIC) {
+                ++cancelledEventCount;
+                assertEq(entry.topics.length, 3, "cancel topic count");
+                assertEq(entry.topics[1], order, "cancel order log");
+                assertEq(entry.topics[2], _addressTopic(owner), "cancel owner log");
+
+                (uint256 eventBaseAmount, uint256 eventQuoteAmount) = abi.decode(entry.data, (uint256, uint256));
+                assertEq(eventBaseAmount, baseAmount, "cancel base log");
+                assertEq(eventQuoteAmount, quoteAmount, "cancel quote log");
+            } else if (topic == ORDER_RESTED_TOPIC || topic == ORDER_MATCHED_TOPIC) {
+                fail("fill event during cancel");
+            } else {
+                fail("unknown engine event during cancel");
+            }
+        }
+
+        assertEq(cancelledEventCount, 1, "cancel event count");
     }
 
     function _applyCancel(uint256 index) private {
@@ -421,6 +524,14 @@ contract RadixMatchingEngineHandler is Test {
 
     function _quoteValue(uint24 price, uint192 quantity) private pure returns (uint256) {
         return uint256(price) * uint256(quantity);
+    }
+
+    function _addressTopic(address account) private pure returns (bytes32) {
+        return bytes32(uint256(uint160(account)));
+    }
+
+    function _boolTopic(bool value) private pure returns (bytes32) {
+        return bytes32(uint256(value ? 1 : 0));
     }
 
     function _nonce(bytes32 order) private pure returns (uint40) {
