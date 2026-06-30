@@ -650,6 +650,11 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         _assertBranchesReachableByContractRouting(engine.askRoot(), engine.askRoot(), false);
     }
 
+    function invariant_OwnedLiveBranchesAreBackedByPartialOrders() public view {
+        _assertOwnedLiveBranchesBackedByPartialOrders(engine.bidRoot(), true);
+        _assertOwnedLiveBranchesBackedByPartialOrders(engine.askRoot(), false);
+    }
+
     function invariant_LiveLeafSideKeysAreUnique() public view {
         bytes32[] memory seenSideKeys = new bytes32[](handler.orderCount() + 2);
         uint256 seenCount = _assertUniqueLiveLeafSideKeys(engine.bidRoot(), seenSideKeys, 0);
@@ -992,6 +997,36 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
         _assertBranchesReachableByContractRouting(root, leftNode, isBidTree);
         _assertBranchesReachableByContractRouting(root, rightNode, isBidTree);
+    }
+
+    function _assertOwnedLiveBranchesBackedByPartialOrders(bytes32 node, bool isBidTree) private view {
+        if (node == bytes32(0) || !_isBranch(node)) return;
+
+        address owner = engine.ownerOfOrder(node);
+        if (owner != address(0)) _assertOwnedBranchBackedByPartialOrder(node, owner, isBidTree);
+
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+        _assertOwnedLiveBranchesBackedByPartialOrders(leftNode, isBidTree);
+        _assertOwnedLiveBranchesBackedByPartialOrders(rightNode, isBidTree);
+    }
+
+    function _assertOwnedBranchBackedByPartialOrder(bytes32 branchNode, address owner, bool isBidTree) private view {
+        uint256 matches;
+        uint256 length = handler.orderCount();
+
+        for (uint256 i; i < length; ++i) {
+            (bytes32 order, address trackedOwner, bool trackedIsBid, bool active) = handler.orderAt(i);
+            if (order != branchNode) continue;
+
+            assertTrue(active, "owned branch inactive order");
+            assertEq(trackedOwner, owner, "owned branch owner");
+            assertEq(trackedIsBid, isBidTree, "owned branch side");
+            assertGt(handler.remainingQuantityAt(i), 0, "owned branch filled order");
+            assertLt(handler.remainingQuantityAt(i), _quantity(order), "owned branch unfilled order");
+            ++matches;
+        }
+
+        assertEq(matches, 1, "owned branch backing");
     }
 
     function _containsBranchByContractRouting(bytes32 root, bytes32 target, bool isBidTree)
