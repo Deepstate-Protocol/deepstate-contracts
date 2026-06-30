@@ -17,6 +17,15 @@ contract RadixMatchingEngineHandler is Test {
         uint192 remainingQuantity;
     }
 
+    struct FillLogState {
+        uint256 matchedEventCount;
+        uint192 matchedQuantity;
+        uint256 matchedQuoteAmount;
+        uint256 restedEventCount;
+        bool sawMatchedPrice;
+        uint24 previousMatchedPrice;
+    }
+
     TestERC20 internal immutable BASE;
     TestERC20 internal immutable QUOTE;
     RadixMatchingEngine internal immutable ENGINE;
@@ -336,10 +345,7 @@ contract RadixMatchingEngineHandler is Test {
         uint192 baseFilled,
         uint256 quoteAmount
     ) private {
-        uint256 matchedEventCount;
-        uint192 matchedQuantity;
-        uint256 matchedQuoteAmount;
-        uint256 restedEventCount;
+        FillLogState memory state;
 
         for (uint256 i; i < entries.length; ++i) {
             Vm.Log memory entry = entries[i];
@@ -348,25 +354,35 @@ contract RadixMatchingEngineHandler is Test {
 
             bytes32 topic = entry.topics[0];
             if (topic == ORDER_RESTED_TOPIC) {
-                ++restedEventCount;
+                ++state.restedEventCount;
                 assertEq(entry.topics.length, 4, "rested topic count");
                 assertEq(entry.topics[1], restingOrder, "rested order log");
                 assertEq(entry.topics[2], _addressTopic(actor), "rested owner log");
                 assertEq(entry.topics[3], _boolTopic(isBid), "rested side log");
                 assertEq(entry.data.length, 0, "rested data");
             } else if (topic == ORDER_MATCHED_TOPIC) {
-                ++matchedEventCount;
+                ++state.matchedEventCount;
                 assertEq(entry.topics.length, 3, "matched topic count");
                 bytes32 restingNode = entry.topics[1];
                 assertTrue(restingNode != bytes32(0), "matched node log");
                 assertEq(entry.topics[2], _boolTopic(!isBid), "matched side log");
 
                 (uint192 eventQuantity, uint256 eventQuoteAmount) = abi.decode(entry.data, (uint192, uint256));
+                uint24 eventPrice = _price(restingNode);
                 assertGt(eventQuantity, 0, "matched quantity log");
                 assertLe(eventQuantity, _quantity(restingNode), "matched node quantity log");
-                assertEq(eventQuoteAmount, _quoteValue(_price(restingNode), eventQuantity), "matched quote price log");
-                matchedQuantity += eventQuantity;
-                matchedQuoteAmount += eventQuoteAmount;
+                assertEq(eventQuoteAmount, _quoteValue(eventPrice, eventQuantity), "matched quote price log");
+                if (state.sawMatchedPrice) {
+                    if (isBid) {
+                        assertGe(eventPrice, state.previousMatchedPrice, "matched ask price order");
+                    } else {
+                        assertLe(eventPrice, state.previousMatchedPrice, "matched bid price order");
+                    }
+                }
+                state.sawMatchedPrice = true;
+                state.previousMatchedPrice = eventPrice;
+                state.matchedQuantity += eventQuantity;
+                state.matchedQuoteAmount += eventQuoteAmount;
             } else if (topic == ORDER_CANCELLED_TOPIC) {
                 fail("cancel event during fill");
             } else {
@@ -374,12 +390,12 @@ contract RadixMatchingEngineHandler is Test {
             }
         }
 
-        assertEq(restedEventCount, restingOrder == bytes32(0) ? 0 : 1, "rested event count");
-        assertEq(matchedQuantity, baseFilled, "matched quantity sum");
-        assertEq(matchedQuoteAmount, quoteAmount, "matched quote sum");
-        assertEq(matchedEventCount == 0, baseFilled == 0, "matched event count");
+        assertEq(state.restedEventCount, restingOrder == bytes32(0) ? 0 : 1, "rested event count");
+        assertEq(state.matchedQuantity, baseFilled, "matched quantity sum");
+        assertEq(state.matchedQuoteAmount, quoteAmount, "matched quote sum");
+        assertEq(state.matchedEventCount == 0, baseFilled == 0, "matched event count");
         assertEq(remaining == 0, restingOrder == bytes32(0), "resting event remainder");
-        assertTrue(restedEventCount != 0 || matchedEventCount != 0, "fill event count");
+        assertTrue(state.restedEventCount != 0 || state.matchedEventCount != 0, "fill event count");
     }
 
     function _assertCancelLogs(
