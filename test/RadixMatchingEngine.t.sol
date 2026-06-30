@@ -1639,6 +1639,30 @@ contract RadixMatchingEngineTest is Test {
         assertEq(rightNode, firstBid);
     }
 
+    function test_SamePriceAskBranchSplitsAtFinalNonceBit() public {
+        uint24 price = 321;
+
+        vm.prank(alice);
+        bytes32 firstAsk = engine.fill(_order(price, 1, 0), false);
+        vm.prank(bob);
+        bytes32 secondAsk = engine.fill(_order(price, 1, 0), false);
+        vm.prank(carol);
+        bytes32 thirdAsk = engine.fill(_order(price, 1, 0), false);
+
+        assertEq(_nonce(firstAsk), MAX_ORDER_NONCE);
+        assertEq(_nonce(secondAsk), MAX_ORDER_NONCE - 1);
+        assertEq(_nonce(thirdAsk), MAX_ORDER_NONCE - 2);
+        assertEq(_commonPrefix(_askSortKey(firstAsk), _askSortKey(secondAsk)), 63);
+
+        bytes32 finalSplit = _branchFor(firstAsk, secondAsk);
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(finalSplit);
+
+        assertEq(_pathKey(finalSplit), _pathKey(firstAsk));
+        assertEq(_quantity(finalSplit), _quantity(firstAsk) + _quantity(secondAsk));
+        assertEq(leftNode, secondAsk);
+        assertEq(rightNode, firstAsk);
+    }
+
     function test_InsertPreservesChildBranchWhenItReusesParentAddress() public {
         vm.prank(alice);
         bytes32 firstBid = engine.fill(_order(108, 77, 0), true);
@@ -1664,6 +1688,35 @@ contract RadixMatchingEngineTest is Test {
         (bytes32 childLeft, bytes32 childRight) = engine.tree(reusedChild);
         assertEq(childLeft, thirdBid);
         assertEq(childRight, firstBid);
+    }
+
+    function test_AskInsertPreservesChildBranchWhenItReusesParentAddress() public {
+        vm.prank(alice);
+        bytes32 firstAsk = engine.fill(_order(108, 77, 0), false);
+        vm.prank(bob);
+        bytes32 secondAsk = engine.fill(_order(14, 19, 0), false);
+
+        bytes32 oldRoot = _branchFor(firstAsk, secondAsk);
+        assertEq(engine.askRoot(), oldRoot);
+
+        vm.prank(carol);
+        bytes32 thirdAsk = engine.fill(_order(80, 19, 0), false);
+
+        bytes32 reusedChild = _branchFor(firstAsk, thirdAsk);
+        bytes32 newRoot = _branchFor(secondAsk, reusedChild);
+        (bytes32 expectedRootLeft, bytes32 expectedRootRight) = _expectedBranchChildren(secondAsk, reusedChild, false);
+        (bytes32 expectedChildLeft, bytes32 expectedChildRight) = _expectedBranchChildren(firstAsk, thirdAsk, false);
+
+        assertEq(reusedChild, oldRoot);
+        assertEq(engine.askRoot(), newRoot);
+
+        (bytes32 rootLeft, bytes32 rootRight) = engine.tree(newRoot);
+        assertEq(rootLeft, expectedRootLeft);
+        assertEq(rootRight, expectedRootRight);
+
+        (bytes32 childLeft, bytes32 childRight) = engine.tree(reusedChild);
+        assertEq(childLeft, expectedChildLeft);
+        assertEq(childRight, expectedChildRight);
     }
 
     function test_PricePrefixCombFullyMatchesAndClaims() public {
