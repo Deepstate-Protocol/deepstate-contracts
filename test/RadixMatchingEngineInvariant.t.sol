@@ -434,6 +434,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         uint192 quantity;
         uint64 minKey;
         uint64 maxKey;
+        uint64 maxPathKey;
         uint24 bestPrice;
         uint24 leftmostPrice;
         uint24 rightmostPrice;
@@ -1044,6 +1045,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
             stats.quantity = _quantity(node);
             stats.minKey = key;
             stats.maxKey = key;
+            stats.maxPathKey = _pathKey(node);
             stats.bestPrice = _price(node);
             stats.leftmostPrice = stats.bestPrice;
             stats.rightmostPrice = stats.bestPrice;
@@ -1065,11 +1067,13 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         stats.quantity = leftStats.quantity + rightStats.quantity;
         stats.minKey = leftStats.minKey;
         stats.maxKey = rightStats.maxKey;
+        stats.maxPathKey = leftStats.maxPathKey > rightStats.maxPathKey ? leftStats.maxPathKey : rightStats.maxPathKey;
         stats.bestPrice = rightStats.bestPrice;
         stats.leftmostPrice = leftStats.leftmostPrice;
         stats.rightmostPrice = rightStats.rightmostPrice;
         stats.exists = true;
         assertEq(_quantity(node), stats.quantity, "branch quantity");
+        assertEq(_pathKey(node), stats.maxPathKey, "branch max path");
         _assertStoredNodeKeyRepresentsSubtree(node, stats, isBidTree);
         _assertSubtreePricePriority(stats, isBidTree);
         _assertSinglePriceFastPathCoversSubtree(stats, leftStats, rightStats);
