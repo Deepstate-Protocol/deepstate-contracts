@@ -1,0 +1,52 @@
+name: Verify
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      deep:
+        description: Run the deep invariant profile.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
+      RUN_DEEP: ${{ github.event_name == 'workflow_dispatch' && inputs.deep }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Slither
+        run: python -m pip install slither-analyzer
+
+      - name: Verify
+        run: |
+          if [[ "$RUN_DEEP" == "true" ]]; then
+            make verify-deep SLITHER=slither
+          else
+            make verify SLITHER=slither
+          fi
