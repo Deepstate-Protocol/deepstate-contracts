@@ -1318,6 +1318,96 @@ contract RadixMatchingEngineTest is Test {
         assertEq(quoteAmount, 68);
     }
 
+    function test_PartialAskOriginalCanAliasRootBranchAndStillCancel() public {
+        uint24 price = 10;
+
+        vm.prank(alice);
+        bytes32 originalAsk = engine.fill(_order(price, 3, 0), false);
+
+        vm.prank(bob);
+        bytes32 fullyMatchedBid = engine.fill(_order(price, 1, 0), true);
+
+        assertEq(fullyMatchedBid, bytes32(0));
+
+        bytes32 reducedAsk = _order(price, 2, _nonce(originalAsk));
+        assertEq(engine.askRoot(), reducedAsk);
+
+        vm.prank(carol);
+        bytes32 laterAsk = engine.fill(_order(price, 1, 0), false);
+
+        bytes32 rootAlias = _branchFor(reducedAsk, laterAsk);
+        (bytes32 expectedLeft, bytes32 expectedRight) = _expectedBranchChildren(reducedAsk, laterAsk, false);
+
+        assertEq(rootAlias, originalAsk);
+        assertEq(engine.askRoot(), originalAsk);
+        _assertTreeBranchStorage(originalAsk, expectedLeft, expectedRight, "ask root alias");
+        assertEq(engine.ownerOfOrder(originalAsk), alice);
+        assertEq(engine.ownerOfOrder(reducedAsk), address(0));
+        assertEq(engine.ownerOfOrder(laterAsk), carol);
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(originalAsk);
+
+        assertEq(baseAmount, 2);
+        assertEq(quoteAmount, price);
+        assertEq(engine.askRoot(), laterAsk);
+        assertEq(engine.ownerOfOrder(originalAsk), address(0));
+        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(originalAsk))), address(0));
+        assertEq(engine.ownerOfOrder(laterAsk), carol);
+
+        vm.prank(carol);
+        (baseAmount, quoteAmount) = engine.cancel(laterAsk);
+
+        assertEq(baseAmount, 1);
+        assertEq(quoteAmount, 0);
+        assertEq(engine.askRoot(), bytes32(0));
+    }
+
+    function test_PartialBidOriginalCanAliasRootBranchAndStillCancel() public {
+        uint24 price = 10;
+
+        vm.prank(alice);
+        bytes32 originalBid = engine.fill(_order(price, 3, 0), true);
+
+        vm.prank(bob);
+        bytes32 fullyMatchedAsk = engine.fill(_order(price, 1, 0), false);
+
+        assertEq(fullyMatchedAsk, bytes32(0));
+
+        bytes32 reducedBid = _order(price, 2, _nonce(originalBid));
+        assertEq(engine.bidRoot(), reducedBid);
+
+        vm.prank(carol);
+        bytes32 laterBid = engine.fill(_order(price, 1, 0), true);
+
+        bytes32 rootAlias = _branchFor(reducedBid, laterBid);
+        (bytes32 expectedLeft, bytes32 expectedRight) = _expectedBranchChildren(reducedBid, laterBid, true);
+
+        assertEq(rootAlias, originalBid);
+        assertEq(engine.bidRoot(), originalBid);
+        _assertTreeBranchStorage(originalBid, expectedLeft, expectedRight, "bid root alias");
+        assertEq(engine.ownerOfOrder(originalBid), alice);
+        assertEq(engine.ownerOfOrder(reducedBid), address(0));
+        assertEq(engine.ownerOfOrder(laterBid), carol);
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(originalBid);
+
+        assertEq(baseAmount, 1);
+        assertEq(quoteAmount, uint256(price) * 2);
+        assertEq(engine.bidRoot(), laterBid);
+        assertEq(engine.ownerOfOrder(originalBid), address(0));
+        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(originalBid))), address(0));
+        assertEq(engine.ownerOfOrder(laterBid), carol);
+
+        vm.prank(carol);
+        (baseAmount, quoteAmount) = engine.cancel(laterBid);
+
+        assertEq(baseAmount, 0);
+        assertEq(quoteAmount, price);
+        assertEq(engine.bidRoot(), bytes32(0));
+    }
+
     function test_PartialFillOriginalOrderCanAliasBranchAndStillClaimAfterFullFill() public {
         address d00d = address(0xD00D);
         _fundAndApprove(d00d);
