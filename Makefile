@@ -1,7 +1,9 @@
-.PHONY: fmt lint test invariant invariant-deep gas-runtime snapshot-runtime snapshot-runtime-check build-size coverage coverage-check slither formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
+.PHONY: fmt lint test invariant invariant-deep invariant-deep-shard invariant-deep-shards gas-runtime snapshot-runtime snapshot-runtime-check build-size coverage coverage-check slither formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
 
 INVARIANT_RUNS ?= 2048
 INVARIANT_DEPTH ?= 64
+INVARIANT_SHARDS ?= 8
+INVARIANT_SHARD ?= 1
 COVERAGE_FILE ?= src/RadixMatchingEngine.sol
 COVERAGE_MIN_LINES ?= 100
 COVERAGE_MIN_STATEMENTS ?= 100
@@ -30,6 +32,12 @@ invariant:
 
 invariant-deep:
 	FOUNDRY_INVARIANT_RUNS=$(INVARIANT_RUNS) FOUNDRY_INVARIANT_DEPTH=$(INVARIANT_DEPTH) forge test --force --match-contract '.*RadixMatchingEngineInvariantTest.*' --match-test 'invariant_.*'
+
+invariant-deep-shard:
+	python3 script/run_invariant_shards.py --runs "$(INVARIANT_RUNS)" --depth "$(INVARIANT_DEPTH)" --shards "$(INVARIANT_SHARDS)" --shard "$(INVARIANT_SHARD)"
+
+invariant-deep-shards:
+	python3 script/run_invariant_shards.py --runs "$(INVARIANT_RUNS)" --depth "$(INVARIANT_DEPTH)" --shards "$(INVARIANT_SHARDS)" --all
 
 gas-runtime:
 	forge test --force --match-contract RadixMatchingEngineGasTest --gas-report
@@ -77,6 +85,6 @@ formal-kevm:
 
 verify: fmt lint test invariant snapshot-runtime-check build-size slither
 
-verify-deep: fmt lint test invariant-deep snapshot-runtime-check build-size slither
+verify-deep: fmt lint test invariant-deep-shards snapshot-runtime-check build-size slither
 
-verify-security: fmt lint test invariant-deep snapshot-runtime-check build-size slither coverage-check formal-halmos
+verify-security: fmt lint test invariant-deep-shards snapshot-runtime-check build-size slither coverage-check formal-halmos
