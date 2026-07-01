@@ -46,9 +46,11 @@ Higher order nonce still means earlier time priority at the same price.
 ```sh
 make verify
 make verify-deep
+make verify-security
 make gas-runtime
 make snapshot-runtime
 make snapshot-runtime-check
+make coverage
 ```
 
 Equivalent individual commands:
@@ -62,11 +64,13 @@ forge test --force --match-contract RadixMatchingEngineGasTest --gas-report
 forge snapshot --force --match-contract RadixMatchingEngineGasTest --snap .gas-snapshot.runtime
 forge snapshot --force --match-contract RadixMatchingEngineGasTest --check .gas-snapshot.runtime
 forge build --sizes
-slither src/RadixMatchingEngine.sol
+slither src/RadixMatchingEngine.sol --config-file slither.config.json --exclude-informational
+forge coverage --report summary
 ```
 
 `gas-runtime` and `snapshot-runtime` use a fixed harness that pauses setup gas and meters one target `fill` or `cancel` call per test. Deployment-heavy negative-token and reentrancy tests remain in `make verify`, but they are intentionally outside the runtime gas profile.
 `make verify` and `make verify-deep` include `snapshot-runtime-check` so runtime gas drift is reviewed instead of silently accepted.
+`make verify-security` is the heavyweight local gate: it runs the deep invariant profile, runtime gas snapshot check, build-size check, clean Slither gate, and Forge coverage summary.
 
 Deploy script:
 
