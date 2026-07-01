@@ -2,5 +2,6 @@
   "solc_remaps": "solady/=lib/solady/src/",
   "filter_paths": "lib|test|script",
   "exclude_dependencies": true,
+  "exclude_informational": true,
   "fail_on": "medium"
 }

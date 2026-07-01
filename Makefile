@@ -1,4 +1,4 @@
-.PHONY: fmt lint test invariant invariant-deep gas-runtime snapshot-runtime snapshot-runtime-check build-size slither verify verify-deep
+.PHONY: fmt lint test invariant invariant-deep gas-runtime snapshot-runtime snapshot-runtime-check build-size coverage slither verify verify-deep
 
 INVARIANT_RUNS ?= 2048
 INVARIANT_DEPTH ?= 64
@@ -31,8 +31,11 @@ snapshot-runtime-check:
 build-size:
 	forge build --sizes
 
+coverage:
+	forge coverage --report summary
+
 slither:
-	$(SLITHER) src/RadixMatchingEngine.sol
+	$(SLITHER) src/RadixMatchingEngine.sol --config-file slither.config.json --exclude-informational
 
 verify: fmt lint test invariant snapshot-runtime-check build-size slither
 
