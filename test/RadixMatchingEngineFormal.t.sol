@@ -118,6 +118,164 @@ contract RadixMatchingEngineFormalTest is Test {
         assert(quote.balanceOf(BOB) == INITIAL_BALANCE + _quoteValue(price, matched));
     }
 
+    function testFuzz_DirtySamePriceAskRightSpineConserves(
+        uint8 priceSeed,
+        uint8 firstQtySeed,
+        uint8 secondQtySeed,
+        uint8 firstFillSeed
+    ) public {
+        uint24 price = _price(priceSeed);
+        uint192 firstQty = _qtyAtLeastTwo(firstQtySeed);
+        uint192 secondQty = _qty(secondQtySeed);
+        uint192 firstFill = _partialFill(firstFillSeed, firstQty);
+        uint192 remaining = firstQty - firstFill;
+
+        vm.prank(ALICE);
+        bytes32 firstAsk = engine.fill(_order(price, firstQty, 0), false);
+        vm.prank(BOB);
+        bytes32 secondAsk = engine.fill(_order(price, secondQty, 0), false);
+
+        vm.prank(CAROL);
+        assert(engine.fill(_order(price, firstFill, 0), true) == bytes32(0));
+
+        vm.prank(CAROL);
+        assert(engine.fill(_order(price, remaining + secondQty, 0), true) == bytes32(0));
+
+        vm.prank(ALICE);
+        (uint256 firstBase, uint256 firstQuote) = engine.cancel(firstAsk);
+        vm.prank(BOB);
+        (uint256 secondBase, uint256 secondQuote) = engine.cancel(secondAsk);
+
+        assert(firstBase == 0);
+        assert(firstQuote == _quoteValue(price, firstQty));
+        assert(secondBase == 0);
+        assert(secondQuote == _quoteValue(price, secondQty));
+        _assertEmptyBook();
+        assert(base.balanceOf(CAROL) == INITIAL_BALANCE + firstQty + secondQty);
+        assert(quote.balanceOf(CAROL) == INITIAL_BALANCE - _quoteValue(price, firstQty + secondQty));
+    }
+
+    function testFuzz_DirtySamePriceBidRightSpineConserves(
+        uint8 priceSeed,
+        uint8 firstQtySeed,
+        uint8 secondQtySeed,
+        uint8 firstFillSeed
+    ) public {
+        uint24 price = _price(priceSeed);
+        uint192 firstQty = _qtyAtLeastTwo(firstQtySeed);
+        uint192 secondQty = _qty(secondQtySeed);
+        uint192 firstFill = _partialFill(firstFillSeed, firstQty);
+        uint192 remaining = firstQty - firstFill;
+
+        vm.prank(ALICE);
+        bytes32 firstBid = engine.fill(_order(price, firstQty, 0), true);
+        vm.prank(BOB);
+        bytes32 secondBid = engine.fill(_order(price, secondQty, 0), true);
+
+        vm.prank(CAROL);
+        assert(engine.fill(_order(price, firstFill, 0), false) == bytes32(0));
+
+        vm.prank(CAROL);
+        assert(engine.fill(_order(price, remaining + secondQty, 0), false) == bytes32(0));
+
+        vm.prank(ALICE);
+        (uint256 firstBase, uint256 firstQuote) = engine.cancel(firstBid);
+        vm.prank(BOB);
+        (uint256 secondBase, uint256 secondQuote) = engine.cancel(secondBid);
+
+        assert(firstBase == firstQty);
+        assert(firstQuote == 0);
+        assert(secondBase == secondQty);
+        assert(secondQuote == 0);
+        _assertEmptyBook();
+        assert(base.balanceOf(CAROL) == INITIAL_BALANCE - firstQty - secondQty);
+        assert(quote.balanceOf(CAROL) == INITIAL_BALANCE + _quoteValue(price, firstQty + secondQty));
+    }
+
+    function testFuzz_DirtyMixedPriceAskRightSpineConserves(
+        uint8 lowPriceSeed,
+        uint8 highPriceOffsetSeed,
+        uint8 firstQtySeed,
+        uint8 secondQtySeed,
+        uint8 firstFillSeed
+    ) public {
+        uint24 lowPrice = _price(lowPriceSeed);
+        uint24 highPrice = lowPrice + _priceOffset(highPriceOffsetSeed);
+        uint192 firstQty = _qtyAtLeastTwo(firstQtySeed);
+        uint192 secondQty = _qty(secondQtySeed);
+        uint192 firstFill = _partialFill(firstFillSeed, firstQty);
+        uint192 remaining = firstQty - firstFill;
+
+        vm.prank(ALICE);
+        bytes32 lowAsk = engine.fill(_order(lowPrice, firstQty, 0), false);
+        vm.prank(BOB);
+        bytes32 highAsk = engine.fill(_order(highPrice, secondQty, 0), false);
+
+        vm.prank(CAROL);
+        assert(engine.fill(_order(lowPrice, firstFill, 0), true) == bytes32(0));
+
+        vm.prank(CAROL);
+        assert(engine.fill(_order(highPrice, remaining + secondQty, 0), true) == bytes32(0));
+
+        vm.prank(ALICE);
+        (uint256 lowBase, uint256 lowQuote) = engine.cancel(lowAsk);
+        vm.prank(BOB);
+        (uint256 highBase, uint256 highQuote) = engine.cancel(highAsk);
+
+        assert(lowBase == 0);
+        assert(lowQuote == _quoteValue(lowPrice, firstQty));
+        assert(highBase == 0);
+        assert(highQuote == _quoteValue(highPrice, secondQty));
+        _assertEmptyBook();
+        assert(base.balanceOf(CAROL) == INITIAL_BALANCE + firstQty + secondQty);
+        assert(
+            quote.balanceOf(CAROL)
+                == INITIAL_BALANCE - _quoteValue(lowPrice, firstQty) - _quoteValue(highPrice, secondQty)
+        );
+    }
+
+    function testFuzz_DirtyMixedPriceBidRightSpineConserves(
+        uint8 lowPriceSeed,
+        uint8 highPriceOffsetSeed,
+        uint8 firstQtySeed,
+        uint8 secondQtySeed,
+        uint8 firstFillSeed
+    ) public {
+        uint24 lowPrice = _price(lowPriceSeed);
+        uint24 highPrice = lowPrice + _priceOffset(highPriceOffsetSeed);
+        uint192 firstQty = _qtyAtLeastTwo(firstQtySeed);
+        uint192 secondQty = _qty(secondQtySeed);
+        uint192 firstFill = _partialFill(firstFillSeed, firstQty);
+        uint192 remaining = firstQty - firstFill;
+
+        vm.prank(ALICE);
+        bytes32 highBid = engine.fill(_order(highPrice, firstQty, 0), true);
+        vm.prank(BOB);
+        bytes32 lowBid = engine.fill(_order(lowPrice, secondQty, 0), true);
+
+        vm.prank(CAROL);
+        assert(engine.fill(_order(highPrice, firstFill, 0), false) == bytes32(0));
+
+        vm.prank(CAROL);
+        assert(engine.fill(_order(lowPrice, remaining + secondQty, 0), false) == bytes32(0));
+
+        vm.prank(ALICE);
+        (uint256 highBase, uint256 highQuote) = engine.cancel(highBid);
+        vm.prank(BOB);
+        (uint256 lowBase, uint256 lowQuote) = engine.cancel(lowBid);
+
+        assert(highBase == firstQty);
+        assert(highQuote == 0);
+        assert(lowBase == secondQty);
+        assert(lowQuote == 0);
+        _assertEmptyBook();
+        assert(base.balanceOf(CAROL) == INITIAL_BALANCE - firstQty - secondQty);
+        assert(
+            quote.balanceOf(CAROL)
+                == INITIAL_BALANCE + _quoteValue(highPrice, firstQty) + _quoteValue(lowPrice, secondQty)
+        );
+    }
+
     function testFuzz_FormalDirtySamePriceAskRightSpineConserves() public {
         uint24 price = 60;
         uint192 firstQty = 3;
@@ -277,6 +435,18 @@ contract RadixMatchingEngineFormalTest is Test {
 
     function _qty(uint8 seed) private pure returns (uint192) {
         return (uint192(seed) % 8) + 1;
+    }
+
+    function _qtyAtLeastTwo(uint8 seed) private pure returns (uint192) {
+        return (uint192(seed) % 7) + 2;
+    }
+
+    function _partialFill(uint8 seed, uint192 quantity) private pure returns (uint192) {
+        return (uint192(seed) % (quantity - 1)) + 1;
+    }
+
+    function _priceOffset(uint8 seed) private pure returns (uint24) {
+        return (uint24(seed) % 8) + 1;
     }
 
     function _min(uint192 a, uint192 b) private pure returns (uint192) {
