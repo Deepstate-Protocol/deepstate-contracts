@@ -2,7 +2,7 @@
 
 INVARIANT_RUNS ?= 2048
 INVARIANT_DEPTH ?= 64
-SLITHER ?= slither
+SLITHER ?= uv tool run --from slither-analyzer slither
 HALMOS ?= uv tool run --from halmos halmos
 HALMOS_ARGS ?= --match-contract RadixMatchingEngineFormalTest --match-test '^testFuzz_Formal' --solver z3 --solver-timeout-assertion 120s --no-status
 KONTROL_IMAGE ?= runtimeverificationinc/kontrol:ubuntu-jammy-1.0.255

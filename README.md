@@ -67,22 +67,14 @@ forge test --force --match-contract RadixMatchingEngineGasTest --gas-report
 forge snapshot --force --match-contract RadixMatchingEngineGasTest --snap .gas-snapshot.runtime
 forge snapshot --force --match-contract RadixMatchingEngineGasTest --check .gas-snapshot.runtime
 forge build --sizes
-slither src/RadixMatchingEngine.sol --config-file slither.config.json --exclude-informational
+uv tool run --from slither-analyzer slither src/RadixMatchingEngine.sol --config-file slither.config.json --exclude-informational
 forge coverage --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
 uv tool run --from halmos halmos --match-contract RadixMatchingEngineFormalTest --match-test '^testFuzz_Formal' --solver z3 --solver-timeout-assertion 120s --no-status
 ```
 
 `gas-runtime` and `snapshot-runtime` use a fixed harness that pauses setup gas and meters one target `fill` or `cancel` call per test. Deployment-heavy negative-token and reentrancy tests remain in `make verify`, but they are intentionally outside the runtime gas profile.
 `make verify` and `make verify-deep` include `snapshot-runtime-check` so runtime gas drift is reviewed instead of silently accepted.
-`make verify-security` is the heavyweight local gate: it runs the deep invariant profile, runtime gas snapshot check, build-size check, clean Slither gate, contract-focused Forge coverage summary, and Halmos symbolic tests. `formal-kevm-build` and `formal-kevm` are optional KEVM/Kontrol targets and require Docker.
-
-## Rightmost Branch Safety
-
-The rightmost branch optimization does not change the radix-tree ordering rule or introduce a branch namespace. It leaves an existing right-spine branch word in place when its right child changes, then records a side-specific dirty bit. The stored child pointers remain authoritative, and any later operation that needs exact aggregate branch words materializes the right spine before inserting new liquidity on that side.
-
-Dirty right-spine matching is intentionally narrow. Same-price right-spine subtrees can still be aggregate-consumed because every leaf settles at one price, so the fill quantity can be recovered from child pointers and the quote amount is `price * quantity`. Mixed-price dirty subtrees are not aggregate-consumed; they recurse through exact child pointers, preserving price priority without reintroducing the branch-rewrite cascade.
-
-The invariant suite proves the optimized form by checking that live branches remain reachable by contract routing, off-spine branches use the exact branch address for their children, right-spine dirty anchors have valid distinct children and sufficient packed quantity bounds, aggregate tree quantities match the tracked remaining orders, best-price/rightmost-leaf priority is preserved, and live leaves are backed by active owner records. The focused unit, gas, and formal-style fuzz tests cover dirty same-price aggregate consumption, dirty mixed-price fallback routing, materialization before rest, and full-depth rightmost comb cases for both bid and ask trees.
+`make verify-security` is the heavyweight local gate: it runs the deep invariant profile, runtime gas snapshot check, build-size check, clean Slither gate, contract-focused LCOV coverage, and Halmos symbolic tests. `formal-kevm-build` and `formal-kevm` are optional KEVM/Kontrol targets and require Docker.
 
 Deploy script:
 
