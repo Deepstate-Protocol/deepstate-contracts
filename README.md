@@ -68,13 +68,13 @@ forge snapshot --force --match-contract RadixMatchingEngineGasTest --snap .gas-s
 forge snapshot --force --match-contract RadixMatchingEngineGasTest --check .gas-snapshot.runtime
 forge build --sizes
 slither src/RadixMatchingEngine.sol --config-file slither.config.json --exclude-informational
-forge coverage --report summary --no-match-coverage 'test|script'
-uv tool run --from halmos halmos --match-contract RadixMatchingEngineFormalTest --match-test '^(testFuzz_FormalBidAgainstAskConservesAndClaims|testFuzz_FormalAskAgainstBidConservesAndClaims)' --solver-timeout-assertion 5000 --no-status
+forge coverage --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
+uv tool run --from halmos halmos --match-contract RadixMatchingEngineFormalTest --match-test '^testFuzz_Formal' --solver z3 --solver-timeout-assertion 120s --no-status
 ```
 
 `gas-runtime` and `snapshot-runtime` use a fixed harness that pauses setup gas and meters one target `fill` or `cancel` call per test. Deployment-heavy negative-token and reentrancy tests remain in `make verify`, but they are intentionally outside the runtime gas profile.
 `make verify` and `make verify-deep` include `snapshot-runtime-check` so runtime gas drift is reviewed instead of silently accepted.
-`make verify-security` is the heavyweight local gate: it runs the deep invariant profile, runtime gas snapshot check, build-size check, clean Slither gate, contract-focused Forge coverage summary, and two Halmos symbolic smoke proofs. `formal-kevm-build` and `formal-kevm` are optional KEVM/Kontrol targets and require Docker.
+`make verify-security` is the heavyweight local gate: it runs the deep invariant profile, runtime gas snapshot check, build-size check, clean Slither gate, contract-focused Forge coverage summary, and Halmos symbolic tests. `formal-kevm-build` and `formal-kevm` are optional KEVM/Kontrol targets and require Docker.
 
 ## Rightmost Branch Safety
 

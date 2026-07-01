@@ -4,9 +4,11 @@ INVARIANT_RUNS ?= 2048
 INVARIANT_DEPTH ?= 64
 SLITHER ?= slither
 HALMOS ?= uv tool run --from halmos halmos
-HALMOS_ARGS ?= --match-contract RadixMatchingEngineFormalTest --match-test '^(testFuzz_FormalBidAgainstAskConservesAndClaims|testFuzz_FormalAskAgainstBidConservesAndClaims)' --solver-timeout-assertion 5000 --no-status
+HALMOS_ARGS ?= --match-contract RadixMatchingEngineFormalTest --match-test '^testFuzz_Formal' --solver z3 --solver-timeout-assertion 120s --no-status
 KONTROL_IMAGE ?= runtimeverificationinc/kontrol:ubuntu-jammy-1.0.255
 KONTROL ?= docker run --rm --platform linux/amd64 -v "$(CURDIR):/workspace" -w /workspace $(KONTROL_IMAGE) kontrol
+KONTROL_BUILD_ARGS ?= --foundry-project-root /workspace --no-metadata --no-O2 --no-keccak-lemmas
+KONTROL_PROVE_ARGS ?= --foundry-project-root /workspace --match-test $(KONTROL_TEST) --schedule CANCUN --no-gas
 KONTROL_TEST ?= 'RadixMatchingEngineFormalTest.testFuzz_FormalBidAgainstAskConservesAndClaims(uint8,uint8,uint8)'
 
 fmt:
@@ -37,7 +39,7 @@ build-size:
 	forge build --sizes
 
 coverage:
-	forge coverage --report summary --no-match-coverage 'test|script'
+	forge coverage --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
 
 slither:
 	$(SLITHER) src/RadixMatchingEngine.sol --config-file slither.config.json --exclude-informational
@@ -46,10 +48,10 @@ formal-halmos:
 	$(HALMOS) $(HALMOS_ARGS)
 
 formal-kevm-build:
-	$(KONTROL) build --foundry-project-root /workspace --no-metadata
+	$(KONTROL) build $(KONTROL_BUILD_ARGS)
 
 formal-kevm:
-	$(KONTROL) prove --foundry-project-root /workspace --match-test $(KONTROL_TEST) --schedule CANCUN --no-gas
+	$(KONTROL) prove $(KONTROL_PROVE_ARGS)
 
 verify: fmt lint test invariant snapshot-runtime-check build-size slither
 

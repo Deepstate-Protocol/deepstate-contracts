@@ -2003,6 +2003,365 @@ contract RadixMatchingEngineTest is Test {
         assertTrue(engine.askRoot() != branch);
     }
 
+    function test_BidConsumesBestAskThenExactSamePriceOffSpineSubtree() public {
+        address dave = address(0xD00D);
+        _fundAndApprove(dave);
+
+        vm.prank(alice);
+        bytes32 firstAsk = engine.fill(_order(20, 2, 0), false);
+        vm.prank(bob);
+        bytes32 secondAsk = engine.fill(_order(20, 3, 0), false);
+        vm.prank(dave);
+        bytes32 bestAsk = engine.fill(_order(10, 1, 0), false);
+
+        bytes32 aggregate = _branchFor(firstAsk, secondAsk);
+        assertEq(_subtreeQuantity(aggregate), 5);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(bestAsk, false, 1, 10);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(aggregate, false, 5, 100);
+
+        vm.prank(carol);
+        bytes32 restingBid = engine.fill(_order(20, 6, 0), true);
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(base.balanceOf(carol), 1_000_006);
+        assertEq(quote.balanceOf(address(engine)), 110);
+
+        vm.prank(alice);
+        (, uint256 firstQuote) = engine.cancel(firstAsk);
+        vm.prank(bob);
+        (, uint256 secondQuote) = engine.cancel(secondAsk);
+        vm.prank(dave);
+        (, uint256 bestQuote) = engine.cancel(bestAsk);
+
+        assertEq(firstQuote, 40);
+        assertEq(secondQuote, 60);
+        assertEq(bestQuote, 10);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_BidConsumesBestAskThenExactMixedPriceOffSpineSubtree() public {
+        address dave = address(0xD00D);
+        _fundAndApprove(dave);
+
+        vm.prank(alice);
+        bytes32 lowerAsk = engine.fill(_order(20, 2, 0), false);
+        vm.prank(bob);
+        bytes32 higherAsk = engine.fill(_order(21, 3, 0), false);
+        vm.prank(dave);
+        bytes32 bestAsk = engine.fill(_order(10, 1, 0), false);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(bestAsk, false, 1, 10);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(lowerAsk, false, 2, 40);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(higherAsk, false, 3, 63);
+
+        vm.prank(carol);
+        bytes32 restingBid = engine.fill(_order(21, 6, 0), true);
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(base.balanceOf(carol), 1_000_006);
+        assertEq(quote.balanceOf(address(engine)), 113);
+
+        vm.prank(alice);
+        (, uint256 lowerQuote) = engine.cancel(lowerAsk);
+        vm.prank(bob);
+        (, uint256 higherQuote) = engine.cancel(higherAsk);
+        vm.prank(dave);
+        (, uint256 bestQuote) = engine.cancel(bestAsk);
+
+        assertEq(lowerQuote, 40);
+        assertEq(higherQuote, 63);
+        assertEq(bestQuote, 10);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_AskConsumesBestBidThenExactSamePriceOffSpineSubtree() public {
+        address dave = address(0xD00D);
+        _fundAndApprove(dave);
+
+        vm.prank(alice);
+        bytes32 firstBid = engine.fill(_order(70, 2, 0), true);
+        vm.prank(bob);
+        bytes32 secondBid = engine.fill(_order(70, 3, 0), true);
+        vm.prank(dave);
+        bytes32 bestBid = engine.fill(_order(80, 1, 0), true);
+
+        bytes32 aggregate = _branchFor(firstBid, secondBid);
+        assertEq(_subtreeQuantity(aggregate), 5);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(bestBid, true, 1, 80);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(aggregate, true, 5, 350);
+
+        vm.prank(carol);
+        bytes32 restingAsk = engine.fill(_order(70, 6, 0), false);
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(base.balanceOf(carol), 999_994);
+        assertEq(quote.balanceOf(carol), 1_000_430);
+        assertEq(base.balanceOf(address(engine)), 6);
+
+        vm.prank(alice);
+        (uint256 firstBase,) = engine.cancel(firstBid);
+        vm.prank(bob);
+        (uint256 secondBase,) = engine.cancel(secondBid);
+        vm.prank(dave);
+        (uint256 bestBase,) = engine.cancel(bestBid);
+
+        assertEq(firstBase, 2);
+        assertEq(secondBase, 3);
+        assertEq(bestBase, 1);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_AskConsumesBestBidThenExactMixedPriceOffSpineSubtree() public {
+        address dave = address(0xD00D);
+        _fundAndApprove(dave);
+
+        vm.prank(alice);
+        bytes32 higherBid = engine.fill(_order(70, 2, 0), true);
+        vm.prank(bob);
+        bytes32 lowerBid = engine.fill(_order(69, 3, 0), true);
+        vm.prank(dave);
+        bytes32 bestBid = engine.fill(_order(80, 1, 0), true);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(bestBid, true, 1, 80);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(higherBid, true, 2, 140);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(lowerBid, true, 3, 207);
+
+        vm.prank(carol);
+        bytes32 restingAsk = engine.fill(_order(69, 6, 0), false);
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(base.balanceOf(carol), 999_994);
+        assertEq(quote.balanceOf(carol), 1_000_427);
+        assertEq(base.balanceOf(address(engine)), 6);
+
+        vm.prank(alice);
+        (uint256 higherBase,) = engine.cancel(higherBid);
+        vm.prank(bob);
+        (uint256 lowerBase,) = engine.cancel(lowerBid);
+        vm.prank(dave);
+        (uint256 bestBase,) = engine.cancel(bestBid);
+
+        assertEq(higherBase, 2);
+        assertEq(lowerBase, 3);
+        assertEq(bestBase, 1);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_BidPartiallyConsumesOffSpineAskSubtreeRecursively() public {
+        address dave = address(0xD00D);
+        _fundAndApprove(dave);
+
+        vm.prank(alice);
+        bytes32 lowerAsk = engine.fill(_order(20, 2, 0), false);
+        vm.prank(bob);
+        bytes32 higherAsk = engine.fill(_order(21, 3, 0), false);
+        vm.prank(dave);
+        bytes32 bestAsk = engine.fill(_order(10, 1, 0), false);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(bestAsk, false, 1, 10);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(lowerAsk, false, 2, 40);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(higherAsk, false, 1, 21);
+
+        vm.prank(carol);
+        bytes32 restingBid = engine.fill(_order(21, 4, 0), true);
+
+        bytes32 reducedHigherAsk = _order(21, 2, _nonce(higherAsk));
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.askRoot(), reducedHigherAsk);
+        assertEq(base.balanceOf(carol), 1_000_004);
+        assertEq(quote.balanceOf(address(engine)), 71);
+        assertEq(base.balanceOf(address(engine)), 2);
+
+        vm.prank(alice);
+        (, uint256 lowerQuote) = engine.cancel(lowerAsk);
+        vm.prank(bob);
+        (uint256 higherBase, uint256 higherQuote) = engine.cancel(higherAsk);
+        vm.prank(dave);
+        (, uint256 bestQuote) = engine.cancel(bestAsk);
+
+        assertEq(lowerQuote, 40);
+        assertEq(higherBase, 2);
+        assertEq(higherQuote, 21);
+        assertEq(bestQuote, 10);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_BidStopsInsideOffSpineAskSubtreeWhenNextAskDoesNotCross() public {
+        address dave = address(0xD00D);
+        _fundAndApprove(dave);
+
+        vm.prank(alice);
+        bytes32 lowerAsk = engine.fill(_order(30, 2, 0), false);
+        vm.prank(bob);
+        bytes32 higherAsk = engine.fill(_order(31, 3, 0), false);
+        vm.prank(dave);
+        bytes32 bestAsk = engine.fill(_order(10, 1, 0), false);
+
+        bytes32 offSpineAggregate = _branchFor(lowerAsk, higherAsk);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(bestAsk, false, 1, 10);
+
+        vm.prank(carol);
+        bytes32 restingBid = engine.fill(_order(20, 4, 0), true);
+
+        assertEq(restingBid, _order(20, 3, MAX_ORDER_NONCE - 3));
+        assertEq(engine.askRoot(), offSpineAggregate);
+        assertEq(engine.bidRoot(), restingBid);
+        assertEq(base.balanceOf(carol), 1_000_001);
+        assertEq(quote.balanceOf(address(engine)), 70);
+
+        vm.prank(alice);
+        (uint256 lowerBase,) = engine.cancel(lowerAsk);
+        vm.prank(bob);
+        (uint256 higherBase,) = engine.cancel(higherAsk);
+        vm.prank(dave);
+        (, uint256 bestQuote) = engine.cancel(bestAsk);
+        vm.prank(carol);
+        (, uint256 bidQuote) = engine.cancel(restingBid);
+
+        assertEq(lowerBase, 2);
+        assertEq(higherBase, 3);
+        assertEq(bestQuote, 10);
+        assertEq(bidQuote, 60);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_AskPartiallyConsumesOffSpineBidSubtreeRecursively() public {
+        address dave = address(0xD00D);
+        _fundAndApprove(dave);
+
+        vm.prank(alice);
+        bytes32 higherBid = engine.fill(_order(70, 2, 0), true);
+        vm.prank(bob);
+        bytes32 lowerBid = engine.fill(_order(69, 3, 0), true);
+        vm.prank(dave);
+        bytes32 bestBid = engine.fill(_order(80, 1, 0), true);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(bestBid, true, 1, 80);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(higherBid, true, 2, 140);
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(lowerBid, true, 1, 69);
+
+        vm.prank(carol);
+        bytes32 restingAsk = engine.fill(_order(69, 4, 0), false);
+
+        bytes32 reducedLowerBid = _order(69, 2, _nonce(lowerBid));
+        assertEq(restingAsk, bytes32(0));
+        assertEq(engine.bidRoot(), reducedLowerBid);
+        assertEq(base.balanceOf(address(engine)), 4);
+        assertEq(quote.balanceOf(carol), 1_000_289);
+
+        vm.prank(alice);
+        (uint256 higherBase,) = engine.cancel(higherBid);
+        vm.prank(bob);
+        (uint256 lowerBase, uint256 lowerQuote) = engine.cancel(lowerBid);
+        vm.prank(dave);
+        (uint256 bestBase,) = engine.cancel(bestBid);
+
+        assertEq(higherBase, 2);
+        assertEq(lowerBase, 1);
+        assertEq(lowerQuote, 138);
+        assertEq(bestBase, 1);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_AskStopsInsideOffSpineBidSubtreeWhenNextBidDoesNotCross() public {
+        address dave = address(0xD00D);
+        _fundAndApprove(dave);
+
+        vm.prank(alice);
+        bytes32 higherBid = engine.fill(_order(60, 2, 0), true);
+        vm.prank(bob);
+        bytes32 lowerBid = engine.fill(_order(59, 3, 0), true);
+        vm.prank(dave);
+        bytes32 bestBid = engine.fill(_order(80, 1, 0), true);
+
+        bytes32 offSpineAggregate = _branchFor(higherBid, lowerBid);
+
+        vm.expectEmit(true, true, false, true, address(engine));
+        emit OrderMatched(bestBid, true, 1, 80);
+
+        vm.prank(carol);
+        bytes32 restingAsk = engine.fill(_order(70, 4, 0), false);
+
+        assertEq(restingAsk, _order(70, 3, MAX_ORDER_NONCE - 3));
+        assertEq(engine.bidRoot(), offSpineAggregate);
+        assertEq(engine.askRoot(), restingAsk);
+        assertEq(base.balanceOf(address(engine)), 4);
+        assertEq(quote.balanceOf(carol), 1_000_080);
+
+        vm.prank(alice);
+        (, uint256 higherQuote) = engine.cancel(higherBid);
+        vm.prank(bob);
+        (, uint256 lowerQuote) = engine.cancel(lowerBid);
+        vm.prank(dave);
+        (uint256 bestBase,) = engine.cancel(bestBid);
+        vm.prank(carol);
+        (uint256 askBase,) = engine.cancel(restingAsk);
+
+        assertEq(higherQuote, 120);
+        assertEq(lowerQuote, 177);
+        assertEq(bestBase, 1);
+        assertEq(askBase, 3);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_CancelAskFromLeftBranchRewritesParent() public {
+        vm.prank(alice);
+        bytes32 worseAsk = engine.fill(_order(20, 1, 0), false);
+        vm.prank(bob);
+        bytes32 betterAsk = engine.fill(_order(10, 1, 0), false);
+
+        assertTrue(engine.askRoot() != worseAsk);
+        assertTrue(engine.askRoot() != betterAsk);
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(worseAsk);
+
+        assertEq(baseAmount, 1);
+        assertEq(quoteAmount, 0);
+        assertEq(engine.askRoot(), betterAsk);
+
+        vm.prank(bob);
+        (baseAmount, quoteAmount) = engine.cancel(betterAsk);
+
+        assertEq(baseAmount, 1);
+        assertEq(quoteAmount, 0);
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
     function test_SamePriceAskAggregateMatchStillLetsEachMakerClaim() public {
         uint24 price = 50;
 
