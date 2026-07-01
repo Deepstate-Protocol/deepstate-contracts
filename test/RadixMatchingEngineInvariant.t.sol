@@ -788,6 +788,11 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         assertEq(askStats.quantity, expectedAskQuantity, "ask root quantity");
     }
 
+    function invariant_RightSpineQuantitiesNeverUnderstateLiveLeaves() public view {
+        _assertRightSpineQuantityUpperBounds(engine.bidRoot());
+        _assertRightSpineQuantityUpperBounds(engine.askRoot());
+    }
+
     function invariant_ModelRemainingQuantitiesMatchBook() public view {
         uint256 length = handler.orderCount();
 
@@ -1213,6 +1218,14 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         view
         returns (SubtreeStats memory stats)
     {
+        return _assertSubtree(node, depth, isBidTree, true);
+    }
+
+    function _assertSubtree(bytes32 node, uint256 depth, bool isBidTree, bool rightmost)
+        private
+        view
+        returns (SubtreeStats memory stats)
+    {
         if (node == bytes32(0)) return stats;
         assertLe(depth, 64, "radix depth");
 
@@ -1234,13 +1247,13 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
         assertTrue(leftNode != bytes32(0), "left child");
         assertTrue(rightNode != bytes32(0), "right child");
-        assertEq(node, _branchNodeForChildren(leftNode, rightNode), "branch address");
 
         uint8 branchDepth = _branchDepth(node, isBidTree);
-        SubtreeStats memory leftStats = _assertSubtree(leftNode, depth + 1, isBidTree);
-        SubtreeStats memory rightStats = _assertSubtree(rightNode, depth + 1, isBidTree);
+        SubtreeStats memory leftStats = _assertSubtree(leftNode, depth + 1, isBidTree, false);
+        SubtreeStats memory rightStats = _assertSubtree(rightNode, depth + 1, isBidTree, rightmost);
 
         _assertBranchOrder(branchDepth, leftStats, rightStats);
+        _assertStoredBranchOrder(leftNode, rightNode, leftStats, rightStats, isBidTree);
 
         stats.quantity = leftStats.quantity + rightStats.quantity;
         stats.minKey = leftStats.minKey;
@@ -1253,12 +1266,42 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         stats.leftmostPrice = leftStats.leftmostPrice;
         stats.rightmostPrice = rightStats.rightmostPrice;
         stats.exists = true;
-        assertEq(_quantity(node), stats.quantity, "branch quantity");
-        assertEq(_pathKey(node), stats.maxPathKey, "branch max path");
-        assertGt(_quantity(node), stats.maxPathLeafQuantity, "branch quantity over max leaf");
-        _assertStoredNodeKeyRepresentsSubtree(node, stats, isBidTree);
+        if (!rightmost) {
+            assertEq(node, _branchNodeForChildren(leftNode, rightNode), "branch address");
+            assertEq(_quantity(node), stats.quantity, "branch quantity");
+            assertEq(_pathKey(node), stats.maxPathKey, "branch max path");
+            assertGt(_quantity(node), stats.maxPathLeafQuantity, "branch quantity over max leaf");
+            _assertStoredNodeKeyRepresentsSubtree(node, stats, isBidTree);
+        }
         _assertSubtreePricePriority(stats, isBidTree);
         _assertSinglePriceFastPathCoversSubtree(stats, leftStats, rightStats);
+        if (stats.leftmostPrice == stats.rightmostPrice) {
+            assertEq(_price(node), stats.leftmostPrice, "single-price branch node price");
+        }
+    }
+
+    function _assertRightSpineQuantityUpperBounds(bytes32 node) private view {
+        while (node != bytes32(0) && _isBranch(node)) {
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+            uint192 actualQuantity = _actualSubtreeQuantity(node);
+
+            assertGe(uint256(_quantity(node)), uint256(actualQuantity), "right spine quantity bound");
+            assertTrue(leftNode != node, "right spine left self-cycle");
+            assertTrue(rightNode != node, "right spine right self-cycle");
+            assertTrue(leftNode != rightNode, "right spine duplicate children");
+
+            node = rightNode;
+        }
+    }
+
+    function _actualSubtreeQuantity(bytes32 node) private view returns (uint192 quantity) {
+        if (node == bytes32(0)) return 0;
+
+        if (!_isBranch(node)) return _quantity(node);
+
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+        quantity = _actualSubtreeQuantity(leftNode);
+        quantity += _actualSubtreeQuantity(rightNode);
     }
 
     function _assertBranchOrder(uint8 branchDepth, SubtreeStats memory leftStats, SubtreeStats memory rightStats)
@@ -1282,6 +1325,19 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         if (rightStats.minKey != rightStats.maxKey) {
             assertGe(_commonPrefix(rightStats.minKey, rightStats.maxKey), branchDepth + 1, "right prefix");
         }
+    }
+
+    function _assertStoredBranchOrder(
+        bytes32 leftNode,
+        bytes32 rightNode,
+        SubtreeStats memory leftStats,
+        SubtreeStats memory rightStats,
+        bool isBidTree
+    ) private pure {
+        uint8 storedBranchDepth = _commonPrefix(
+            _storedNodeKey(leftNode, isBidTree), _storedNodeKey(rightNode, isBidTree)
+        );
+        _assertBranchOrder(storedBranchDepth, leftStats, rightStats);
     }
 
     function _assertStoredNodeKeyRepresentsSubtree(bytes32 node, SubtreeStats memory stats, bool isBidTree)
