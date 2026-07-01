@@ -77,7 +77,7 @@ jobs:
         run: python -m pip install uv
 
       - name: Forge Coverage
-        run: make coverage
+        run: make coverage-check
 
       - name: Halmos Formal
         run: make formal-halmos

@@ -1,7 +1,12 @@
-.PHONY: fmt lint test invariant invariant-deep gas-runtime snapshot-runtime snapshot-runtime-check build-size coverage slither formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
+.PHONY: fmt lint test invariant invariant-deep gas-runtime snapshot-runtime snapshot-runtime-check build-size coverage coverage-check slither formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
 
 INVARIANT_RUNS ?= 2048
 INVARIANT_DEPTH ?= 64
+COVERAGE_FILE ?= src/RadixMatchingEngine.sol
+COVERAGE_MIN_LINES ?= 100
+COVERAGE_MIN_STATEMENTS ?= 100
+COVERAGE_MIN_BRANCHES ?= 100
+COVERAGE_MIN_FUNCS ?= 100
 SLITHER ?= uv tool run --from slither-analyzer slither
 HALMOS ?= uv tool run --from halmos halmos
 HALMOS_ARGS ?= --match-contract RadixMatchingEngineFormalTest --match-test '^testFuzz_Formal' --solver z3 --solver-timeout-assertion 120s --no-status
@@ -41,6 +46,23 @@ build-size:
 coverage:
 	forge coverage --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
 
+coverage-check:
+	@set -e; \
+	tmp="$$(mktemp)"; \
+	if ! NO_COLOR=1 forge coverage --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest' > "$$tmp" 2>&1; then \
+		cat "$$tmp"; \
+		rm -f "$$tmp"; \
+		exit 1; \
+	fi; \
+	cat "$$tmp"; \
+	python3 script/check_forge_coverage.py "$$tmp" \
+		--file "$(COVERAGE_FILE)" \
+		--min-lines "$(COVERAGE_MIN_LINES)" \
+		--min-statements "$(COVERAGE_MIN_STATEMENTS)" \
+		--min-branches "$(COVERAGE_MIN_BRANCHES)" \
+		--min-funcs "$(COVERAGE_MIN_FUNCS)"; \
+	rm -f "$$tmp"
+
 slither:
 	$(SLITHER) src/RadixMatchingEngine.sol --config-file slither.config.json --exclude-informational
 
@@ -57,4 +79,4 @@ verify: fmt lint test invariant snapshot-runtime-check build-size slither
 
 verify-deep: fmt lint test invariant-deep snapshot-runtime-check build-size slither
 
-verify-security: fmt lint test invariant-deep snapshot-runtime-check build-size slither coverage formal-halmos
+verify-security: fmt lint test invariant-deep snapshot-runtime-check build-size slither coverage-check formal-halmos
