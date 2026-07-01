@@ -1253,6 +1253,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         SubtreeStats memory rightStats = _assertSubtree(rightNode, depth + 1, isBidTree, rightmost);
 
         _assertBranchOrder(branchDepth, leftStats, rightStats);
+        _assertStoredBranchOrder(leftNode, rightNode, leftStats, rightStats, isBidTree);
 
         stats.quantity = leftStats.quantity + rightStats.quantity;
         stats.minKey = leftStats.minKey;
@@ -1274,6 +1275,9 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
         _assertSubtreePricePriority(stats, isBidTree);
         _assertSinglePriceFastPathCoversSubtree(stats, leftStats, rightStats);
+        if (stats.leftmostPrice == stats.rightmostPrice) {
+            assertEq(_price(node), stats.leftmostPrice, "single-price branch node price");
+        }
     }
 
     function _assertRightSpineQuantityUpperBounds(bytes32 node) private view {
@@ -1321,6 +1325,19 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         if (rightStats.minKey != rightStats.maxKey) {
             assertGe(_commonPrefix(rightStats.minKey, rightStats.maxKey), branchDepth + 1, "right prefix");
         }
+    }
+
+    function _assertStoredBranchOrder(
+        bytes32 leftNode,
+        bytes32 rightNode,
+        SubtreeStats memory leftStats,
+        SubtreeStats memory rightStats,
+        bool isBidTree
+    ) private pure {
+        uint8 storedBranchDepth = _commonPrefix(
+            _storedNodeKey(leftNode, isBidTree), _storedNodeKey(rightNode, isBidTree)
+        );
+        _assertBranchOrder(storedBranchDepth, leftStats, rightStats);
     }
 
     function _assertStoredNodeKeyRepresentsSubtree(bytes32 node, SubtreeStats memory stats, bool isBidTree)
