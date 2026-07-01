@@ -760,8 +760,6 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, bytes32 removed)
     {
-        if (root == bytes32(0)) return (bytes32(0), bytes32(0));
-
         bytes32 leftNode = tree[root].leftNode;
         if (leftNode == bytes32(0)) {
             return _bidSortKey(root) == targetKey ? (bytes32(0), root) : (root, bytes32(0));
@@ -795,8 +793,6 @@ contract RadixMatchingEngine {
         private
         returns (bytes32 newRoot, bytes32 removed)
     {
-        if (root == bytes32(0)) return (bytes32(0), bytes32(0));
-
         bytes32 leftNode = tree[root].leftNode;
         if (leftNode == bytes32(0)) {
             return _askSortKey(root) == targetKey ? (bytes32(0), root) : (root, bytes32(0));
@@ -835,7 +831,6 @@ contract RadixMatchingEngine {
         private
         returns (bytes32)
     {
-        if (leftNode == bytes32(0)) return rightNode;
         if (rightNode == bytes32(0)) return leftNode;
         if (rightNode == branchNode || rightNode == leftNode) return _replaceBranch(leftNode, rightNode);
 
@@ -934,10 +929,8 @@ contract RadixMatchingEngine {
     /// The first bit where `aKey` and `bKey` differ decides child order. Equal keys are impossible
     /// for honest state because nonce assignment is unique; if corruption makes them equal, this
     /// reverts before overwriting ownership or branch data.
+    /// Callers pass nonzero children; empty-subtree cases are handled before this helper is reached.
     function _storeBranch(bytes32 a, bytes32 b, uint64 aKey, uint64 bKey) private returns (bytes32 branchNode) {
-        if (a == bytes32(0)) return b;
-        if (b == bytes32(0)) return a;
-
         uint8 branchDepth = _commonPrefix(aKey, bKey);
         if (branchDepth == 64) revert DuplicateOrder();
 

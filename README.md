@@ -47,10 +47,13 @@ Higher order nonce still means earlier time priority at the same price.
 make verify
 make verify-deep
 make verify-security
+make invariant-deep-shard
+make invariant-deep-shards
 make gas-runtime
 make snapshot-runtime
 make snapshot-runtime-check
 make coverage
+make coverage-check
 make formal-halmos
 make formal-kevm-build
 make formal-kevm
@@ -61,28 +64,28 @@ Equivalent individual commands:
 ```sh
 forge fmt --check
 forge lint
-forge test --force -vv
+forge test --force -vv --no-match-contract '.*RadixMatchingEngineInvariantTest.*'
+forge test --force --match-contract '.*RadixMatchingEngineInvariantTest.*' --match-test 'invariant_.*'
 FOUNDRY_INVARIANT_RUNS=2048 FOUNDRY_INVARIANT_DEPTH=64 forge test --force --match-contract '.*RadixMatchingEngineInvariantTest.*' --match-test 'invariant_.*'
+INVARIANT_RUNS=2048 INVARIANT_DEPTH=64 INVARIANT_SHARDS=8 INVARIANT_SHARD=1 make invariant-deep-shard
+INVARIANT_RUNS=2048 INVARIANT_DEPTH=64 INVARIANT_SHARDS=8 make invariant-deep-shards
 forge test --force --match-contract RadixMatchingEngineGasTest --gas-report
 forge snapshot --force --match-contract RadixMatchingEngineGasTest --snap .gas-snapshot.runtime
 forge snapshot --force --match-contract RadixMatchingEngineGasTest --check .gas-snapshot.runtime
 forge build --sizes
-slither src/RadixMatchingEngine.sol --config-file slither.config.json --exclude-informational
-forge coverage --report summary --no-match-coverage 'test|script'
-uv tool run --from halmos halmos --match-contract RadixMatchingEngineFormalTest --match-test '^(testFuzz_FormalBidAgainstAskConservesAndClaims|testFuzz_FormalAskAgainstBidConservesAndClaims)' --solver-timeout-assertion 5000 --no-status
+uv tool run --from slither-analyzer slither src/RadixMatchingEngine.sol --config-file slither.config.json --exclude-informational
+forge coverage --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
+make coverage-check
+uv tool run --from halmos halmos --match-contract RadixMatchingEngineFormalTest --match-test '^testFuzz_Formal' --solver z3 --solver-timeout-assertion 120s --no-status
 ```
 
 `gas-runtime` and `snapshot-runtime` use a fixed harness that pauses setup gas and meters one target `fill` or `cancel` call per test. Deployment-heavy negative-token and reentrancy tests remain in `make verify`, but they are intentionally outside the runtime gas profile.
+`make verify` runs the invariant contract through its dedicated `invariant` target, so the regular `test` target excludes that contract to avoid duplicate invariant execution.
+`invariant-deep-shard` and `invariant-deep-shards` split the deep invariant suite into deterministic batches with `INVARIANT_SHARDS` and `INVARIANT_SHARD`, which makes long 2048-run profiles easier to audit and retry.
 `make verify` and `make verify-deep` include `snapshot-runtime-check` so runtime gas drift is reviewed instead of silently accepted.
-`make verify-security` is the heavyweight local gate: it runs the deep invariant profile, runtime gas snapshot check, build-size check, clean Slither gate, contract-focused Forge coverage summary, and two Halmos symbolic smoke proofs. `formal-kevm-build` and `formal-kevm` are optional KEVM/Kontrol targets and require Docker.
-
-## Rightmost Branch Safety
-
-The rightmost branch optimization does not change the radix-tree ordering rule or introduce a branch namespace. It leaves an existing right-spine branch word in place when its right child changes, then records a side-specific dirty bit. The stored child pointers remain authoritative, and any later operation that needs exact aggregate branch words materializes the right spine before inserting new liquidity on that side.
-
-Dirty right-spine matching is intentionally narrow. Same-price right-spine subtrees can still be aggregate-consumed because every leaf settles at one price, so the fill quantity can be recovered from child pointers and the quote amount is `price * quantity`. Mixed-price dirty subtrees are not aggregate-consumed; they recurse through exact child pointers, preserving price priority without reintroducing the branch-rewrite cascade.
-
-The invariant suite proves the optimized form by checking that live branches remain reachable by contract routing, off-spine branches use the exact branch address for their children, right-spine dirty anchors have valid distinct children and sufficient packed quantity bounds, aggregate tree quantities match the tracked remaining orders, best-price/rightmost-leaf priority is preserved, and live leaves are backed by active owner records. The focused unit, gas, and formal-style fuzz tests cover dirty same-price aggregate consumption, dirty mixed-price fallback routing, materialization before rest, and full-depth rightmost comb cases for both bid and ask trees.
+Pull requests run both `make verify` and the additional security job for `make coverage-check` plus `make formal-halmos`.
+`coverage-check` emits `lcov.info` and fails unless `src/RadixMatchingEngine.sol` stays at 100% line, statement, branch, and function coverage in the Forge summary.
+`make verify-security` is the heavyweight local gate: it runs the deep invariant profile, runtime gas snapshot check, build-size check, clean Slither gate, enforced contract-focused Forge LCOV plus summary coverage, and Halmos symbolic tests. `formal-kevm-build` and `formal-kevm` are optional KEVM/Kontrol targets and require Docker.
 
 Deploy script:
 
