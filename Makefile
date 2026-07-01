@@ -52,12 +52,12 @@ build-size:
 	forge build --sizes
 
 coverage:
-	forge coverage --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
+	forge coverage --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
 
 coverage-check:
 	@set -e; \
 	tmp="$$(mktemp)"; \
-	if ! NO_COLOR=1 forge coverage --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest' > "$$tmp" 2>&1; then \
+	if ! NO_COLOR=1 forge coverage --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest' > "$$tmp" 2>&1; then \
 		cat "$$tmp"; \
 		rm -f "$$tmp"; \
 		exit 1; \

@@ -74,7 +74,7 @@ forge snapshot --force --match-contract RadixMatchingEngineGasTest --snap .gas-s
 forge snapshot --force --match-contract RadixMatchingEngineGasTest --check .gas-snapshot.runtime
 forge build --sizes
 uv tool run --from slither-analyzer slither src/RadixMatchingEngine.sol --config-file slither.config.json --exclude-informational
-forge coverage --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
+forge coverage --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
 make coverage-check
 uv tool run --from halmos halmos --match-contract RadixMatchingEngineFormalTest --match-test '^testFuzz_Formal' --solver z3 --solver-timeout-assertion 120s --no-status
 ```
@@ -84,8 +84,8 @@ uv tool run --from halmos halmos --match-contract RadixMatchingEngineFormalTest 
 `invariant-deep-shard` and `invariant-deep-shards` split the deep invariant suite into deterministic batches with `INVARIANT_SHARDS` and `INVARIANT_SHARD`, which makes long 2048-run profiles easier to audit and retry.
 `make verify` and `make verify-deep` include `snapshot-runtime-check` so runtime gas drift is reviewed instead of silently accepted.
 Pull requests run both `make verify` and the additional security job for `make coverage-check` plus `make formal-halmos`.
-`coverage-check` fails unless `src/RadixMatchingEngine.sol` stays at 100% line, statement, branch, and function coverage in the Forge summary.
-`make verify-security` is the heavyweight local gate: it runs the deep invariant profile, runtime gas snapshot check, build-size check, clean Slither gate, enforced contract-focused Forge coverage summary, and Halmos symbolic tests. `formal-kevm-build` and `formal-kevm` are optional KEVM/Kontrol targets and require Docker.
+`coverage-check` emits `lcov.info` and fails unless `src/RadixMatchingEngine.sol` stays at 100% line, statement, branch, and function coverage in the Forge summary.
+`make verify-security` is the heavyweight local gate: it runs the deep invariant profile, runtime gas snapshot check, build-size check, clean Slither gate, enforced contract-focused Forge LCOV plus summary coverage, and Halmos symbolic tests. `formal-kevm-build` and `formal-kevm` are optional KEVM/Kontrol targets and require Docker.
 
 Deploy script:
 
