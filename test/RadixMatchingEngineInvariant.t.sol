@@ -1275,6 +1275,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
         _assertSubtreePricePriority(stats, isBidTree);
         _assertSinglePriceFastPathCoversSubtree(stats, leftStats, rightStats);
+        _assertRightSpineSamePriceFastPathPrecondition(rightmost, node, leftNode, rightNode, stats);
         if (stats.leftmostPrice == stats.rightmostPrice) {
             assertEq(_price(node), stats.leftmostPrice, "single-price branch node price");
         }
@@ -1369,6 +1370,19 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         assertEq(leftStats.rightmostPrice, price, "single-price left max");
         assertEq(rightStats.leftmostPrice, price, "single-price right min");
         assertEq(rightStats.rightmostPrice, price, "single-price right max");
+    }
+
+    function _assertRightSpineSamePriceFastPathPrecondition(
+        bool rightmost,
+        bytes32 node,
+        bytes32 leftNode,
+        bytes32 rightNode,
+        SubtreeStats memory stats
+    ) private pure {
+        if (!rightmost || _price(leftNode) != _price(rightNode)) return;
+
+        assertEq(stats.leftmostPrice, stats.rightmostPrice, "right-spine same-price check mixed subtree");
+        assertEq(_price(node), stats.leftmostPrice, "right-spine same-price node price");
     }
 
     function _assertNoSharedBranches(bytes32 bidNode, bytes32 askRoot) private view {

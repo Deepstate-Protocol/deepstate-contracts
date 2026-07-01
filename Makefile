@@ -18,7 +18,7 @@ lint:
 	forge lint
 
 test:
-	forge test --force -vv
+	forge test --force -vv --no-match-contract '.*RadixMatchingEngineInvariantTest.*'
 
 invariant:
 	forge test --force --match-contract '.*RadixMatchingEngineInvariantTest.*' --match-test 'invariant_.*'

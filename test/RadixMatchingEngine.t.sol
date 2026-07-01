@@ -2625,6 +2625,69 @@ contract RadixMatchingEngineTest is Test {
         assertEq(quote.balanceOf(address(engine)), 0);
     }
 
+    function test_CorruptedEqualPackedAskBranchDoesNotAggregateMixedPriceLeaves() public {
+        bytes32 leftAsk = _order(10, 1, MAX_ORDER_NONCE);
+        bytes32 rightLeftAsk = _order(10, 1, MAX_ORDER_NONCE - 1);
+        bytes32 rightRightAsk = _order(11, 1, MAX_ORDER_NONCE - 2);
+        bytes32 rightBranch = _order(10, 2, MAX_ORDER_NONCE - 1);
+        bytes32 root = _order(10, 3, MAX_ORDER_NONCE);
+
+        _storeTreeBranch(root, leftAsk, rightBranch);
+        _storeTreeBranch(rightBranch, rightLeftAsk, rightRightAsk);
+        vm.store(address(engine), _askRootSlot(), root);
+
+        vm.prank(carol);
+        bytes32 restingBid = engine.fill(_order(9, 1, 0), true);
+
+        assertEq(restingBid, _order(9, 1, MAX_ORDER_NONCE));
+        assertEq(engine.askRoot(), root);
+        assertEq(engine.bidRoot(), restingBid);
+        assertEq(quote.balanceOf(address(engine)), 9);
+        assertEq(base.balanceOf(address(engine)), 0);
+    }
+
+    function test_CorruptedRightSpineBranchNodeAliasRecomputesBranch() public {
+        uint24 price = 50;
+        bytes32 leftAsk = _order(price, 2, MAX_ORDER_NONCE - 1);
+        bytes32 rightAsk = _order(price, 5, MAX_ORDER_NONCE);
+        bytes32 root = _order(price, 4, MAX_ORDER_NONCE);
+
+        _storeTreeBranch(root, leftAsk, rightAsk);
+        vm.store(address(engine), _askRootSlot(), root);
+        base.mint(address(engine), 1);
+
+        vm.prank(carol);
+        bytes32 restingBid = engine.fill(_order(price, 1, 0), true);
+
+        bytes32 expectedRoot = _branchFor(leftAsk, root);
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.askRoot(), expectedRoot);
+        _assertTreeBranchStorage(expectedRoot, leftAsk, root, "alias-recomputed");
+        assertEq(base.balanceOf(carol), 1_000_001);
+        assertEq(quote.balanceOf(address(engine)), price);
+    }
+
+    function test_CorruptedRightSpineDuplicateChildAliasRecomputesBranch() public {
+        uint24 price = 51;
+        bytes32 leftAsk = _order(price, 4, MAX_ORDER_NONCE - 1);
+        bytes32 rightAsk = _order(price, 5, MAX_ORDER_NONCE - 1);
+        bytes32 root = _order(price, 6, MAX_ORDER_NONCE);
+
+        _storeTreeBranch(root, leftAsk, rightAsk);
+        vm.store(address(engine), _askRootSlot(), root);
+        base.mint(address(engine), 1);
+
+        vm.prank(carol);
+        bytes32 restingBid = engine.fill(_order(price, 1, 0), true);
+
+        bytes32 expectedRoot = _branchFor(leftAsk, leftAsk);
+        assertEq(restingBid, bytes32(0));
+        assertEq(engine.askRoot(), expectedRoot);
+        _assertTreeBranchStorage(expectedRoot, leftAsk, leftAsk, "duplicate-child-recomputed");
+        assertEq(base.balanceOf(carol), 1_000_001);
+        assertEq(quote.balanceOf(address(engine)), price);
+    }
+
     function test_AskDirtyRightSpineSurvivesBidRestAndMaterializesBeforeAskInsert() public {
         uint24 price = 60;
 
@@ -4015,6 +4078,12 @@ contract RadixMatchingEngineTest is Test {
             rightNode,
             string.concat(label, " tree right slot")
         );
+    }
+
+    function _storeTreeBranch(bytes32 branch, bytes32 leftNode, bytes32 rightNode) internal {
+        bytes32 branchSlot = _treeSlot(branch);
+        vm.store(address(engine), branchSlot, leftNode);
+        vm.store(address(engine), bytes32(uint256(branchSlot) + 1), rightNode);
     }
 
     function _expectedBranchChildren(bytes32 a, bytes32 b, bool isBid)
