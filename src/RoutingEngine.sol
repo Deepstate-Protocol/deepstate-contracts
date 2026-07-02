@@ -290,11 +290,8 @@ contract RoutingEngine is RadixMatchingEngine {
         emit BookInitialized(pid, id, epoch);
     }
 
-    function _requireSortedTokens(address token0, address token1) internal view virtual {
-        if (
-            token0 == address(0) || token1 == address(0) || token0 >= token1 || token0.code.length == 0
-                || token1.code.length == 0
-        ) {
+    function _requireSortedTokens(address token0, address token1) internal pure virtual {
+        if (token0 == address(0) || token1 == address(0) || token0 >= token1) {
             revert InvalidToken();
         }
     }

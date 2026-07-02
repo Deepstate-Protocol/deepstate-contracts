@@ -385,7 +385,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.bidRoot(), bytes32(0));
     }
 
-    function test_ConstructorRejectsInvalidTokens() public {
+    function test_ConstructorRejectsZeroAndDuplicateTokens() public {
         vm.expectRevert(bytes4(keccak256("InvalidToken()")));
         new RadixMatchingEngine(address(0), address(quote));
 
@@ -394,12 +394,6 @@ contract RadixMatchingEngineTest is Test {
 
         vm.expectRevert(bytes4(keccak256("InvalidToken()")));
         new RadixMatchingEngine(address(base), address(base));
-
-        vm.expectRevert(bytes4(keccak256("InvalidToken()")));
-        new RadixMatchingEngine(alice, address(quote));
-
-        vm.expectRevert(bytes4(keccak256("InvalidToken()")));
-        new RadixMatchingEngine(address(base), bob);
     }
 
     function test_StorageLayoutMatchesStrictDesign() public {

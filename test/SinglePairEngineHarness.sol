@@ -15,10 +15,7 @@ contract SinglePairEngineHarness is RoutingEngine {
     address public immutable QUOTE_TOKEN;
 
     constructor(address baseToken_, address quoteToken_) {
-        if (
-            baseToken_ == address(0) || quoteToken_ == address(0) || baseToken_ == quoteToken_
-                || baseToken_.code.length == 0 || quoteToken_.code.length == 0
-        ) {
+        if (baseToken_ == address(0) || quoteToken_ == address(0) || baseToken_ == quoteToken_) {
             revert InvalidToken();
         }
         BASE_TOKEN = baseToken_;
@@ -89,11 +86,8 @@ contract SinglePairEngineHarness is RoutingEngine {
         }
     }
 
-    function _requireSortedTokens(address token0, address token1) internal view override {
-        if (
-            token0 == address(0) || token1 == address(0) || token0 == token1 || token0.code.length == 0
-                || token1.code.length == 0
-        ) {
+    function _requireSortedTokens(address token0, address token1) internal pure override {
+        if (token0 == address(0) || token1 == address(0) || token0 == token1) {
             revert InvalidToken();
         }
     }
