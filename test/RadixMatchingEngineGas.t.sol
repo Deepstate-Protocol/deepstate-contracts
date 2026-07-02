@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
+import {NigiriRewarder} from "../src/NigiriRewarder.sol";
 import {RoutingEngine} from "../src/RoutingEngine.sol";
 import {TestERC20} from "./RadixMatchingEngine.t.sol";
 
@@ -14,6 +15,8 @@ contract RadixMatchingEngineGasTest is Test {
     uint24 internal constant LARGE_ASK_BASE_PRICE = 2_000_000;
     uint24 internal constant LARGE_REST_BID_PRICE = 1_750_000;
     uint24 internal constant LARGE_REST_ASK_PRICE = 1_750_001;
+    uint256 internal constant BOOK_HOOK_TOKEN0_ACTIVE = uint256(1) << 42;
+    uint256 internal constant BOOK_HOOK_TOKEN1_ACTIVE = uint256(1) << 43;
 
     struct LargeRandomBook {
         bytes32 bestBid;
@@ -32,7 +35,7 @@ contract RadixMatchingEngineGasTest is Test {
     address internal bob = address(0xB0B);
     address internal carol = address(0xCA201);
 
-    function setUp() public {
+    function setUp() public virtual {
         TestERC20 tokenA = new TestERC20("Base", "BASE");
         TestERC20 tokenB = new TestERC20("Quote", "QUOTE");
         if (address(tokenA) < address(tokenB)) {
@@ -47,7 +50,11 @@ contract RadixMatchingEngineGasTest is Test {
         _fundAndApprove(alice);
         _fundAndApprove(bob);
         _fundAndApprove(carol);
+
+        _afterSetUp();
     }
+
+    function _afterSetUp() internal virtual {}
 
     function testGas_FillRestBidEmptyBook() public {
         vm.pauseGasMetering();
@@ -585,7 +592,7 @@ contract RadixMatchingEngineGasTest is Test {
         uint64 targetKey = type(uint64).max;
         quote.mint(alice, 2_000_000_000);
 
-        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
+        vm.store(address(engine), _nextNonceSlot(), bytes32(_nonceAndFlags(MAX_ORDER_NONCE)));
         vm.prank(alice);
         targetOrder = _fill(_order(type(uint24).max, 1, 0), true);
 
@@ -596,7 +603,7 @@ contract RadixMatchingEngineGasTest is Test {
             // forge-lint: disable-next-line(unsafe-typecast)
             uint40 nonce = uint40(siblingKey);
 
-            vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
+            vm.store(address(engine), _nextNonceSlot(), bytes32(_nonceAndFlags(nonce)));
             vm.prank(alice);
             _fill(_order(price, 1, 0), true);
         }
@@ -605,7 +612,7 @@ contract RadixMatchingEngineGasTest is Test {
     function _buildMaxValidDepthAskNonceComb() internal returns (bytes32 targetOrder) {
         uint24 targetSortPrice = type(uint24).max - 1;
 
-        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
+        vm.store(address(engine), _nextNonceSlot(), bytes32(_nonceAndFlags(MAX_ORDER_NONCE)));
         vm.prank(alice);
         targetOrder = _fill(_order(1, 1, 0), false);
 
@@ -617,7 +624,7 @@ contract RadixMatchingEngineGasTest is Test {
             uint40 nonce = MAX_ORDER_NONCE - uint40(10_000 + orderIndex);
             uint24 price = type(uint24).max - sortPrice;
 
-            vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
+            vm.store(address(engine), _nextNonceSlot(), bytes32(_nonceAndFlags(nonce)));
             vm.prank(alice);
             _fill(_order(price, 1, 0), false);
 
@@ -632,7 +639,7 @@ contract RadixMatchingEngineGasTest is Test {
             // forge-lint: disable-next-line(unsafe-typecast)
             uint40 nonce = uint40(sortKey);
 
-            vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
+            vm.store(address(engine), _nextNonceSlot(), bytes32(_nonceAndFlags(nonce)));
             vm.prank(alice);
             _fill(_order(1, 1, 0), false);
         }
@@ -642,7 +649,7 @@ contract RadixMatchingEngineGasTest is Test {
         uint64 targetKey = (uint64(price) << 40) | uint64(MAX_ORDER_NONCE);
         quote.mint(alice, 2_000_000_000);
 
-        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
+        vm.store(address(engine), _nextNonceSlot(), bytes32(_nonceAndFlags(MAX_ORDER_NONCE)));
         vm.prank(alice);
         targetOrder = _fill(_order(price, 1, 0), true);
 
@@ -651,7 +658,7 @@ contract RadixMatchingEngineGasTest is Test {
             // forge-lint: disable-next-line(unsafe-typecast)
             uint40 nonce = uint40(siblingKey);
 
-            vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
+            vm.store(address(engine), _nextNonceSlot(), bytes32(_nonceAndFlags(nonce)));
             vm.prank(alice);
             _fill(_order(price, 1, 0), true);
         }
@@ -695,5 +702,24 @@ contract RadixMatchingEngineGasTest is Test {
 
     function _nextNonceSlot() internal view returns (bytes32) {
         return keccak256(abi.encode(_bookId(), uint256(0)));
+    }
+
+    function _nonceAndFlags(uint256 nonce) internal pure virtual returns (uint256) {
+        return nonce;
+    }
+}
+
+contract RadixMatchingEngineHookGasTest is RadixMatchingEngineGasTest {
+    NigiriRewarder internal hook;
+    TestERC20 internal hookRewardToken;
+
+    function _afterSetUp() internal override {
+        hookRewardToken = new TestERC20("Hook Reward", "HOOK");
+        hook = new NigiriRewarder(address(this), address(engine), address(hookRewardToken));
+        engine.setPoolHookConfig(address(base), address(quote), address(hook), true, true);
+    }
+
+    function _nonceAndFlags(uint256 nonce) internal pure override returns (uint256) {
+        return nonce | BOOK_HOOK_TOKEN0_ACTIVE | BOOK_HOOK_TOKEN1_ACTIVE;
     }
 }

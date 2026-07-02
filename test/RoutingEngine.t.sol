@@ -40,7 +40,7 @@ contract RoutingEngineHarness is RoutingEngine {
         bool isBid,
         address owner
     ) external returns (bytes32 restingOrder, uint40 nextNonceAfter) {
-        return _restBook(id, books[id], nonceAndFlags, price, quantity, isBid, owner);
+        return _restBook(id, books[id], nonceAndFlags, price, quantity, isBid, owner, false);
     }
 }
 
