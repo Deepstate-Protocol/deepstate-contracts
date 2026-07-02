@@ -9,6 +9,20 @@ contract RadixMatchingEngineGasTest is Test {
     uint40 internal constant MAX_ORDER_NONCE = type(uint40).max;
     uint256 internal constant QUANTITY_SHIFT = 40;
     uint256 internal constant QUANTITY_MASK = (uint256(1) << 192) - 1;
+    uint256 internal constant LARGE_BOOK_ORDERS = 5_000;
+    uint24 internal constant LARGE_BID_BASE_PRICE = 1_000_000;
+    uint24 internal constant LARGE_ASK_BASE_PRICE = 2_000_000;
+    uint24 internal constant LARGE_REST_BID_PRICE = 1_750_000;
+    uint24 internal constant LARGE_REST_ASK_PRICE = 1_750_001;
+
+    struct LargeRandomBook {
+        bytes32 bestBid;
+        bytes32 bestAsk;
+        uint24 bestBidPrice;
+        uint24 bestAskPrice;
+        uint192 bestBidQuantity;
+        uint192 bestAskQuantity;
+    }
 
     TestERC20 internal base;
     TestERC20 internal quote;
@@ -136,6 +150,94 @@ contract RadixMatchingEngineGasTest is Test {
         assertEq(restingBid, _order(100, 2, type(uint40).max - 1));
         assertEq(_bidRoot(), restingBid);
         assertEq(_askRoot(), bytes32(0));
+        vm.resumeGasMetering();
+    }
+
+    function testGas_LargeRandomBookBidMatchesOneAsk() public {
+        vm.pauseGasMetering();
+        LargeRandomBook memory book = _buildLargeRandomBook();
+
+        vm.prank(carol);
+        vm.resumeGasMetering();
+        bytes32 restingBid = _fill(_order(book.bestAskPrice, book.bestAskQuantity, 0), true);
+        vm.pauseGasMetering();
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(_ownerOfOrder(book.bestAsk), bob);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_LargeRandomBookAskMatchesOneBid() public {
+        vm.pauseGasMetering();
+        LargeRandomBook memory book = _buildLargeRandomBook();
+
+        vm.prank(carol);
+        vm.resumeGasMetering();
+        bytes32 restingAsk = _fill(_order(book.bestBidPrice, book.bestBidQuantity, 0), false);
+        vm.pauseGasMetering();
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(_ownerOfOrder(book.bestBid), alice);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_LargeRandomBookPartialFillsBid() public {
+        vm.pauseGasMetering();
+        LargeRandomBook memory book = _buildLargeRandomBook();
+        uint192 fillQuantity = book.bestBidQuantity - 1;
+
+        vm.prank(carol);
+        vm.resumeGasMetering();
+        bytes32 restingAsk = _fill(_order(book.bestBidPrice, fillQuantity, 0), false);
+        vm.pauseGasMetering();
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(_ownerOfOrder(book.bestBid), alice);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_LargeRandomBookPartialFillsAsk() public {
+        vm.pauseGasMetering();
+        LargeRandomBook memory book = _buildLargeRandomBook();
+        uint192 fillQuantity = book.bestAskQuantity - 1;
+
+        vm.prank(carol);
+        vm.resumeGasMetering();
+        bytes32 restingBid = _fill(_order(book.bestAskPrice, fillQuantity, 0), true);
+        vm.pauseGasMetering();
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(_ownerOfOrder(book.bestAsk), bob);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_LargeRandomBookRestsBid() public {
+        vm.pauseGasMetering();
+        LargeRandomBook memory book = _buildLargeRandomBook();
+
+        vm.prank(carol);
+        vm.resumeGasMetering();
+        bytes32 restingBid = _fill(_order(LARGE_REST_BID_PRICE, 7, 0), true);
+        vm.pauseGasMetering();
+
+        assertTrue(restingBid != bytes32(0));
+        assertEq(_ownerOfOrder(restingBid), carol);
+        assertEq(_ownerOfOrder(book.bestAsk), bob);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_LargeRandomBookRestsAsk() public {
+        vm.pauseGasMetering();
+        LargeRandomBook memory book = _buildLargeRandomBook();
+
+        vm.prank(carol);
+        vm.resumeGasMetering();
+        bytes32 restingAsk = _fill(_order(LARGE_REST_ASK_PRICE, 7, 0), false);
+        vm.pauseGasMetering();
+
+        assertTrue(restingAsk != bytes32(0));
+        assertEq(_ownerOfOrder(restingAsk), carol);
+        assertEq(_ownerOfOrder(book.bestBid), alice);
         vm.resumeGasMetering();
     }
 
@@ -372,6 +474,16 @@ contract RadixMatchingEngineGasTest is Test {
         vm.stopPrank();
     }
 
+    function _fundLargeAndApprove(address account) internal {
+        base.mint(account, 1e30);
+        quote.mint(account, 1e30);
+
+        vm.startPrank(account);
+        base.approve(address(engine), type(uint256).max);
+        quote.approve(address(engine), type(uint256).max);
+        vm.stopPrank();
+    }
+
     function _fill(bytes32 order, bool isBid) internal returns (bytes32 restingOrder) {
         restingOrder = engine.fill(
             RoutingEngine.FillParams({
@@ -404,6 +516,69 @@ contract RadixMatchingEngineGasTest is Test {
 
     function _tree(bytes32 node) internal view returns (bytes32 leftNode, bytes32 rightNode) {
         return engine.tree(_bookId(), node);
+    }
+
+    function _buildLargeRandomBook() internal returns (LargeRandomBook memory book) {
+        _fundLargeAndApprove(alice);
+        _fundLargeAndApprove(bob);
+        _fundLargeAndApprove(carol);
+
+        for (uint256 i; i < LARGE_BOOK_ORDERS;) {
+            uint24 price = _largeBidPrice(i);
+            uint192 quantity = _largeQuantity(i, 17);
+
+            vm.prank(alice);
+            bytes32 restingBid = _fill(_order(price, quantity, 0), true);
+
+            if (price > book.bestBidPrice) {
+                book.bestBid = restingBid;
+                book.bestBidPrice = price;
+                book.bestBidQuantity = quantity;
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
+
+        for (uint256 i; i < LARGE_BOOK_ORDERS;) {
+            uint24 price = _largeAskPrice(i);
+            uint192 quantity = _largeQuantity(i, 97);
+
+            vm.prank(bob);
+            bytes32 restingAsk = _fill(_order(price, quantity, 0), false);
+
+            if (book.bestAsk == bytes32(0) || price < book.bestAskPrice) {
+                book.bestAsk = restingAsk;
+                book.bestAskPrice = price;
+                book.bestAskQuantity = quantity;
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    function _largeBidPrice(uint256 index) internal pure returns (uint24) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint24(uint256(LARGE_BID_BASE_PRICE) + uint256(_largeOffset(index, 7919)));
+    }
+
+    function _largeAskPrice(uint256 index) internal pure returns (uint24) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint24(uint256(LARGE_ASK_BASE_PRICE) + uint256(_largeOffset(index, 313)));
+    }
+
+    function _largeOffset(uint256 index, uint256 salt) internal pure returns (uint24) {
+        // 4813 is odd, so multiplication by it permutes values modulo 2^13.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint24((index * 4813 + salt) & 8191);
+    }
+
+    function _largeQuantity(uint256 index, uint256 salt) internal pure returns (uint192) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint192(2 + ((index * 37 + salt) % 9));
     }
 
     function _buildFullDepthBidNonceComb() internal returns (bytes32 targetOrder) {
