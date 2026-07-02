@@ -3,7 +3,7 @@ pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
-import {RadixMatchingEngine} from "../src/RadixMatchingEngine.sol";
+import {SinglePairEngineHarness as RadixMatchingEngine} from "./SinglePairEngineHarness.sol";
 
 contract FormalERC20 is ERC20 {
     function name() public pure override returns (string memory) {

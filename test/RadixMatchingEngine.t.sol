@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {stdError} from "forge-std/StdError.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
-import {RadixMatchingEngine} from "../src/RadixMatchingEngine.sol";
+import {SinglePairEngineHarness as RadixMatchingEngine} from "./SinglePairEngineHarness.sol";
 
 contract TestERC20 is ERC20 {
     string private _name;
@@ -129,9 +129,12 @@ contract RadixMatchingEngineTest is Test {
     uint256 internal constant BID_RIGHT_SPINE_DIRTY = uint256(1) << 40;
     uint256 internal constant ASK_RIGHT_SPINE_DIRTY = uint256(1) << 41;
 
-    event OrderRested(bytes32 indexed order, address indexed owner, bool indexed isBid);
-    event OrderMatched(bytes32 indexed restingOrder, bool indexed restingIsBid, uint192 quantity, uint256 quoteAmount);
-    event OrderCancelled(bytes32 indexed order, address indexed owner, uint256 baseAmount, uint256 quoteAmount);
+    event OrderRested(bytes32 indexed bookId, bytes32 indexed order, address indexed owner, bool isBid);
+    event AskMatched(bytes32 bookId, bytes32 restingOrder, uint192 quantity, uint256 quoteAmount);
+    event BidMatched(bytes32 bookId, bytes32 restingOrder, uint192 quantity, uint256 quoteAmount);
+    event OrderCancelled(
+        bytes32 indexed bookId, bytes32 indexed order, address indexed owner, uint256 baseAmount, uint256 quoteAmount
+    );
 
     TestERC20 internal base;
     TestERC20 internal quote;
@@ -262,7 +265,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 expectedAsk = _order(90, 2, MAX_ORDER_NONCE);
 
         vm.expectEmit(true, true, true, true, address(engine));
-        emit OrderRested(expectedAsk, bob, false);
+        emit OrderRested(_bookId(), expectedAsk, bob, false);
 
         vm.prank(bob);
         bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
@@ -271,10 +274,10 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 expectedBid = _order(100, 1, MAX_ORDER_NONCE - 1);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(restingAsk, false, 2, 180);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), restingAsk, 2, 180);
         vm.expectEmit(true, true, true, true, address(engine));
-        emit OrderRested(expectedBid, alice, true);
+        emit OrderRested(_bookId(), expectedBid, alice, true);
 
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 3, 0), true);
@@ -282,7 +285,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(restingBid, expectedBid);
 
         vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderCancelled(restingAsk, bob, 0, 180);
+        emit OrderCancelled(_bookId(), restingAsk, bob, 0, 180);
 
         vm.prank(bob);
         (uint256 bobBaseAmount, uint256 bobQuoteAmount) = engine.cancel(restingAsk);
@@ -291,7 +294,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(bobQuoteAmount, 180);
 
         vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderCancelled(restingBid, alice, 0, 100);
+        emit OrderCancelled(_bookId(), restingBid, alice, 0, 100);
 
         vm.prank(alice);
         (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = engine.cancel(restingBid);
@@ -304,7 +307,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 expectedBid = _order(100, 2, MAX_ORDER_NONCE);
 
         vm.expectEmit(true, true, true, true, address(engine));
-        emit OrderRested(expectedBid, alice, true);
+        emit OrderRested(_bookId(), expectedBid, alice, true);
 
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
@@ -313,19 +316,19 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 expectedAsk = _order(90, 1, MAX_ORDER_NONCE - 1);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(restingBid, true, 2, 200);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), restingBid, 2, 200);
         vm.expectEmit(true, true, true, true, address(engine));
-        emit OrderRested(expectedAsk, bob, false);
+        emit OrderRested(_bookId(), expectedAsk, bob, false);
 
         vm.prank(bob);
         bytes32 restingAsk = engine.fill(_order(90, 3, 0), false);
 
         assertEq(restingAsk, expectedAsk);
-        assertEq(engine.ownerOfOrder(_order(100, 0, MAX_ORDER_NONCE)), address(1));
+        assertTrue(engine.isBidOrder(restingBid));
 
         vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderCancelled(restingBid, alice, 2, 0);
+        emit OrderCancelled(_bookId(), restingBid, alice, 2, 0);
 
         vm.prank(alice);
         (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = engine.cancel(restingBid);
@@ -335,7 +338,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(_order(100, 0, MAX_ORDER_NONCE)), address(0));
 
         vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderCancelled(restingAsk, bob, 1, 0);
+        emit OrderCancelled(_bookId(), restingAsk, bob, 1, 0);
 
         vm.prank(bob);
         (uint256 bobBaseAmount, uint256 bobQuoteAmount) = engine.cancel(restingAsk);
@@ -351,10 +354,10 @@ contract RadixMatchingEngineTest is Test {
         vm.prank(bob);
         bytes32 highAsk = engine.fill(_order(90, 1, 0), false);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(lowAsk, false, 1, 80);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(highAsk, false, 1, 90);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), lowAsk, 1, 80);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), highAsk, 1, 90);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
@@ -370,10 +373,10 @@ contract RadixMatchingEngineTest is Test {
         vm.prank(bob);
         bytes32 lowBid = engine.fill(_order(90, 1, 0), true);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(highBid, true, 1, 100);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(lowBid, true, 1, 90);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), highBid, 1, 100);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), lowBid, 1, 90);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(80, 2, 0), false);
@@ -382,27 +385,21 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.bidRoot(), bytes32(0));
     }
 
-    function test_ConstructorRejectsInvalidTokens() public {
-        vm.expectRevert(RadixMatchingEngine.InvalidToken.selector);
+    function test_ConstructorRejectsZeroAndDuplicateTokens() public {
+        vm.expectRevert(bytes4(keccak256("InvalidToken()")));
         new RadixMatchingEngine(address(0), address(quote));
 
-        vm.expectRevert(RadixMatchingEngine.InvalidToken.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidToken()")));
         new RadixMatchingEngine(address(base), address(0));
 
-        vm.expectRevert(RadixMatchingEngine.InvalidToken.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidToken()")));
         new RadixMatchingEngine(address(base), address(base));
-
-        vm.expectRevert(RadixMatchingEngine.InvalidToken.selector);
-        new RadixMatchingEngine(alice, address(quote));
-
-        vm.expectRevert(RadixMatchingEngine.InvalidToken.selector);
-        new RadixMatchingEngine(address(base), bob);
     }
 
     function test_StorageLayoutMatchesStrictDesign() public {
-        assertEq(vm.load(address(engine), bytes32(uint256(2))), bytes32(0), "bidRoot slot");
-        assertEq(vm.load(address(engine), bytes32(uint256(3))), bytes32(0), "askRoot slot");
-        assertEq(vm.load(address(engine), _nextNonceSlot()), bytes32(uint256(MAX_ORDER_NONCE)), "nextNonce slot");
+        assertEq(vm.load(address(engine), _bidRootSlot()), bytes32(0), "bidRoot slot");
+        assertEq(vm.load(address(engine), _askRootSlot()), bytes32(0), "askRoot slot");
+        assertEq(vm.load(address(engine), _nextNonceSlot()), bytes32(0), "nextNonce slot before init");
 
         {
             vm.prank(alice);
@@ -414,13 +411,9 @@ contract RadixMatchingEngineTest is Test {
 
             assertEq(vm.load(address(engine), _bidRootSlot()), bidBranch, "bidRoot slot after insert");
             assertEq(
-                vm.load(address(engine), _ownerOfOrderSlot(firstBid)), bytes32(uint256(uint160(alice))), "owner slot"
+                vm.load(address(engine), _ownerOfOrderSlot(firstBid)), _orderStateSlotValue(alice, true), "owner slot"
             );
-            assertEq(
-                vm.load(address(engine), _ownerOfOrderSlot(_order(100, 0, _nonce(firstBid)))),
-                bytes32(uint256(1)),
-                "bid side slot"
-            );
+            assertTrue(engine.isBidOrder(firstBid), "bid side");
             _assertTreeBranchStorage(bidBranch, leftNode, rightNode, "bid");
         }
 
@@ -435,14 +428,10 @@ contract RadixMatchingEngineTest is Test {
             assertEq(vm.load(address(engine), _askRootSlot()), askBranch, "askRoot slot after insert");
             assertEq(
                 vm.load(address(engine), _ownerOfOrderSlot(firstAsk)),
-                bytes32(uint256(uint160(alice))),
+                _orderStateSlotValue(alice, false),
                 "ask owner slot"
             );
-            assertEq(
-                vm.load(address(engine), _ownerOfOrderSlot(_order(200, 0, _nonce(firstAsk)))),
-                bytes32(uint256(2)),
-                "ask side slot"
-            );
+            assertFalse(engine.isBidOrder(firstAsk), "ask side");
             _assertTreeBranchStorage(askBranch, leftNode, rightNode, "ask");
         }
     }
@@ -450,13 +439,13 @@ contract RadixMatchingEngineTest is Test {
     function test_InvalidOrdersRevert() public {
         vm.startPrank(alice);
 
-        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidOrder()")));
         engine.fill(_order(0, 1, 0), true);
 
-        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidOrder()")));
         engine.fill(_order(1, 0, 0), true);
 
-        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidOrder()")));
         engine.fill(_order(1, 1, 1), true);
 
         vm.stopPrank();
@@ -465,7 +454,7 @@ contract RadixMatchingEngineTest is Test {
     function test_ReentrancyGuardClearsAfterFillRevert() public {
         vm.startPrank(alice);
 
-        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidOrder()")));
         engine.fill(_order(0, 1, 0), true);
 
         bytes32 restingBid = engine.fill(_order(10, 1, 0), true);
@@ -481,7 +470,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 restingBid = engine.fill(_order(10, 1, 0), true);
 
         vm.startPrank(alice);
-        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidOrder()")));
         engine.cancel(_order(10, 0, _nonce(restingBid)));
 
         (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(restingBid);
@@ -505,7 +494,7 @@ contract RadixMatchingEngineTest is Test {
         uint256 aliceQuoteBefore = quote.balanceOf(alice);
 
         vm.prank(alice);
-        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidOrder()")));
         engine.fill(order, isBid);
 
         assertEq(engine.bidRoot(), bidRootBefore);
@@ -518,6 +507,7 @@ contract RadixMatchingEngineTest is Test {
     }
 
     function testFuzz_CancelZeroQuantityDoesNotMutate(uint24 price, uint40 nonce, address caller) public {
+        vm.assume(caller != address(0));
         bytes32 order = _order(price, 0, nonce);
 
         bytes32 bidRootBefore = engine.bidRoot();
@@ -527,7 +517,7 @@ contract RadixMatchingEngineTest is Test {
         uint256 engineQuoteBefore = quote.balanceOf(address(engine));
 
         vm.prank(caller);
-        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidBook()")));
         engine.cancel(order);
 
         assertEq(engine.bidRoot(), bidRootBefore);
@@ -536,6 +526,18 @@ contract RadixMatchingEngineTest is Test {
         assertEq(base.balanceOf(address(engine)), engineBaseBefore);
         assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
         assertEq(engine.ownerOfOrder(order), address(0));
+    }
+
+    function test_CancelOwnedZeroQuantityOrderRevertsInvalidOrder() public {
+        bytes32 order = _order(777, 0, 123);
+        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
+        vm.store(address(engine), _ownerOfOrderSlot(order), _orderStateSlotValue(alice, true));
+
+        vm.prank(alice);
+        vm.expectRevert(bytes4(keccak256("InvalidOrder()")));
+        engine.cancel(order);
+
+        assertEq(vm.load(address(engine), _ownerOfOrderSlot(order)), _orderStateSlotValue(alice, true));
     }
 
     function testFuzz_CancelUnknownOrderDoesNotMutate(uint24 price, uint192 quantity, uint40 nonce, address caller)
@@ -552,7 +554,7 @@ contract RadixMatchingEngineTest is Test {
         uint256 engineQuoteBefore = quote.balanceOf(address(engine));
 
         vm.prank(caller);
-        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidBook()")));
         engine.cancel(order);
 
         assertEq(engine.bidRoot(), bidRootBefore);
@@ -563,9 +565,10 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(order), address(0));
     }
 
-    function test_CancelOrphanedOwnerWithoutBookOrSideMarkerRevertsOrderNotFound() public {
+    function test_CancelOrphanedOrderStateWithoutCollateralRevertsAndPreservesState() public {
         bytes32 order = _order(777, 3, 123);
-        vm.store(address(engine), _ownerOfOrderSlot(order), bytes32(uint256(uint160(alice))));
+        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
+        vm.store(address(engine), _ownerOfOrderSlot(order), _orderStateSlotValue(alice, true));
 
         uint256 aliceBaseBefore = base.balanceOf(alice);
         uint256 aliceQuoteBefore = quote.balanceOf(alice);
@@ -573,10 +576,10 @@ contract RadixMatchingEngineTest is Test {
         uint256 engineQuoteBefore = quote.balanceOf(address(engine));
 
         vm.prank(alice);
-        vm.expectRevert(RadixMatchingEngine.OrderNotFound.selector);
+        vm.expectRevert(SafeTransferLib.TransferFailed.selector);
         engine.cancel(order);
 
-        assertEq(engine.ownerOfOrder(order), alice);
+        assertEq(vm.load(address(engine), _ownerOfOrderSlot(order)), _orderStateSlotValue(alice, true));
         assertEq(base.balanceOf(alice), aliceBaseBefore);
         assertEq(quote.balanceOf(alice), aliceQuoteBefore);
         assertEq(base.balanceOf(address(engine)), engineBaseBefore);
@@ -596,7 +599,7 @@ contract RadixMatchingEngineTest is Test {
         uint256 engineQuoteBefore = quote.balanceOf(address(engine));
 
         vm.prank(alice);
-        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidOrder()")));
         engine.cancel(order);
 
         assertEq(engine.bidRoot(), corruptedLeaf);
@@ -612,7 +615,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
 
         vm.prank(bob);
-        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        vm.expectRevert(bytes4(keccak256("NotOrderOwner()")));
         engine.cancel(restingBid);
 
         assertEq(engine.ownerOfOrder(restingBid), alice);
@@ -635,7 +638,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(restingAsk), address(0));
 
         vm.prank(bob);
-        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        vm.expectRevert(bytes4(keccak256("NotOrderOwner()")));
         engine.cancel(restingAsk);
     }
 
@@ -663,14 +666,14 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(restingBid, _order(10, 1, MAX_ORDER_NONCE));
 
-        bytes32 nextNonceSlot = bytes32(uint256(4));
+        bytes32 nextNonceSlot = _nextNonceSlot();
         vm.store(address(engine), nextNonceSlot, bytes32(uint256(MAX_ORDER_NONCE)));
 
         uint256 engineQuoteBefore = quote.balanceOf(address(engine));
         uint256 bobQuoteBefore = quote.balanceOf(bob);
 
         vm.prank(bob);
-        vm.expectRevert(RadixMatchingEngine.DuplicateOrder.selector);
+        vm.expectRevert(bytes4(keccak256("DuplicateOrder()")));
         engine.fill(_order(10, 1, 0), true);
 
         assertEq(engine.bidRoot(), restingBid);
@@ -686,14 +689,14 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(restingAsk, _order(10, 1, MAX_ORDER_NONCE));
 
-        bytes32 nextNonceSlot = bytes32(uint256(4));
+        bytes32 nextNonceSlot = _nextNonceSlot();
         vm.store(address(engine), nextNonceSlot, bytes32(uint256(MAX_ORDER_NONCE)));
 
         uint256 engineBaseBefore = base.balanceOf(address(engine));
         uint256 bobBaseBefore = base.balanceOf(bob);
 
         vm.prank(bob);
-        vm.expectRevert(RadixMatchingEngine.DuplicateOrder.selector);
+        vm.expectRevert(bytes4(keccak256("DuplicateOrder()")));
         engine.fill(_order(10, 1, 0), false);
 
         assertEq(engine.askRoot(), restingAsk);
@@ -703,109 +706,106 @@ contract RadixMatchingEngineTest is Test {
         assertEq(base.balanceOf(bob), bobBaseBefore);
     }
 
-    function test_NonceExhaustionRevertsWithoutMutatingBook() public {
-        bytes32 nextNonceSlot = bytes32(uint256(4));
-        vm.store(address(engine), nextNonceSlot, bytes32(uint256(1)));
+    function test_ExhaustedBookRestsNewSameSideOrderInActiveEpoch() public {
+        bytes32 nextNonceSlot = _nextNonceSlot();
+        vm.store(address(engine), nextNonceSlot, bytes32(uint256(2)));
 
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(10, 1, 0), true);
 
-        assertEq(restingBid, _order(10, 1, 1));
+        assertEq(restingBid, _order(10, 1, 2));
         assertEq(engine.bidRoot(), restingBid);
-        assertEq(engine.nextNonce(), 0);
+        assertEq(engine.nextNonce(), 1);
+        assertEq(engine.poolEpoch(engine.poolId(address(base), address(quote))), 1);
 
         vm.prank(bob);
-        vm.expectRevert(RadixMatchingEngine.NonceExhausted.selector);
-        engine.fill(_order(11, 1, 0), true);
+        bytes32 nextBid = engine.fill(_order(11, 1, 0), true);
 
         assertEq(engine.bidRoot(), restingBid);
         assertEq(engine.ownerOfOrder(restingBid), alice);
-        assertEq(engine.nextNonce(), 0);
-        assertEq(quote.balanceOf(address(engine)), 10);
+        assertEq(engine.nextNonce(), 1);
+
+        (, bytes32 epochOneBidRoot) = engine.roots(address(base), address(quote), 1);
+        assertEq(nextBid, _order(11, 1, MAX_ORDER_NONCE));
+        assertEq(epochOneBidRoot, nextBid);
+        assertEq(engine.ownerOfOrder(nextBid), bob);
+        assertEq(quote.balanceOf(address(engine)), 21);
     }
 
-    function test_BidRemainderNonceExhaustionRollsBackMatch() public {
-        bytes32 nextNonceSlot = bytes32(uint256(4));
-        vm.store(address(engine), nextNonceSlot, bytes32(uint256(1)));
+    function test_BidRemainderFromExhaustedBookRestsInActiveEpoch() public {
+        bytes32 nextNonceSlot = _nextNonceSlot();
+        vm.store(address(engine), nextNonceSlot, bytes32(uint256(2)));
 
         vm.prank(bob);
         bytes32 restingAsk = engine.fill(_order(90, 1, 0), false);
 
-        assertEq(restingAsk, _order(90, 1, 1));
+        assertEq(restingAsk, _order(90, 1, 2));
         assertEq(engine.askRoot(), restingAsk);
-        assertEq(engine.nextNonce(), 0);
-
-        bytes32 askRootBefore = engine.askRoot();
-        uint256 engineBaseBefore = base.balanceOf(address(engine));
-        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
-        uint256 aliceBaseBefore = base.balanceOf(alice);
-        uint256 aliceQuoteBefore = quote.balanceOf(alice);
-        uint256 bobBaseBefore = base.balanceOf(bob);
-        uint256 bobQuoteBefore = quote.balanceOf(bob);
+        assertEq(engine.nextNonce(), 1);
+        assertEq(engine.poolEpoch(engine.poolId(address(base), address(quote))), 1);
 
         vm.prank(alice);
-        vm.expectRevert(RadixMatchingEngine.NonceExhausted.selector);
-        engine.fill(_order(100, 2, 0), true);
+        bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
 
-        assertEq(engine.askRoot(), askRootBefore);
+        assertEq(restingBid, _order(100, 1, MAX_ORDER_NONCE));
+        assertEq(engine.askRoot(), bytes32(0));
         assertEq(engine.bidRoot(), bytes32(0));
         assertEq(engine.ownerOfOrder(restingAsk), bob);
-        assertEq(engine.ownerOfOrder(_order(90, 0, 1)), address(2));
-        assertEq(engine.nextNonce(), 0);
-        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
-        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
-        assertEq(base.balanceOf(alice), aliceBaseBefore);
-        assertEq(quote.balanceOf(alice), aliceQuoteBefore);
-        assertEq(base.balanceOf(bob), bobBaseBefore);
-        assertEq(quote.balanceOf(bob), bobQuoteBefore);
+        assertFalse(engine.isBidOrder(restingAsk));
+        assertEq(engine.nextNonce(), 1);
+
+        (, bytes32 epochOneBidRoot) = engine.roots(address(base), address(quote), 1);
+        assertEq(epochOneBidRoot, restingBid);
+        assertEq(base.balanceOf(alice), 1_000_001);
+        assertEq(quote.balanceOf(alice), 1_000_000 - 190);
+        assertEq(base.balanceOf(bob), 1_000_000 - 1);
+        assertEq(quote.balanceOf(bob), 1_000_000);
+        assertEq(base.balanceOf(address(engine)), 0);
+        assertEq(quote.balanceOf(address(engine)), 190);
     }
 
-    function test_AskRemainderNonceExhaustionRollsBackMatch() public {
-        bytes32 nextNonceSlot = bytes32(uint256(4));
-        vm.store(address(engine), nextNonceSlot, bytes32(uint256(1)));
+    function test_AskRemainderFromExhaustedBookRestsInActiveEpoch() public {
+        bytes32 nextNonceSlot = _nextNonceSlot();
+        vm.store(address(engine), nextNonceSlot, bytes32(uint256(2)));
 
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 1, 0), true);
 
-        assertEq(restingBid, _order(100, 1, 1));
+        assertEq(restingBid, _order(100, 1, 2));
         assertEq(engine.bidRoot(), restingBid);
-        assertEq(engine.nextNonce(), 0);
-
-        bytes32 bidRootBefore = engine.bidRoot();
-        uint256 engineBaseBefore = base.balanceOf(address(engine));
-        uint256 engineQuoteBefore = quote.balanceOf(address(engine));
-        uint256 aliceBaseBefore = base.balanceOf(alice);
-        uint256 aliceQuoteBefore = quote.balanceOf(alice);
-        uint256 bobBaseBefore = base.balanceOf(bob);
-        uint256 bobQuoteBefore = quote.balanceOf(bob);
-
-        vm.prank(bob);
-        vm.expectRevert(RadixMatchingEngine.NonceExhausted.selector);
-        engine.fill(_order(90, 2, 0), false);
-
-        assertEq(engine.bidRoot(), bidRootBefore);
-        assertEq(engine.askRoot(), bytes32(0));
-        assertEq(engine.ownerOfOrder(restingBid), alice);
-        assertEq(engine.ownerOfOrder(_order(100, 0, 1)), address(1));
-        assertEq(engine.nextNonce(), 0);
-        assertEq(base.balanceOf(address(engine)), engineBaseBefore);
-        assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
-        assertEq(base.balanceOf(alice), aliceBaseBefore);
-        assertEq(quote.balanceOf(alice), aliceQuoteBefore);
-        assertEq(base.balanceOf(bob), bobBaseBefore);
-        assertEq(quote.balanceOf(bob), bobQuoteBefore);
-    }
-
-    function test_BidFullMatchSucceedsWhenNonceExhausted() public {
-        bytes32 nextNonceSlot = bytes32(uint256(4));
-        vm.store(address(engine), nextNonceSlot, bytes32(uint256(1)));
+        assertEq(engine.nextNonce(), 1);
+        assertEq(engine.poolEpoch(engine.poolId(address(base), address(quote))), 1);
 
         vm.prank(bob);
         bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
 
-        assertEq(restingAsk, _order(90, 2, 1));
+        assertEq(restingAsk, _order(90, 1, MAX_ORDER_NONCE));
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(engine.ownerOfOrder(restingBid), alice);
+        assertTrue(engine.isBidOrder(restingBid));
+        assertEq(engine.nextNonce(), 1);
+
+        (bytes32 epochOneAskRoot,) = engine.roots(address(base), address(quote), 1);
+        assertEq(epochOneAskRoot, restingAsk);
+        assertEq(base.balanceOf(alice), 1_000_000);
+        assertEq(quote.balanceOf(alice), 1_000_000 - 100);
+        assertEq(base.balanceOf(bob), 1_000_000 - 2);
+        assertEq(quote.balanceOf(bob), 1_000_100);
+        assertEq(base.balanceOf(address(engine)), 2);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function test_BidFullMatchSucceedsWhenNonceExhausted() public {
+        bytes32 nextNonceSlot = _nextNonceSlot();
+        vm.store(address(engine), nextNonceSlot, bytes32(uint256(2)));
+
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
+
+        assertEq(restingAsk, _order(90, 2, 2));
         assertEq(engine.askRoot(), restingAsk);
-        assertEq(engine.nextNonce(), 0);
+        assertEq(engine.nextNonce(), 1);
 
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
@@ -813,7 +813,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(restingBid, bytes32(0));
         assertEq(engine.bidRoot(), bytes32(0));
         assertEq(engine.askRoot(), bytes32(0));
-        assertEq(engine.nextNonce(), 0);
+        assertEq(engine.nextNonce(), 1);
         assertEq(base.balanceOf(alice), 1_000_002);
         assertEq(quote.balanceOf(alice), 1_000_000 - 180);
         assertEq(engine.ownerOfOrder(restingAsk), bob);
@@ -824,19 +824,19 @@ contract RadixMatchingEngineTest is Test {
         assertEq(bobBase, 0);
         assertEq(bobQuote, 180);
         assertEq(engine.ownerOfOrder(restingAsk), address(0));
-        assertEq(engine.ownerOfOrder(_order(90, 0, 1)), address(0));
+        assertEq(engine.ownerOfOrder(_order(90, 0, 2)), address(0));
     }
 
     function test_AskFullMatchSucceedsWhenNonceExhausted() public {
-        bytes32 nextNonceSlot = bytes32(uint256(4));
-        vm.store(address(engine), nextNonceSlot, bytes32(uint256(1)));
+        bytes32 nextNonceSlot = _nextNonceSlot();
+        vm.store(address(engine), nextNonceSlot, bytes32(uint256(2)));
 
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
 
-        assertEq(restingBid, _order(100, 2, 1));
+        assertEq(restingBid, _order(100, 2, 2));
         assertEq(engine.bidRoot(), restingBid);
-        assertEq(engine.nextNonce(), 0);
+        assertEq(engine.nextNonce(), 1);
 
         vm.prank(bob);
         bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
@@ -844,7 +844,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(restingAsk, bytes32(0));
         assertEq(engine.bidRoot(), bytes32(0));
         assertEq(engine.askRoot(), bytes32(0));
-        assertEq(engine.nextNonce(), 0);
+        assertEq(engine.nextNonce(), 1);
         assertEq(base.balanceOf(bob), 1_000_000 - 2);
         assertEq(quote.balanceOf(bob), 1_000_200);
         assertEq(engine.ownerOfOrder(restingBid), alice);
@@ -855,7 +855,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(aliceBase, 2);
         assertEq(aliceQuote, 0);
         assertEq(engine.ownerOfOrder(restingBid), address(0));
-        assertEq(engine.ownerOfOrder(_order(100, 0, 1)), address(0));
+        assertEq(engine.ownerOfOrder(_order(100, 0, 2)), address(0));
     }
 
     function test_MaxPriceAndQuantityBidCancels() public {
@@ -1056,30 +1056,34 @@ contract RadixMatchingEngineTest is Test {
         assertEq(base.balanceOf(address(engine)), type(uint192).max);
     }
 
-    function test_RestingSideMetadataUsesZeroQuantityNamespace() public {
+    function test_RestingOrderSideUsesPackedOrderState() public {
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
 
         bytes32 bidSideKey = _order(100, 0, _nonce(restingBid));
         assertEq(engine.ownerOfOrder(restingBid), alice);
-        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+        assertTrue(engine.isBidOrder(restingBid));
+        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
 
         vm.prank(bob);
         engine.fill(_order(100, 5, 0), false);
 
-        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+        assertTrue(engine.isBidOrder(restingBid));
+        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
 
         vm.prank(bob);
         bytes32 restingAsk = engine.fill(_order(101, 7, 0), false);
 
         bytes32 askSideKey = _order(101, 0, _nonce(restingAsk));
         assertEq(engine.ownerOfOrder(restingAsk), bob);
-        assertEq(engine.ownerOfOrder(askSideKey), address(2));
+        assertFalse(engine.isBidOrder(restingAsk));
+        assertEq(engine.ownerOfOrder(askSideKey), address(0));
 
         vm.prank(alice);
         engine.fill(_order(101, 7, 0), true);
 
-        assertEq(engine.ownerOfOrder(askSideKey), address(2));
+        assertFalse(engine.isBidOrder(restingAsk));
+        assertEq(engine.ownerOfOrder(askSideKey), address(0));
 
         vm.prank(alice);
         engine.cancel(restingBid);
@@ -1090,7 +1094,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(askSideKey), address(0));
     }
 
-    function test_CancelRejectsSideMetadataKey() public {
+    function test_CancelRejectsZeroQuantitySideKey() public {
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 1, 0), true);
 
@@ -1099,14 +1103,16 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 bidSideKey = _order(100, 0, _nonce(restingBid));
         assertEq(engine.ownerOfOrder(restingBid), alice);
-        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+        assertTrue(engine.isBidOrder(restingBid));
+        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
 
         vm.prank(address(1));
-        vm.expectRevert(RadixMatchingEngine.InvalidOrder.selector);
+        vm.expectRevert(bytes4(keccak256("InvalidOrder()")));
         engine.cancel(bidSideKey);
 
         assertEq(engine.ownerOfOrder(restingBid), alice);
-        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+        assertTrue(engine.isBidOrder(restingBid));
+        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
 
         vm.prank(alice);
         (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(restingBid);
@@ -1117,7 +1123,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(bidSideKey), address(0));
     }
 
-    function test_FilledSideMarkerAddressCannotClaimForOriginalOwner() public {
+    function test_AddressOneAndTwoCannotClaimForOriginalOwner() public {
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 1, 0), true);
 
@@ -1126,14 +1132,16 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 bidSideKey = _order(100, 0, _nonce(restingBid));
         assertEq(engine.ownerOfOrder(restingBid), alice);
-        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+        assertTrue(engine.isBidOrder(restingBid));
+        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
 
         vm.prank(address(1));
-        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        vm.expectRevert(bytes4(keccak256("NotOrderOwner()")));
         engine.cancel(restingBid);
 
         assertEq(engine.ownerOfOrder(restingBid), alice);
-        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+        assertTrue(engine.isBidOrder(restingBid));
+        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
 
         vm.prank(alice);
         engine.cancel(restingBid);
@@ -1149,14 +1157,16 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 askSideKey = _order(90, 0, _nonce(restingAsk));
         assertEq(engine.ownerOfOrder(restingAsk), bob);
-        assertEq(engine.ownerOfOrder(askSideKey), address(2));
+        assertFalse(engine.isBidOrder(restingAsk));
+        assertEq(engine.ownerOfOrder(askSideKey), address(0));
 
         vm.prank(address(2));
-        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        vm.expectRevert(bytes4(keccak256("NotOrderOwner()")));
         engine.cancel(restingAsk);
 
         assertEq(engine.ownerOfOrder(restingAsk), bob);
-        assertEq(engine.ownerOfOrder(askSideKey), address(2));
+        assertFalse(engine.isBidOrder(restingAsk));
+        assertEq(engine.ownerOfOrder(askSideKey), address(0));
 
         vm.prank(bob);
         engine.cancel(restingAsk);
@@ -1165,7 +1175,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(askSideKey), address(0));
     }
 
-    function test_SentinelAddressOwnersCanCancelUnfilledOrders() public {
+    function test_AddressOneAndTwoOwnersCanCancelUnfilledOrders() public {
         address bidOwner = address(1);
         address askOwner = address(2);
         _fundAndApprove(bidOwner);
@@ -1176,14 +1186,16 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 bidSideKey = _order(100, 0, _nonce(restingBid));
         assertEq(engine.ownerOfOrder(restingBid), bidOwner);
-        assertEq(engine.ownerOfOrder(bidSideKey), address(1));
+        assertTrue(engine.isBidOrder(restingBid));
+        assertEq(engine.ownerOfOrder(bidSideKey), address(0));
 
         vm.prank(askOwner);
         bytes32 restingAsk = engine.fill(_order(101, 4, 0), false);
 
         bytes32 askSideKey = _order(101, 0, _nonce(restingAsk));
         assertEq(engine.ownerOfOrder(restingAsk), askOwner);
-        assertEq(engine.ownerOfOrder(askSideKey), address(2));
+        assertFalse(engine.isBidOrder(restingAsk));
+        assertEq(engine.ownerOfOrder(askSideKey), address(0));
 
         vm.prank(bidOwner);
         (uint256 bidBaseAmount, uint256 bidQuoteAmount) = engine.cancel(restingBid);
@@ -1202,7 +1214,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(askSideKey), address(0));
     }
 
-    function test_SentinelAddressOwnersCanClaimFilledOrders() public {
+    function test_AddressOneAndTwoOwnersCanClaimFilledOrders() public {
         address bidOwner = address(1);
         address askOwner = address(2);
         _fundAndApprove(bidOwner);
@@ -2017,10 +2029,10 @@ contract RadixMatchingEngineTest is Test {
         bytes32 aggregate = _branchFor(firstAsk, secondAsk);
         assertEq(_subtreeQuantity(aggregate), 5);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(bestAsk, false, 1, 10);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(aggregate, false, 5, 100);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), bestAsk, 1, 10);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), aggregate, 5, 100);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(20, 6, 0), true);
@@ -2055,12 +2067,12 @@ contract RadixMatchingEngineTest is Test {
         vm.prank(dave);
         bytes32 bestAsk = engine.fill(_order(10, 1, 0), false);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(bestAsk, false, 1, 10);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(lowerAsk, false, 2, 40);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(higherAsk, false, 3, 63);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), bestAsk, 1, 10);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), lowerAsk, 2, 40);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), higherAsk, 3, 63);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(21, 6, 0), true);
@@ -2098,10 +2110,10 @@ contract RadixMatchingEngineTest is Test {
         bytes32 aggregate = _branchFor(firstBid, secondBid);
         assertEq(_subtreeQuantity(aggregate), 5);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(bestBid, true, 1, 80);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(aggregate, true, 5, 350);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), bestBid, 1, 80);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), aggregate, 5, 350);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(70, 6, 0), false);
@@ -2137,12 +2149,12 @@ contract RadixMatchingEngineTest is Test {
         vm.prank(dave);
         bytes32 bestBid = engine.fill(_order(80, 1, 0), true);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(bestBid, true, 1, 80);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(higherBid, true, 2, 140);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(lowerBid, true, 3, 207);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), bestBid, 1, 80);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), higherBid, 2, 140);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), lowerBid, 3, 207);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(69, 6, 0), false);
@@ -2178,12 +2190,12 @@ contract RadixMatchingEngineTest is Test {
         vm.prank(dave);
         bytes32 bestAsk = engine.fill(_order(10, 1, 0), false);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(bestAsk, false, 1, 10);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(lowerAsk, false, 2, 40);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(higherAsk, false, 1, 21);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), bestAsk, 1, 10);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), lowerAsk, 2, 40);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), higherAsk, 1, 21);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(21, 4, 0), true);
@@ -2223,8 +2235,8 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 offSpineAggregate = _branchFor(lowerAsk, higherAsk);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(bestAsk, false, 1, 10);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), bestAsk, 1, 10);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(20, 4, 0), true);
@@ -2263,12 +2275,12 @@ contract RadixMatchingEngineTest is Test {
         vm.prank(dave);
         bytes32 bestBid = engine.fill(_order(80, 1, 0), true);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(bestBid, true, 1, 80);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(higherBid, true, 2, 140);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(lowerBid, true, 1, 69);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), bestBid, 1, 80);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), higherBid, 2, 140);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), lowerBid, 1, 69);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(69, 4, 0), false);
@@ -2307,8 +2319,8 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 offSpineAggregate = _branchFor(higherBid, lowerBid);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(bestBid, true, 1, 80);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), bestBid, 1, 80);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(70, 4, 0), false);
@@ -2373,8 +2385,8 @@ contract RadixMatchingEngineTest is Test {
         bytes32 aggregate = _branchFor(firstAsk, secondAsk);
         assertEq(engine.askRoot(), aggregate);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(aggregate, false, 5, 250);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), aggregate, 5, 250);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(price, 5, 0), true);
@@ -2385,8 +2397,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(quote.balanceOf(address(engine)), 250);
         assertEq(engine.ownerOfOrder(firstAsk), alice);
         assertEq(engine.ownerOfOrder(secondAsk), bob);
-        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(firstAsk))), address(2));
-        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(secondAsk))), address(2));
+        assertFalse(engine.isBidOrder(firstAsk));
+        assertFalse(engine.isBidOrder(secondAsk));
 
         vm.prank(alice);
         (uint256 firstBaseAmount, uint256 firstQuoteAmount) = engine.cancel(firstAsk);
@@ -2418,8 +2430,8 @@ contract RadixMatchingEngineTest is Test {
         bytes32 aggregate = _branchFor(firstBid, secondBid);
         assertEq(engine.bidRoot(), aggregate);
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(aggregate, true, 5, 350);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), aggregate, 5, 350);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(price, 5, 0), false);
@@ -2431,8 +2443,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(base.balanceOf(address(engine)), 5);
         assertEq(engine.ownerOfOrder(firstBid), alice);
         assertEq(engine.ownerOfOrder(secondBid), bob);
-        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(firstBid))), address(1));
-        assertEq(engine.ownerOfOrder(_order(price, 0, _nonce(secondBid))), address(1));
+        assertTrue(engine.isBidOrder(firstBid));
+        assertTrue(engine.isBidOrder(secondBid));
 
         vm.prank(alice);
         (uint256 firstBaseAmount, uint256 firstQuoteAmount) = engine.cancel(firstBid);
@@ -2471,8 +2483,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_subtreeQuantity(engine.askRoot()), 4);
 
         bytes32 dirtyAggregate = _order(price, 4, _nonce(firstAsk));
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(dirtyAggregate, false, 4, 240);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), dirtyAggregate, 4, 240);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(price, 4, 0), true);
@@ -2511,8 +2523,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_subtreeQuantity(engine.bidRoot()), 4);
 
         bytes32 dirtyAggregate = _order(price, 4, _nonce(firstBid));
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(dirtyAggregate, true, 4, 320);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), dirtyAggregate, 4, 320);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(price, 4, 0), false);
@@ -2553,10 +2565,10 @@ contract RadixMatchingEngineTest is Test {
             uint256(vm.load(address(engine), _nextNonceSlot())), (uint256(MAX_ORDER_NONCE) - 2) | ASK_RIGHT_SPINE_DIRTY
         );
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(reducedFirstAsk, false, 1, 60);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(secondAsk, false, 3, 183);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), reducedFirstAsk, 1, 60);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit AskMatched(_bookId(), secondAsk, 3, 183);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(61, 4, 0), true);
@@ -2599,10 +2611,10 @@ contract RadixMatchingEngineTest is Test {
             uint256(vm.load(address(engine), _nextNonceSlot())), (uint256(MAX_ORDER_NONCE) - 2) | BID_RIGHT_SPINE_DIRTY
         );
 
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(reducedFirstBid, true, 1, 80);
-        vm.expectEmit(true, true, false, true, address(engine));
-        emit OrderMatched(secondBid, true, 3, 237);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), reducedFirstBid, 1, 80);
+        vm.expectEmit(false, false, false, true, address(engine));
+        emit BidMatched(_bookId(), secondBid, 3, 237);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(79, 4, 0), false);
@@ -2632,6 +2644,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 rightBranch = _order(10, 2, MAX_ORDER_NONCE - 1);
         bytes32 root = _order(10, 3, MAX_ORDER_NONCE);
 
+        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
         _storeTreeBranch(root, leftAsk, rightBranch);
         _storeTreeBranch(rightBranch, rightLeftAsk, rightRightAsk);
         vm.store(address(engine), _askRootSlot(), root);
@@ -2652,6 +2665,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 rightAsk = _order(price, 5, MAX_ORDER_NONCE);
         bytes32 root = _order(price, 4, MAX_ORDER_NONCE);
 
+        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
         _storeTreeBranch(root, leftAsk, rightAsk);
         vm.store(address(engine), _askRootSlot(), root);
         base.mint(address(engine), 1);
@@ -2673,6 +2687,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 rightAsk = _order(price, 5, MAX_ORDER_NONCE - 1);
         bytes32 root = _order(price, 6, MAX_ORDER_NONCE);
 
+        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
         _storeTreeBranch(root, leftAsk, rightAsk);
         vm.store(address(engine), _askRootSlot(), root);
         base.mint(address(engine), 1);
@@ -2834,8 +2849,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.askRoot(), askRootBefore);
         assertEq(engine.ownerOfOrder(firstAsk), bob);
         assertEq(engine.ownerOfOrder(secondAsk), carol);
-        assertEq(engine.ownerOfOrder(_order(80, 0, _nonce(firstAsk))), address(2));
-        assertEq(engine.ownerOfOrder(_order(90, 0, _nonce(secondAsk))), address(2));
+        assertFalse(engine.isBidOrder(firstAsk));
+        assertFalse(engine.isBidOrder(secondAsk));
         assertEq(base.balanceOf(address(engine)), 2);
         assertEq(quote.balanceOf(address(engine)), 0);
         assertEq(base.balanceOf(poorTaker), 0);
@@ -2860,8 +2875,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.bidRoot(), bidRootBefore);
         assertEq(engine.ownerOfOrder(firstBid), alice);
         assertEq(engine.ownerOfOrder(secondBid), bob);
-        assertEq(engine.ownerOfOrder(_order(100, 0, _nonce(firstBid))), address(1));
-        assertEq(engine.ownerOfOrder(_order(90, 0, _nonce(secondBid))), address(1));
+        assertTrue(engine.isBidOrder(firstBid));
+        assertTrue(engine.isBidOrder(secondBid));
         assertEq(base.balanceOf(address(engine)), 0);
         assertEq(quote.balanceOf(address(engine)), 190);
         assertEq(base.balanceOf(poorTaker), 0);
@@ -2887,7 +2902,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(falseEngine.bidRoot(), bytes32(0));
         assertEq(falseEngine.ownerOfOrder(expectedBid), address(0));
         assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(expectedBid))), address(0));
-        assertEq(falseEngine.nextNonce(), MAX_ORDER_NONCE);
+        assertEq(falseEngine.nextNonce(), 0);
         assertEq(falseQuote.balanceOf(address(falseEngine)), 0);
         assertEq(falseQuote.balanceOf(alice), 1_000);
     }
@@ -2911,7 +2926,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(falseEngine.askRoot(), bytes32(0));
         assertEq(falseEngine.ownerOfOrder(expectedAsk), address(0));
         assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(expectedAsk))), address(0));
-        assertEq(falseEngine.nextNonce(), MAX_ORDER_NONCE);
+        assertEq(falseEngine.nextNonce(), 0);
         assertEq(falseBase.balanceOf(address(falseEngine)), 0);
         assertEq(falseBase.balanceOf(alice), 1_000);
     }
@@ -2942,7 +2957,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(falseEngine.askRoot(), restingAsk);
         assertEq(falseEngine.bidRoot(), bytes32(0));
         assertEq(falseEngine.ownerOfOrder(restingAsk), bob);
-        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(restingAsk))), address(2));
+        assertFalse(falseEngine.isBidOrder(restingAsk));
         assertEq(falseEngine.ownerOfOrder(expectedBid), address(0));
         assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(expectedBid))), address(0));
         assertEq(falseEngine.nextNonce(), MAX_ORDER_NONCE - 1);
@@ -2976,7 +2991,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(falseEngine.bidRoot(), restingBid);
         assertEq(falseEngine.askRoot(), bytes32(0));
         assertEq(falseEngine.ownerOfOrder(restingBid), bob);
-        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(restingBid))), address(1));
+        assertTrue(falseEngine.isBidOrder(restingBid));
         assertEq(falseEngine.ownerOfOrder(expectedAsk), address(0));
         assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(expectedAsk))), address(0));
         assertEq(falseEngine.nextNonce(), MAX_ORDER_NONCE - 1);
@@ -3012,7 +3027,7 @@ contract RadixMatchingEngineTest is Test {
         falseEngine.cancel(restingBid);
 
         assertEq(falseEngine.ownerOfOrder(restingBid), alice);
-        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(restingBid))), address(1));
+        assertTrue(falseEngine.isBidOrder(restingBid));
         assertEq(falseBase.balanceOf(address(falseEngine)), 2);
         assertEq(falseBase.balanceOf(alice), 0);
     }
@@ -3045,7 +3060,7 @@ contract RadixMatchingEngineTest is Test {
         falseEngine.cancel(restingAsk);
 
         assertEq(falseEngine.ownerOfOrder(restingAsk), alice);
-        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(restingAsk))), address(2));
+        assertFalse(falseEngine.isBidOrder(restingAsk));
         assertEq(falseQuote.balanceOf(address(falseEngine)), 20);
         assertEq(falseQuote.balanceOf(alice), 0);
     }
@@ -3090,7 +3105,7 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(falseEngine.bidRoot(), bidRootBefore);
         assertEq(falseEngine.ownerOfOrder(restingBid), alice);
-        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(restingBid))), address(1));
+        assertTrue(falseEngine.isBidOrder(restingBid));
         assertEq(plainBase.balanceOf(address(falseEngine)), engineBaseBefore);
         assertEq(falseQuote.balanceOf(address(falseEngine)), engineQuoteBefore);
         assertEq(plainBase.balanceOf(alice), aliceBaseBefore);
@@ -3137,7 +3152,7 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(falseEngine.askRoot(), askRootBefore);
         assertEq(falseEngine.ownerOfOrder(restingAsk), alice);
-        assertEq(falseEngine.ownerOfOrder(_order(10, 0, _nonce(restingAsk))), address(2));
+        assertFalse(falseEngine.isBidOrder(restingAsk));
         assertEq(plainBase.balanceOf(address(falseEngine)), engineBaseBefore);
         assertEq(falseQuote.balanceOf(address(falseEngine)), engineQuoteBefore);
         assertEq(plainBase.balanceOf(alice), aliceBaseBefore);
@@ -3171,7 +3186,7 @@ contract RadixMatchingEngineTest is Test {
         reentrantEngine.fill(_order(10, 1, 0), true);
 
         assertFalse(reentrantBase.reentrySucceeded());
-        assertEq(reentrantBase.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantBase.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantBase.balanceOf(bob), 1_001);
     }
 
@@ -3202,7 +3217,7 @@ contract RadixMatchingEngineTest is Test {
         reentrantEngine.fill(_order(10, 1, 0), false);
 
         assertFalse(reentrantQuote.reentrySucceeded());
-        assertEq(reentrantQuote.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantQuote.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantQuote.balanceOf(bob), 1_010);
     }
 
@@ -3233,7 +3248,7 @@ contract RadixMatchingEngineTest is Test {
         reentrantEngine.fill(_order(10, 1, 0), true);
 
         assertFalse(reentrantBase.reentrySucceeded());
-        assertEq(reentrantBase.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantBase.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantBase.balanceOf(bob), 1_001);
     }
 
@@ -3264,7 +3279,7 @@ contract RadixMatchingEngineTest is Test {
         reentrantEngine.fill(_order(10, 1, 0), false);
 
         assertFalse(reentrantQuote.reentrySucceeded());
-        assertEq(reentrantQuote.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantQuote.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantQuote.balanceOf(bob), 1_010);
     }
 
@@ -3294,7 +3309,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(baseAmount, 1);
         assertEq(quoteAmount, 0);
         assertFalse(reentrantBase.reentrySucceeded());
-        assertEq(reentrantBase.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantBase.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantEngine.ownerOfOrder(aliceAsk), address(0));
         assertEq(reentrantEngine.ownerOfOrder(tokenAsk), address(reentrantBase));
         assertEq(reentrantEngine.askRoot(), tokenAsk);
@@ -3333,7 +3348,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(baseAmount, 0);
         assertEq(quoteAmount, 10);
         assertFalse(reentrantQuote.reentrySucceeded());
-        assertEq(reentrantQuote.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantQuote.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantEngine.ownerOfOrder(aliceBid), address(0));
         assertEq(reentrantEngine.ownerOfOrder(tokenBid), address(reentrantQuote));
         assertEq(reentrantEngine.bidRoot(), tokenBid);
@@ -3362,7 +3377,7 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(restingBid, expectedBid);
         assertFalse(reentrantQuote.reentrySucceeded());
-        assertEq(reentrantQuote.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantQuote.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantEngine.bidRoot(), restingBid);
         assertEq(reentrantEngine.ownerOfOrder(restingBid), alice);
         assertEq(reentrantQuote.balanceOf(address(reentrantEngine)), 10);
@@ -3384,7 +3399,7 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(restingBid, expectedBid);
         assertFalse(reentrantQuote.reentrySucceeded());
-        assertEq(reentrantQuote.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantQuote.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantEngine.bidRoot(), restingBid);
         assertEq(reentrantEngine.ownerOfOrder(restingBid), alice);
         assertEq(reentrantQuote.balanceOf(address(reentrantEngine)), 10);
@@ -3413,7 +3428,7 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(restingBid, expectedBid);
         assertFalse(reentrantQuote.reentrySucceeded());
-        assertEq(reentrantQuote.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantQuote.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantEngine.askRoot(), bytes32(0));
         assertEq(reentrantEngine.bidRoot(), expectedBid);
         assertEq(reentrantEngine.ownerOfOrder(restingAsk), bob);
@@ -3451,7 +3466,7 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(restingAsk, expectedAsk);
         assertFalse(reentrantBase.reentrySucceeded());
-        assertEq(reentrantBase.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantBase.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantEngine.askRoot(), restingAsk);
         assertEq(reentrantEngine.ownerOfOrder(restingAsk), alice);
         assertEq(reentrantBase.balanceOf(address(reentrantEngine)), 1);
@@ -3480,7 +3495,7 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(restingAsk, expectedAsk);
         assertFalse(reentrantBase.reentrySucceeded());
-        assertEq(reentrantBase.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantBase.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantEngine.bidRoot(), bytes32(0));
         assertEq(reentrantEngine.askRoot(), expectedAsk);
         assertEq(reentrantEngine.ownerOfOrder(restingBid), alice);
@@ -3518,7 +3533,7 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(restingAsk, expectedAsk);
         assertFalse(reentrantBase.reentrySucceeded());
-        assertEq(reentrantBase.reentrySelector(), RadixMatchingEngine.ReentrantCall.selector);
+        assertEq(reentrantBase.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantEngine.askRoot(), restingAsk);
         assertEq(reentrantEngine.ownerOfOrder(restingAsk), alice);
         assertEq(reentrantBase.balanceOf(address(reentrantEngine)), 1);
@@ -3590,7 +3605,7 @@ contract RadixMatchingEngineTest is Test {
         uint256 engineQuoteBefore = quote.balanceOf(address(engine));
 
         vm.prank(bob);
-        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        vm.expectRevert(bytes4(keccak256("NotOrderOwner()")));
         engine.cancel(reducedAsk);
 
         assertEq(engine.askRoot(), reducedAsk);
@@ -3667,7 +3682,7 @@ contract RadixMatchingEngineTest is Test {
         uint256 engineQuoteBefore = quote.balanceOf(address(engine));
 
         vm.prank(alice);
-        vm.expectRevert(RadixMatchingEngine.NotOrderOwner.selector);
+        vm.expectRevert(bytes4(keccak256("NotOrderOwner()")));
         engine.cancel(reducedBid);
 
         assertEq(engine.bidRoot(), reducedBid);
@@ -4059,12 +4074,28 @@ contract RadixMatchingEngineTest is Test {
         return bytes32((uint256(price) << 232) | (uint256(quantity) << 40) | uint256(nonce));
     }
 
-    function _ownerOfOrderSlot(bytes32 order) internal pure returns (bytes32) {
-        return keccak256(abi.encode(order, uint256(1)));
+    function _bookId() internal view returns (bytes32) {
+        return engine.bookId(address(base), address(quote), 0);
     }
 
-    function _treeSlot(bytes32 node) internal pure returns (bytes32) {
-        return keccak256(abi.encode(node, uint256(0)));
+    function _ownerOfOrderSlot(bytes32 order) internal view returns (bytes32) {
+        return keccak256(abi.encode(keccak256(abi.encode(_bookId(), order)), uint256(1)));
+    }
+
+    function _orderStateSlotValue(address owner, bool isBid) internal pure returns (bytes32) {
+        return bytes32(uint256(uint160(owner)) | (isBid ? uint256(1) << 160 : 0));
+    }
+
+    function _bookSlot() internal view returns (bytes32) {
+        return keccak256(abi.encode(_bookId(), uint256(0)));
+    }
+
+    function _treeMappingSlot() internal view returns (bytes32) {
+        return bytes32(uint256(_bookSlot()) + 1);
+    }
+
+    function _treeSlot(bytes32 node) internal view returns (bytes32) {
+        return keccak256(abi.encode(node, _treeMappingSlot()));
     }
 
     function _assertTreeBranchStorage(bytes32 branch, bytes32 leftNode, bytes32 rightNode, string memory label)
@@ -4103,16 +4134,16 @@ contract RadixMatchingEngineTest is Test {
         }
     }
 
-    function _bidRootSlot() internal pure returns (bytes32) {
-        return bytes32(uint256(2));
+    function _bidRootSlot() internal view returns (bytes32) {
+        return bytes32(uint256(_treeSlot(bytes32(0))) + 1);
     }
 
-    function _askRootSlot() internal pure returns (bytes32) {
-        return bytes32(uint256(3));
+    function _askRootSlot() internal view returns (bytes32) {
+        return _treeSlot(bytes32(0));
     }
 
-    function _nextNonceSlot() internal pure returns (bytes32) {
-        return bytes32(uint256(4));
+    function _nextNonceSlot() internal view returns (bytes32) {
+        return _bookSlot();
     }
 
     function _branchFor(bytes32 a, bytes32 b) internal pure returns (bytes32) {

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.28;
 
-import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 import {LibBit} from "solady/utils/LibBit.sol";
 
 /// @title Radix Matching Engine
@@ -22,7 +21,7 @@ import {LibBit} from "solady/utils/LibBit.sol";
 /// are stored in `tree[branch]`. A node is treated as a branch if it has a nonzero left child in
 /// `tree`; otherwise it is treated as a leaf. This intentionally allows a branch key and an
 /// original order key to be the same `bytes32`: branch structure lives in `tree`, while ownership
-/// and side metadata live in `ownerOfOrder`.
+/// and side metadata live together in `orderOf`.
 ///
 /// The bid and ask books are conceptual trees that coexist in the same `tree` mapping:
 ///
@@ -40,9 +39,7 @@ import {LibBit} from "solady/utils/LibBit.sol";
 /// Token assumptions: this contract uses Solady safe transfer helpers and assumes deployment will
 /// choose standard, non-fee-on-transfer tokens. Deliberately malicious or inexact ERC20 behavior is
 /// out of scope for this engine and should be controlled at deployment/configuration time.
-contract RadixMatchingEngine {
-    using SafeTransferLib for address;
-
+abstract contract RadixMatchingEngine {
     /// @notice Stored child pointers for a branch node.
     /// @dev
     /// `leftNode` and `rightNode` are both `bytes32` nodes. They can be leaves or further branches.
@@ -55,42 +52,32 @@ contract RadixMatchingEngine {
         bytes32 rightNode;
     }
 
-    /// @notice Shared branch storage for both bid and ask trees.
+    /// @notice Owner and side metadata for one original resting order.
     /// @dev
-    /// This is the only tree mapping. `bidRoot` and `askRoot` select which conceptual tree is being
-    /// walked. Branch keys are self-addressed by their aggregate node word, so the mapping only
-    /// needs to hold child pointers.
-    mapping(bytes32 => Branch) public tree;
+    /// Solidity packs `owner` and `isBid` into one storage slot. This keeps the side explicit in
+    /// source code without spending the second side-marker slot used by the earlier design.
+    struct OrderState {
+        address owner;
+        bool isBid;
+    }
 
-    /// @notice Owner lookup by order node. Zero-quantity keys store side metadata for claims.
+    /// @notice One isolated radix book for one token pair epoch.
+    /// @dev The low 40 bits of `nonceAndFlags` are the decrementing nonce. Bits above the nonce
+    /// hold per-book right-spine dirty flags. The zero node in `tree` is reserved as the root
+    /// anchor: `leftNode` is the ask root and `rightNode` is the bid root.
+    struct Book {
+        uint256 nonceAndFlags;
+        mapping(bytes32 => Branch) tree;
+    }
+
+    /// @notice Isolated books keyed by `keccak256(token0, token1, epoch)`.
+    mapping(bytes32 bookId => Book) internal books;
+
+    /// @notice Owner and side lookup by order id.
     /// @dev
-    /// For every active maker order, the original nonzero-quantity order key maps to its owner.
-    /// A companion zero-quantity key with the same price and nonce maps to `_BID_SENTINEL` or
-    /// `_ASK_SENTINEL`, which lets `cancel` know which root to search. Fill/cancel state is not
-    /// stored separately; it is derived by searching the relevant tree and comparing the remaining
-    /// live leaf quantity to the original order quantity.
-    mapping(bytes32 order => address owner) public ownerOfOrder;
-
-    /// @notice Root node of the bid tree.
-    /// @dev Zero means the bid book is empty. Nonzero can be either a leaf order or a branch.
-    bytes32 public bidRoot;
-
-    /// @notice Root node of the ask tree.
-    /// @dev Zero means the ask book is empty. Nonzero can be either a leaf order or a branch.
-    bytes32 public askRoot;
-
-    /// @notice Decrementing nonce. Higher nonce means earlier time priority at the same price.
-    /// @dev
-    /// The first resting order receives `type(uint40).max`, then the counter decrements. Nonce zero
-    /// is reserved as the exhaustion sentinel and is never assigned to a resting order. Private
-    /// right-spine dirty flags live above the low 40 bits in this storage slot; the public getter
-    /// still returns only the declared `uint40` nonce.
-    uint40 public nextNonce = type(uint40).max;
-
-    /// @notice Token sold by asks and received by bid makers when bids fill.
-    address public immutable BASE_TOKEN;
-    /// @notice Token sold by bids and received by ask makers when asks fill.
-    address public immutable QUOTE_TOKEN;
+    /// The key is `keccak256(bookId, orderNode)`, not the raw node, so the same packed order can
+    /// exist in different pools or epochs without ownership collision.
+    mapping(bytes32 orderId => OrderState state) internal orderOf;
 
     /// @dev Bit offset of the 24-bit price field in a packed node.
     uint256 private constant _PRICE_SHIFT = 232;
@@ -104,38 +91,47 @@ contract RadixMatchingEngine {
     uint256 private constant _PATH_MASK = ~(_QUANTITY_MASK << _QUANTITY_SHIFT);
     /// @dev Maximum valid 24-bit price. Also used to invert ask prices into ascending sort order.
     uint24 private constant _MAX_PRICE = type(uint24).max;
+    /// @dev Root anchor in every book's tree. `leftNode` is ask root; `rightNode` is bid root.
+    bytes32 private constant _ROOT_NODE = bytes32(0);
     /// @dev Dirty bit stored above the 40-bit `nextNonce` field when bid right-spine anchors are stale.
     uint256 private constant _BID_RIGHT_SPINE_DIRTY = uint256(1) << 40;
     /// @dev Dirty bit stored above the 40-bit `nextNonce` field when ask right-spine anchors are stale.
     uint256 private constant _ASK_RIGHT_SPINE_DIRTY = uint256(1) << 41;
 
-    /// @dev Side marker stored at `_sideKey(order)` for bid orders.
-    address private constant _BID_SENTINEL = address(uint160(1));
-    /// @dev Side marker stored at `_sideKey(order)` for ask orders.
-    address private constant _ASK_SENTINEL = address(uint160(2));
     /// @dev Transient storage slot used by the custom reentrancy guard.
     bytes32 private constant _REENTRANCY_GUARD_SLOT =
         0xc55a21be1c6e869c49c7a5860f6c3a83187eb30a12bcd0421f3cf4f5871dccff;
 
     /// @notice Emitted when unmatched quantity becomes a resting maker order.
+    /// @param bookId Book that received the resting order.
     /// @param order Packed resting order node with contract-assigned nonce.
     /// @param owner Maker that owns the resting order.
     /// @param isBid True for a bid resting in the bid tree, false for an ask resting in the ask tree.
-    event OrderRested(bytes32 indexed order, address indexed owner, bool indexed isBid);
+    event OrderRested(bytes32 indexed bookId, bytes32 indexed order, address indexed owner, bool isBid);
 
-    /// @notice Matched resting liquidity. The resting node can be a leaf order or a same-price branch aggregate.
-    /// @param restingNode Leaf or same-price aggregate branch consumed by the incoming order.
-    /// @param restingIsBid True if the consumed liquidity came from the bid tree.
-    /// @param quantity Base quantity matched from the resting liquidity.
-    /// @param quoteAmount Quote value of the matched quantity at the resting price.
-    event OrderMatched(bytes32 indexed restingNode, bool indexed restingIsBid, uint192 quantity, uint256 quoteAmount);
+    /// @notice Matched resting ask liquidity.
+    /// @param bookId Book that supplied the resting ask.
+    /// @param restingNode Ask leaf or same-price ask aggregate branch consumed by the incoming bid.
+    /// @param quantity Base quantity matched from the resting ask liquidity.
+    /// @param quoteAmount Quote value paid at the resting ask price.
+    event AskMatched(bytes32 bookId, bytes32 restingNode, uint192 quantity, uint256 quoteAmount);
+
+    /// @notice Matched resting bid liquidity.
+    /// @param bookId Book that supplied the resting bid.
+    /// @param restingNode Bid leaf or same-price bid aggregate branch consumed by the incoming ask.
+    /// @param quantity Base quantity matched from the resting bid liquidity.
+    /// @param quoteAmount Quote value paid at the resting bid price.
+    event BidMatched(bytes32 bookId, bytes32 restingNode, uint192 quantity, uint256 quoteAmount);
 
     /// @notice Emitted when a maker cancels open quantity or claims filled proceeds.
+    /// @param bookId Book that owned the order.
     /// @param order Original packed resting order node.
     /// @param owner Maker that owned the order.
     /// @param baseAmount Base tokens returned or paid to the maker.
     /// @param quoteAmount Quote tokens returned or paid to the maker.
-    event OrderCancelled(bytes32 indexed order, address indexed owner, uint256 baseAmount, uint256 quoteAmount);
+    event OrderCancelled(
+        bytes32 indexed bookId, bytes32 indexed order, address indexed owner, uint256 baseAmount, uint256 quoteAmount
+    );
 
     /// @notice Token configuration is invalid.
     error InvalidToken();
@@ -143,12 +139,14 @@ contract RadixMatchingEngine {
     error InvalidOrder();
     /// @notice The decrementing 40-bit nonce space has been exhausted.
     error NonceExhausted();
+    /// @notice Routed book has not been initialized.
+    error InvalidBook();
+    /// @notice A fill-or-kill leg could not fully fill.
+    error FillOrKill();
     /// @notice A duplicate price/nonce path was encountered.
     error DuplicateOrder();
     /// @notice Caller is not the owner recorded for the original order key.
     error NotOrderOwner();
-    /// @notice Owner exists, but side metadata needed to route cancellation is missing or corrupt.
-    error OrderNotFound();
     /// @notice Reentrant call attempted while `fill` or `cancel` is executing.
     error ReentrantCall();
 
@@ -159,141 +157,106 @@ contract RadixMatchingEngine {
         _exit();
     }
 
-    /// @notice Deploy an engine for one base/quote token pair.
-    /// @param baseToken_ Base token address.
-    /// @param quoteToken_ Quote token address.
-    /// @dev Both tokens must be nonzero, distinct contracts.
-    constructor(address baseToken_, address quoteToken_) {
-        if (
-            baseToken_ == address(0) || quoteToken_ == address(0) || baseToken_ == quoteToken_
-                || baseToken_.code.length == 0 || quoteToken_.code.length == 0
-        ) {
-            revert InvalidToken();
-        }
-        BASE_TOKEN = baseToken_;
-        QUOTE_TOKEN = quoteToken_;
+    /// @notice Return the maker that owns an order id, or zero if the order has been claimed/canceled.
+    /// @dev Preserves the old `ownerOfOrder(bytes32) -> address` external API while the underlying
+    /// storage now keeps side metadata in the same packed struct slot.
+    function ownerOfOrder(bytes32 orderId) public view virtual returns (address) {
+        return orderOf[orderId].owner;
     }
 
-    /// @notice Submit a bid or ask. Any unfilled quantity rests on that side of the book.
+    /// @notice Return whether an active order id belongs to the bid tree.
+    /// @dev The value is meaningful only when `ownerOfOrder(orderId) != address(0)`.
+    function isBidOrder(bytes32 orderId) public view virtual returns (bool) {
+        return orderOf[orderId].isBid;
+    }
+
+    /// @notice Match an incoming order against a routed book without transferring tokens.
+    /// @param bookId Globally unique book id.
+    /// @param book Book storage selected by `bookId`.
     /// @param order Packed incoming order with price and quantity set, nonce bits set to zero.
     /// @param isBid True for a bid, false for an ask.
-    /// @return restingOrder Packed resting order if any quantity remains, otherwise zero.
-    /// @dev
-    /// Incoming orders must leave the low 40 nonce bits empty; the contract assigns time priority
-    /// only to quantities that actually rest.
-    ///
-    /// Bid flow:
-    /// 1. Match against the ask root using the bid limit price.
-    /// 2. Rest any remainder in the bid tree.
-    /// 3. Pull quote for matched quote value plus remaining bid collateral.
-    /// 4. Pay matched base to the taker immediately.
-    ///
-    /// Ask flow:
-    /// 1. Match against the bid root using the ask limit price.
-    /// 2. Rest any remainder in the ask tree.
-    /// 3. Pull the full base quantity. Matched base remains in the contract for bid maker claims;
-    ///    unfilled base collateralizes the resting ask.
-    /// 4. Pay matched quote to the taker immediately.
-    ///
-    /// State changes happen before token transfers, but failed transfers revert the whole call.
-    /// The transient reentrancy guard prevents token callbacks from observing or mutating the
-    /// intermediate state through `fill` or `cancel`.
-    function fill(bytes32 order, bool isBid) external nonReentrant returns (bytes32 restingOrder) {
-        (uint24 limitPrice, uint192 quantity) = _priceAndQuantity(order);
-        if (limitPrice == 0 || quantity == 0 || uint256(order) & _NONCE_MASK != 0) revert InvalidOrder();
-
-        uint192 remaining = quantity;
-        uint192 baseFilled = 0;
-        uint256 quoteAmount = 0;
+    /// @return limitPrice Incoming limit price.
+    /// @return remaining Incoming base quantity left unmatched.
+    /// @return baseFilled Base quantity matched.
+    /// @return quoteAmount Quote value matched.
+    function _matchBook(bytes32 bookId, Book storage book, bytes32 order, bool isBid)
+        internal
+        returns (uint24 limitPrice, uint192 remaining, uint192 baseFilled, uint256 quoteAmount)
+    {
+        (limitPrice, remaining) = _validateIncomingOrder(order);
 
         if (isBid) {
-            bytes32 root = askRoot;
+            bytes32 root = book.tree[_ROOT_NODE].leftNode;
             if (root != bytes32(0)) {
                 bytes32 newRoot;
-                (newRoot, remaining, baseFilled, quoteAmount) = _matchAskTree(root, limitPrice, remaining);
-                if (newRoot != root) askRoot = newRoot;
+                bool dirtyChanged;
+                (newRoot, remaining, baseFilled, quoteAmount, dirtyChanged) =
+                    _matchAskTree(bookId, book, root, limitPrice, remaining);
+                if (newRoot != root) book.tree[_ROOT_NODE].leftNode = newRoot;
+                if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, false);
             }
-
-            uint256 quoteCollateral = quoteAmount;
-            if (remaining != 0) {
-                restingOrder = _restBid(limitPrice, remaining);
-                unchecked {
-                    quoteCollateral += _quoteValue(limitPrice, remaining);
-                }
-            }
-
-            QUOTE_TOKEN.safeTransferFrom(msg.sender, address(this), quoteCollateral);
-            if (baseFilled != 0) BASE_TOKEN.safeTransfer(msg.sender, baseFilled);
         } else {
-            bytes32 root = bidRoot;
+            bytes32 root = book.tree[_ROOT_NODE].rightNode;
             if (root != bytes32(0)) {
                 bytes32 newRoot;
-                (newRoot, remaining, baseFilled, quoteAmount) = _matchBidTree(root, limitPrice, remaining);
-                if (newRoot != root) bidRoot = newRoot;
+                bool dirtyChanged;
+                (newRoot, remaining, baseFilled, quoteAmount, dirtyChanged) =
+                    _matchBidTree(bookId, book, root, limitPrice, remaining);
+                if (newRoot != root) book.tree[_ROOT_NODE].rightNode = newRoot;
+                if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, true);
             }
-
-            if (remaining != 0) {
-                restingOrder = _restAsk(limitPrice, remaining);
-            }
-
-            BASE_TOKEN.safeTransferFrom(msg.sender, address(this), quantity);
-            if (quoteAmount != 0) QUOTE_TOKEN.safeTransfer(msg.sender, quoteAmount);
         }
     }
 
     /// @notice Cancel an open order or claim a filled order.
     /// @param order Original packed resting order returned by `fill`.
+    /// @return owner Owner paid by the router.
+    /// @return isBid True if the original order was a bid.
     /// @return baseAmount Base tokens paid to the maker.
     /// @return quoteAmount Quote tokens paid to the maker.
     /// @dev
     /// `cancel` is also the asynchronous claim path. The original order key always stores the
-    /// owner while active, even if the live leaf has been partially filled and now has a different
-    /// quantity. The side marker at `_sideKey(order)` tells the function which root to search.
+    /// owner and side while active, even if the live leaf has been partially filled and now has a
+    /// different quantity.
     ///
     /// - If the order is absent from the tree, it has fully filled and the maker claims proceeds.
     /// - If a live leaf with the same price/nonce exists, its quantity is returned/canceled and the
     ///   difference between original and remaining quantity is claimed as filled proceeds.
     ///
-    /// The owner and side marker are deleted before payout. If a token transfer reverts, the whole
-    /// transaction reverts and the claim remains live.
-    function cancel(bytes32 order) external nonReentrant returns (uint256 baseAmount, uint256 quoteAmount) {
+    /// The order state is deleted before payout. If a token transfer reverts, the whole transaction
+    /// reverts and the claim remains live.
+    function _cancelBook(bytes32 bookId, Book storage book, bytes32 order, address caller)
+        internal
+        returns (address owner, bool isBid, uint256 baseAmount, uint256 quoteAmount)
+    {
+        bytes32 orderKey = _orderId(bookId, order);
+        OrderState storage state = orderOf[orderKey];
+        owner = state.owner;
+        if (owner != caller) {
+            if (_nextNonce(book) == 0) revert InvalidBook();
+            if (_quantity(order) == 0) revert InvalidOrder();
+            revert NotOrderOwner();
+        }
+
         uint192 originalQuantity = _quantity(order);
         if (originalQuantity == 0) revert InvalidOrder();
+        isBid = state.isBid;
 
-        address owner = ownerOfOrder[order];
-        if (owner != msg.sender) revert NotOrderOwner();
+        bytes32 removed = _removeOrderFromBook(book, order, isBid);
 
-        bool isBid = false;
+        (baseAmount, quoteAmount) = _cancelAmounts(order, removed, isBid, originalQuantity);
+
+        delete orderOf[orderKey];
+
+        emit OrderCancelled(bookId, order, owner, baseAmount, quoteAmount);
+    }
+
+    function _cancelAmounts(bytes32 order, bytes32 removed, bool isBid, uint192 originalQuantity)
+        private
+        pure
+        returns (uint256 baseAmount, uint256 quoteAmount)
+    {
         uint192 remainingQuantity = 0;
-        bytes32 removed = bytes32(0);
-        bytes32 sideKey = _sideKey(order);
-        address marker = ownerOfOrder[sideKey];
-        if (marker == _BID_SENTINEL) {
-            isBid = true;
-        } else if (marker != _ASK_SENTINEL) {
-            revert OrderNotFound();
-        }
-
-        if (isBid) {
-            bytes32 root = bidRoot;
-            bytes32 newRoot;
-            if (root != bytes32(0)) {
-                (newRoot, removed) = _removeBidByKey(root, _bidSortKey(order), true);
-                if (removed != bytes32(0) && newRoot != root) {
-                    bidRoot = newRoot;
-                }
-            }
-        } else {
-            bytes32 root = askRoot;
-            bytes32 newRoot;
-            if (root != bytes32(0)) {
-                (newRoot, removed) = _removeAskByKey(root, _askSortKey(order), true);
-                if (removed != bytes32(0) && newRoot != root) {
-                    askRoot = newRoot;
-                }
-            }
-        }
-
         if (removed != bytes32(0)) {
             remainingQuantity = _quantity(removed);
         }
@@ -310,67 +273,89 @@ contract RadixMatchingEngine {
             baseAmount = remainingQuantity;
             quoteAmount = _quoteValue(limitPrice, filledQuantity);
         }
-
-        delete ownerOfOrder[order];
-        delete ownerOfOrder[sideKey];
-
-        if (baseAmount != 0) BASE_TOKEN.safeTransfer(owner, baseAmount);
-        if (quoteAmount != 0) QUOTE_TOKEN.safeTransfer(owner, quoteAmount);
-
-        emit OrderCancelled(order, owner, baseAmount, quoteAmount);
     }
 
-    /// @notice Rest unmatched bid quantity in the bid tree.
-    /// @param price Bid limit price.
+    function _removeOrderFromBook(Book storage book, bytes32 order, bool isBid) private returns (bytes32 removed) {
+        if (isBid) {
+            bytes32 root = book.tree[_ROOT_NODE].rightNode;
+            bytes32 newRoot;
+            if (root != bytes32(0)) {
+                bool dirtyChanged;
+                (newRoot, removed, dirtyChanged) = _removeBidByKey(book, root, _bidSortKey(order), true);
+                if (removed != bytes32(0) && newRoot != root) {
+                    book.tree[_ROOT_NODE].rightNode = newRoot;
+                }
+                if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, true);
+            }
+        } else {
+            bytes32 root = book.tree[_ROOT_NODE].leftNode;
+            bytes32 newRoot;
+            if (root != bytes32(0)) {
+                bool dirtyChanged;
+                (newRoot, removed, dirtyChanged) = _removeAskByKey(book, root, _askSortKey(order), true);
+                if (removed != bytes32(0) && newRoot != root) {
+                    book.tree[_ROOT_NODE].leftNode = newRoot;
+                }
+                if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, false);
+            }
+        }
+    }
+
+    /// @notice Rest unmatched quantity in one book.
+    /// @param bookId Globally unique book id.
+    /// @param book Book storage selected by `bookId`.
+    /// @param nonceAndFlags Current packed nonce and right-spine flags for `book`.
+    /// @param price Limit price.
     /// @param quantity Unfilled base quantity to rest.
-    /// @return restingOrder Packed resting bid with assigned nonce.
-    /// @dev Stores both owner and side marker before insertion. A revert during insertion rolls the
-    /// entire rest operation back, including nonce decrement and metadata writes.
-    function _restBid(uint24 price, uint192 quantity) private returns (bytes32 restingOrder) {
-        if (_rightSpineDirty(true)) {
-            bidRoot = _materializeRightSpine(bidRoot);
-            _clearRightSpineDirty(true);
+    /// @param isBid True to rest a bid, false to rest an ask.
+    /// @param owner Maker owner.
+    /// @return restingOrder Packed resting order with assigned nonce.
+    /// @return nextNonceAfter The book nonce after assigning `restingOrder`.
+    function _restBook(
+        bytes32 bookId,
+        Book storage book,
+        uint256 nonceAndFlags,
+        uint24 price,
+        uint192 quantity,
+        bool isBid,
+        address owner
+    ) internal returns (bytes32 restingOrder, uint40 nextNonceAfter) {
+        uint256 dirtyFlag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
+        if (nonceAndFlags & dirtyFlag != 0) {
+            if (isBid) {
+                book.tree[_ROOT_NODE].rightNode = _materializeRightSpine(book, book.tree[_ROOT_NODE].rightNode);
+            } else {
+                book.tree[_ROOT_NODE].leftNode = _materializeRightSpine(book, book.tree[_ROOT_NODE].leftNode);
+            }
+            nonceAndFlags &= ~dirtyFlag;
         }
 
-        uint40 nonce = nextNonce;
-        if (nonce == 0) revert NonceExhausted();
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint40 nonce = uint40(nonceAndFlags & _NONCE_MASK);
+        if (nonce <= 1) revert NonceExhausted();
         unchecked {
-            nextNonce = nonce - 1;
+            nextNonceAfter = nonce - 1;
+        }
+        unchecked {
+            book.nonceAndFlags = (nonceAndFlags & ~_NONCE_MASK) | uint256(nextNonceAfter);
         }
 
         restingOrder = _pack(price, quantity, nonce);
-        ownerOfOrder[restingOrder] = msg.sender;
-        ownerOfOrder[_sideKey(restingOrder)] = _BID_SENTINEL;
-        bidRoot = _insertBid(bidRoot, restingOrder, (uint64(price) << 40) | uint64(nonce));
+        orderOf[_orderId(bookId, restingOrder)] = OrderState({owner: owner, isBid: isBid});
 
-        emit OrderRested(restingOrder, msg.sender, true);
-    }
-
-    /// @notice Rest unmatched ask quantity in the ask tree.
-    /// @param price Ask limit price.
-    /// @param quantity Unfilled base quantity to rest.
-    /// @return restingOrder Packed resting ask with assigned nonce.
-    /// @dev Uses an inverted price sort key so lower ask prices live on the rightmost path.
-    function _restAsk(uint24 price, uint192 quantity) private returns (bytes32 restingOrder) {
-        if (_rightSpineDirty(false)) {
-            askRoot = _materializeRightSpine(askRoot);
-            _clearRightSpineDirty(false);
+        if (isBid) {
+            bytes32 root = book.tree[_ROOT_NODE].rightNode;
+            book.tree[_ROOT_NODE].rightNode =
+                _insertBid(book, root, restingOrder, (uint64(price) << 40) | uint64(nonce));
+        } else {
+            bytes32 root = book.tree[_ROOT_NODE].leftNode;
+            unchecked {
+                book.tree[_ROOT_NODE].leftNode =
+                    _insertAsk(book, root, restingOrder, (uint64(_MAX_PRICE - price) << 40) | uint64(nonce));
+            }
         }
 
-        uint40 nonce = nextNonce;
-        if (nonce == 0) revert NonceExhausted();
-        unchecked {
-            nextNonce = nonce - 1;
-        }
-
-        restingOrder = _pack(price, quantity, nonce);
-        ownerOfOrder[restingOrder] = msg.sender;
-        ownerOfOrder[_sideKey(restingOrder)] = _ASK_SENTINEL;
-        unchecked {
-            askRoot = _insertAsk(askRoot, restingOrder, (uint64(_MAX_PRICE - price) << 40) | uint64(nonce));
-        }
-
-        emit OrderRested(restingOrder, msg.sender, false);
+        emit OrderRested(bookId, restingOrder, owner, isBid);
     }
 
     /// @notice Match an incoming bid against the ask tree.
@@ -381,11 +366,12 @@ contract RadixMatchingEngine {
     /// @return newRemaining Incoming quantity left after matching.
     /// @return baseFilled Base quantity paid to the bid taker.
     /// @return quoteAmount Quote value owed by the bid taker for matched asks.
-    function _matchAskTree(bytes32 root, uint24 limitPrice, uint192 remaining)
+    function _matchAskTree(bytes32 bookId, Book storage book, bytes32 root, uint24 limitPrice, uint192 remaining)
         private
-        returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
+        returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount, bool dirtyChanged)
     {
-        (newRoot, baseFilled, quoteAmount) = _matchAskRightSpine(root, limitPrice, remaining, _rightSpineDirty(false));
+        (newRoot, baseFilled, quoteAmount, dirtyChanged) =
+            _matchAskRightSpine(bookId, book, root, limitPrice, remaining, _rightSpineDirty(book, false));
         unchecked {
             newRemaining = remaining - baseFilled;
         }
@@ -399,11 +385,12 @@ contract RadixMatchingEngine {
     /// @return newRemaining Incoming quantity left after matching.
     /// @return baseFilled Base quantity sold into resting bids.
     /// @return quoteAmount Quote value paid to the ask taker.
-    function _matchBidTree(bytes32 root, uint24 limitPrice, uint192 remaining)
+    function _matchBidTree(bytes32 bookId, Book storage book, bytes32 root, uint24 limitPrice, uint192 remaining)
         private
-        returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
+        returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount, bool dirtyChanged)
     {
-        (newRoot, baseFilled, quoteAmount) = _matchBidRightSpine(root, limitPrice, remaining, _rightSpineDirty(true));
+        (newRoot, baseFilled, quoteAmount, dirtyChanged) =
+            _matchBidRightSpine(bookId, book, root, limitPrice, remaining, _rightSpineDirty(book, true));
         unchecked {
             newRemaining = remaining - baseFilled;
         }
@@ -417,7 +404,7 @@ contract RadixMatchingEngine {
     /// @return newRemaining Incoming bid quantity after this leaf.
     /// @return baseFilled Base quantity filled from this ask.
     /// @return quoteAmount Quote paid at the resting ask price.
-    function _matchAskLeaf(bytes32 root, uint24 limitPrice, uint192 remaining)
+    function _matchAskLeaf(bytes32 bookId, bytes32 root, uint24 limitPrice, uint192 remaining)
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
@@ -427,7 +414,7 @@ contract RadixMatchingEngine {
         uint192 fillQuantity = remaining < restingQuantity ? remaining : restingQuantity;
         quoteAmount = _quoteValue(restingPrice, fillQuantity);
 
-        emit OrderMatched(root, false, fillQuantity, quoteAmount);
+        emit AskMatched(bookId, root, fillQuantity, quoteAmount);
 
         unchecked {
             newRemaining = remaining - fillQuantity;
@@ -449,7 +436,7 @@ contract RadixMatchingEngine {
     /// @return newRemaining Incoming ask quantity after this leaf.
     /// @return baseFilled Base quantity filled into this bid.
     /// @return quoteAmount Quote paid at the resting bid price.
-    function _matchBidLeaf(bytes32 root, uint24 limitPrice, uint192 remaining)
+    function _matchBidLeaf(bytes32 bookId, bytes32 root, uint24 limitPrice, uint192 remaining)
         private
         returns (bytes32 newRoot, uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount)
     {
@@ -459,7 +446,7 @@ contract RadixMatchingEngine {
         uint192 fillQuantity = remaining < restingQuantity ? remaining : restingQuantity;
         quoteAmount = _quoteValue(restingPrice, fillQuantity);
 
-        emit OrderMatched(root, true, fillQuantity, quoteAmount);
+        emit BidMatched(bookId, root, fillQuantity, quoteAmount);
 
         unchecked {
             newRemaining = remaining - fillQuantity;
@@ -486,50 +473,58 @@ contract RadixMatchingEngine {
     /// only aggregate-consumes same-price right-spine subtrees. Mixed-price aggregate consumption
     /// remains reserved for exact off-spine subtrees to avoid reintroducing the branch rewrite
     /// cascade this path is designed to skip.
-    function _matchAskRightSpine(bytes32 node, uint24 limitPrice, uint192 remaining, bool dirty)
-        private
-        returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
-    {
-        bytes32 leftNode = tree[node].leftNode;
+    function _matchAskRightSpine(
+        bytes32 bookId,
+        Book storage book,
+        bytes32 node,
+        uint24 limitPrice,
+        uint192 remaining,
+        bool dirty
+    ) private returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount, bool dirtyChanged) {
+        bytes32 leftNode = book.tree[node].leftNode;
         if (leftNode == bytes32(0)) {
-            (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(node, limitPrice, remaining);
-            return (newNode, fillQuantity, quoteAmount);
-        }
-
-        bytes32 rightNode = tree[node].rightNode;
-        if (_price(leftNode) == _price(rightNode)) {
-            fillQuantity = _samePriceRightSpineFillQuantity(node, limitPrice, remaining, false, dirty);
-            if (fillQuantity != 0) {
-                quoteAmount = _quoteValue(_price(node), fillQuantity);
-                emit OrderMatched(dirty ? _withQuantity(node, fillQuantity) : node, false, fillQuantity, quoteAmount);
-                return (bytes32(0), fillQuantity, quoteAmount);
-            }
+            (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(bookId, node, limitPrice, remaining);
+            return (newNode, fillQuantity, quoteAmount, false);
         }
 
         bytes32 newRightNode;
         uint192 rightFillQuantity;
         uint256 rightQuoteAmount;
-        (newRightNode, rightFillQuantity, rightQuoteAmount) =
-            _matchAskRightSpine(rightNode, limitPrice, remaining, dirty);
-        if (rightFillQuantity == 0) return (node, 0, 0);
+        {
+            bytes32 rightNode = book.tree[node].rightNode;
+            if (_price(leftNode) == _price(rightNode)) {
+                fillQuantity = _samePriceRightSpineFillQuantity(book, node, limitPrice, remaining, false, dirty);
+                if (fillQuantity != 0) {
+                    quoteAmount = _quoteValue(_price(node), fillQuantity);
+                    emit AskMatched(bookId, dirty ? _withQuantity(node, fillQuantity) : node, fillQuantity, quoteAmount);
+                    return (bytes32(0), fillQuantity, quoteAmount, false);
+                }
+            }
 
-        uint192 leftFillQuantity = 0;
-        uint256 leftQuoteAmount = 0;
+            (newRightNode, rightFillQuantity, rightQuoteAmount, dirtyChanged) =
+                _matchAskRightSpine(bookId, book, rightNode, limitPrice, remaining, dirty);
+        }
+        if (rightFillQuantity == 0) return (node, 0, 0, false);
+
         bytes32 newLeftNode = leftNode;
         unchecked {
             remaining -= rightFillQuantity;
         }
 
         if (remaining != 0) {
-            (newLeftNode, leftFillQuantity, leftQuoteAmount) = _matchAskSubtree(leftNode, limitPrice, remaining);
+            (newLeftNode, fillQuantity, quoteAmount) = _matchAskSubtree(bookId, book, leftNode, limitPrice, remaining);
         }
 
-        newNode = leftFillQuantity == 0
-            ? _replaceRightmostRightChild(node, newLeftNode, newRightNode, false)
-            : _replaceBranch(newLeftNode, newRightNode);
+        if (fillQuantity == 0) {
+            bool branchDirty;
+            (newNode, branchDirty) = _replaceRightmostRightChild(book, node, newLeftNode, newRightNode);
+            dirtyChanged = dirtyChanged || branchDirty;
+        } else {
+            newNode = _replaceBranch(book, newLeftNode, newRightNode);
+        }
         unchecked {
-            fillQuantity = rightFillQuantity + leftFillQuantity;
-            quoteAmount = rightQuoteAmount + leftQuoteAmount;
+            fillQuantity += rightFillQuantity;
+            quoteAmount += rightQuoteAmount;
         }
     }
 
@@ -540,44 +535,45 @@ contract RadixMatchingEngine {
     /// @return newNode Replacement node for this subtree after matching.
     /// @return fillQuantity Base quantity consumed from this subtree.
     /// @return quoteAmount Quote value consumed from this subtree.
-    function _matchAskSubtree(bytes32 node, uint24 limitPrice, uint192 remaining)
+    function _matchAskSubtree(bytes32 bookId, Book storage book, bytes32 node, uint24 limitPrice, uint192 remaining)
         private
         returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
     {
-        bytes32 leftNode = tree[node].leftNode;
+        bytes32 leftNode = book.tree[node].leftNode;
         if (leftNode == bytes32(0)) {
-            (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(node, limitPrice, remaining);
+            (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(bookId, node, limitPrice, remaining);
             return (newNode, fillQuantity, quoteAmount);
         }
 
         uint192 nodeQuantity = _quantity(node);
-        if (nodeQuantity <= remaining && _leftmostLeafPrice(node) <= limitPrice) {
-            quoteAmount = _consumeSubtree(node, false);
+        if (nodeQuantity <= remaining && _leftmostLeafPrice(book, node) <= limitPrice) {
+            quoteAmount = _consumeSubtree(bookId, book, node, false);
             return (bytes32(0), nodeQuantity, quoteAmount);
         }
 
-        bytes32 rightNode = tree[node].rightNode;
         bytes32 newRightNode;
         uint192 rightFillQuantity;
         uint256 rightQuoteAmount;
-        (newRightNode, rightFillQuantity, rightQuoteAmount) = _matchAskSubtree(rightNode, limitPrice, remaining);
+        {
+            bytes32 rightNode = book.tree[node].rightNode;
+            (newRightNode, rightFillQuantity, rightQuoteAmount) =
+                _matchAskSubtree(bookId, book, rightNode, limitPrice, remaining);
+        }
         if (rightFillQuantity == 0) return (node, 0, 0);
 
-        uint192 leftFillQuantity = 0;
-        uint256 leftQuoteAmount = 0;
         bytes32 newLeftNode = leftNode;
         unchecked {
             remaining -= rightFillQuantity;
         }
 
         if (remaining != 0) {
-            (newLeftNode, leftFillQuantity, leftQuoteAmount) = _matchAskSubtree(leftNode, limitPrice, remaining);
+            (newLeftNode, fillQuantity, quoteAmount) = _matchAskSubtree(bookId, book, leftNode, limitPrice, remaining);
         }
 
-        newNode = _replaceBranch(newLeftNode, newRightNode);
+        newNode = _replaceBranch(book, newLeftNode, newRightNode);
         unchecked {
-            fillQuantity = rightFillQuantity + leftFillQuantity;
-            quoteAmount = rightQuoteAmount + leftQuoteAmount;
+            fillQuantity += rightFillQuantity;
+            quoteAmount += rightQuoteAmount;
         }
     }
 
@@ -594,50 +590,58 @@ contract RadixMatchingEngine {
     /// same-price right-spine subtrees. Mixed-price aggregate consumption remains reserved for exact
     /// off-spine subtrees to avoid reintroducing the branch rewrite cascade this path is designed
     /// to skip.
-    function _matchBidRightSpine(bytes32 node, uint24 limitPrice, uint192 remaining, bool dirty)
-        private
-        returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
-    {
-        bytes32 leftNode = tree[node].leftNode;
+    function _matchBidRightSpine(
+        bytes32 bookId,
+        Book storage book,
+        bytes32 node,
+        uint24 limitPrice,
+        uint192 remaining,
+        bool dirty
+    ) private returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount, bool dirtyChanged) {
+        bytes32 leftNode = book.tree[node].leftNode;
         if (leftNode == bytes32(0)) {
-            (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(node, limitPrice, remaining);
-            return (newNode, fillQuantity, quoteAmount);
-        }
-
-        bytes32 rightNode = tree[node].rightNode;
-        if (_price(leftNode) == _price(rightNode)) {
-            fillQuantity = _samePriceRightSpineFillQuantity(node, limitPrice, remaining, true, dirty);
-            if (fillQuantity != 0) {
-                quoteAmount = _quoteValue(_price(node), fillQuantity);
-                emit OrderMatched(dirty ? _withQuantity(node, fillQuantity) : node, true, fillQuantity, quoteAmount);
-                return (bytes32(0), fillQuantity, quoteAmount);
-            }
+            (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(bookId, node, limitPrice, remaining);
+            return (newNode, fillQuantity, quoteAmount, false);
         }
 
         bytes32 newRightNode;
         uint192 rightFillQuantity;
         uint256 rightQuoteAmount;
-        (newRightNode, rightFillQuantity, rightQuoteAmount) =
-            _matchBidRightSpine(rightNode, limitPrice, remaining, dirty);
-        if (rightFillQuantity == 0) return (node, 0, 0);
+        {
+            bytes32 rightNode = book.tree[node].rightNode;
+            if (_price(leftNode) == _price(rightNode)) {
+                fillQuantity = _samePriceRightSpineFillQuantity(book, node, limitPrice, remaining, true, dirty);
+                if (fillQuantity != 0) {
+                    quoteAmount = _quoteValue(_price(node), fillQuantity);
+                    emit BidMatched(bookId, dirty ? _withQuantity(node, fillQuantity) : node, fillQuantity, quoteAmount);
+                    return (bytes32(0), fillQuantity, quoteAmount, false);
+                }
+            }
 
-        uint192 leftFillQuantity = 0;
-        uint256 leftQuoteAmount = 0;
+            (newRightNode, rightFillQuantity, rightQuoteAmount, dirtyChanged) =
+                _matchBidRightSpine(bookId, book, rightNode, limitPrice, remaining, dirty);
+        }
+        if (rightFillQuantity == 0) return (node, 0, 0, false);
+
         bytes32 newLeftNode = leftNode;
         unchecked {
             remaining -= rightFillQuantity;
         }
 
         if (remaining != 0) {
-            (newLeftNode, leftFillQuantity, leftQuoteAmount) = _matchBidSubtree(leftNode, limitPrice, remaining);
+            (newLeftNode, fillQuantity, quoteAmount) = _matchBidSubtree(bookId, book, leftNode, limitPrice, remaining);
         }
 
-        newNode = leftFillQuantity == 0
-            ? _replaceRightmostRightChild(node, newLeftNode, newRightNode, true)
-            : _replaceBranch(newLeftNode, newRightNode);
+        if (fillQuantity == 0) {
+            bool branchDirty;
+            (newNode, branchDirty) = _replaceRightmostRightChild(book, node, newLeftNode, newRightNode);
+            dirtyChanged = dirtyChanged || branchDirty;
+        } else {
+            newNode = _replaceBranch(book, newLeftNode, newRightNode);
+        }
         unchecked {
-            fillQuantity = rightFillQuantity + leftFillQuantity;
-            quoteAmount = rightQuoteAmount + leftQuoteAmount;
+            fillQuantity += rightFillQuantity;
+            quoteAmount += rightQuoteAmount;
         }
     }
 
@@ -648,44 +652,45 @@ contract RadixMatchingEngine {
     /// @return newNode Replacement node for this subtree after matching.
     /// @return fillQuantity Base quantity consumed from this subtree.
     /// @return quoteAmount Quote value consumed from this subtree.
-    function _matchBidSubtree(bytes32 node, uint24 limitPrice, uint192 remaining)
+    function _matchBidSubtree(bytes32 bookId, Book storage book, bytes32 node, uint24 limitPrice, uint192 remaining)
         private
         returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
     {
-        bytes32 leftNode = tree[node].leftNode;
+        bytes32 leftNode = book.tree[node].leftNode;
         if (leftNode == bytes32(0)) {
-            (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(node, limitPrice, remaining);
+            (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(bookId, node, limitPrice, remaining);
             return (newNode, fillQuantity, quoteAmount);
         }
 
         uint192 nodeQuantity = _quantity(node);
-        if (nodeQuantity <= remaining && _leftmostLeafPrice(node) >= limitPrice) {
-            quoteAmount = _consumeSubtree(node, true);
+        if (nodeQuantity <= remaining && _leftmostLeafPrice(book, node) >= limitPrice) {
+            quoteAmount = _consumeSubtree(bookId, book, node, true);
             return (bytes32(0), nodeQuantity, quoteAmount);
         }
 
-        bytes32 rightNode = tree[node].rightNode;
         bytes32 newRightNode;
         uint192 rightFillQuantity;
         uint256 rightQuoteAmount;
-        (newRightNode, rightFillQuantity, rightQuoteAmount) = _matchBidSubtree(rightNode, limitPrice, remaining);
+        {
+            bytes32 rightNode = book.tree[node].rightNode;
+            (newRightNode, rightFillQuantity, rightQuoteAmount) =
+                _matchBidSubtree(bookId, book, rightNode, limitPrice, remaining);
+        }
         if (rightFillQuantity == 0) return (node, 0, 0);
 
-        uint192 leftFillQuantity = 0;
-        uint256 leftQuoteAmount = 0;
         bytes32 newLeftNode = leftNode;
         unchecked {
             remaining -= rightFillQuantity;
         }
 
         if (remaining != 0) {
-            (newLeftNode, leftFillQuantity, leftQuoteAmount) = _matchBidSubtree(leftNode, limitPrice, remaining);
+            (newLeftNode, fillQuantity, quoteAmount) = _matchBidSubtree(bookId, book, leftNode, limitPrice, remaining);
         }
 
-        newNode = _replaceBranch(newLeftNode, newRightNode);
+        newNode = _replaceBranch(book, newLeftNode, newRightNode);
         unchecked {
-            fillQuantity = rightFillQuantity + leftFillQuantity;
-            quoteAmount = rightQuoteAmount + leftQuoteAmount;
+            fillQuantity += rightFillQuantity;
+            quoteAmount += rightQuoteAmount;
         }
     }
 
@@ -698,26 +703,26 @@ contract RadixMatchingEngine {
     /// Insertion follows Patricia/radix-tree rules. If the new key diverges before the current
     /// branch split, a new parent branch is created above `root`. Otherwise recursion continues
     /// into the child selected by the branch split bit.
-    function _insertBid(bytes32 root, bytes32 node, uint64 nodeKey) private returns (bytes32) {
+    function _insertBid(Book storage book, bytes32 root, bytes32 node, uint64 nodeKey) private returns (bytes32) {
         if (root == bytes32(0)) return node;
 
-        bytes32 leftNode = tree[root].leftNode;
-        if (leftNode == bytes32(0)) return _storeBranch(root, node, _bidSortKey(root), nodeKey);
+        bytes32 leftNode = book.tree[root].leftNode;
+        if (leftNode == bytes32(0)) return _storeBranch(book, root, node, _bidSortKey(root), nodeKey);
 
-        bytes32 rightNode = tree[root].rightNode;
+        bytes32 rightNode = book.tree[root].rightNode;
         uint64 leftKey = _bidSortKey(leftNode);
         uint8 branchDepth = _commonPrefix(leftKey, _bidSortKey(rightNode));
         if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
-            return _storeBranch(root, node, _bidSortKey(root), nodeKey);
+            return _storeBranch(book, root, node, _bidSortKey(root), nodeKey);
         }
 
         if (_bit(nodeKey, branchDepth)) {
-            rightNode = _insertBid(rightNode, node, nodeKey);
+            rightNode = _insertBid(book, rightNode, node, nodeKey);
         } else {
-            leftNode = _insertBid(leftNode, node, nodeKey);
+            leftNode = _insertBid(book, leftNode, node, nodeKey);
         }
 
-        return _replaceBranch(leftNode, rightNode);
+        return _replaceBranch(book, leftNode, rightNode);
     }
 
     /// @notice Insert a leaf or branch into the ask tree.
@@ -726,26 +731,26 @@ contract RadixMatchingEngine {
     /// @param nodeKey Ask sort key for `node`.
     /// @return Updated subtree root.
     /// @dev Same insertion algorithm as bids, but callers provide inverted-price ask keys.
-    function _insertAsk(bytes32 root, bytes32 node, uint64 nodeKey) private returns (bytes32) {
+    function _insertAsk(Book storage book, bytes32 root, bytes32 node, uint64 nodeKey) private returns (bytes32) {
         if (root == bytes32(0)) return node;
 
-        bytes32 leftNode = tree[root].leftNode;
-        if (leftNode == bytes32(0)) return _storeBranch(root, node, _askSortKey(root), nodeKey);
+        bytes32 leftNode = book.tree[root].leftNode;
+        if (leftNode == bytes32(0)) return _storeBranch(book, root, node, _askSortKey(root), nodeKey);
 
-        bytes32 rightNode = tree[root].rightNode;
+        bytes32 rightNode = book.tree[root].rightNode;
         uint64 leftKey = _askSortKey(leftNode);
         uint8 branchDepth = _commonPrefix(leftKey, _askSortKey(rightNode));
         if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
-            return _storeBranch(root, node, _askSortKey(root), nodeKey);
+            return _storeBranch(book, root, node, _askSortKey(root), nodeKey);
         }
 
         if (_bit(nodeKey, branchDepth)) {
-            rightNode = _insertAsk(rightNode, node, nodeKey);
+            rightNode = _insertAsk(book, rightNode, node, nodeKey);
         } else {
-            leftNode = _insertAsk(leftNode, node, nodeKey);
+            leftNode = _insertAsk(book, leftNode, node, nodeKey);
         }
 
-        return _replaceBranch(leftNode, rightNode);
+        return _replaceBranch(book, leftNode, rightNode);
     }
 
     /// @notice Remove one bid leaf by exact bid sort key.
@@ -756,31 +761,34 @@ contract RadixMatchingEngine {
     /// @dev
     /// Cancel searches by price/nonce, not by full order word, because a partially filled live leaf
     /// has the same price/nonce as the original order but a smaller quantity.
-    function _removeBidByKey(bytes32 root, uint64 targetKey, bool rightmost)
+    function _removeBidByKey(Book storage book, bytes32 root, uint64 targetKey, bool rightmost)
         private
-        returns (bytes32 newRoot, bytes32 removed)
+        returns (bytes32 newRoot, bytes32 removed, bool dirtyChanged)
     {
-        bytes32 leftNode = tree[root].leftNode;
+        bytes32 leftNode = book.tree[root].leftNode;
         if (leftNode == bytes32(0)) {
-            return _bidSortKey(root) == targetKey ? (bytes32(0), root) : (root, bytes32(0));
+            return _bidSortKey(root) == targetKey ? (bytes32(0), root, false) : (root, bytes32(0), false);
         }
 
-        bytes32 rightNode = tree[root].rightNode;
+        bytes32 rightNode = book.tree[root].rightNode;
         uint64 leftKey = _bidSortKey(leftNode);
         uint8 branchDepth = _commonPrefix(leftKey, _bidSortKey(rightNode));
-        if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0));
+        if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0), false);
 
-        if (_bit(targetKey, branchDepth)) {
-            (rightNode, removed) = _removeBidByKey(rightNode, targetKey, rightmost);
+        bool goRight = _bit(targetKey, branchDepth);
+        if (goRight) {
+            (rightNode, removed, dirtyChanged) = _removeBidByKey(book, rightNode, targetKey, rightmost);
         } else {
-            (leftNode, removed) = _removeBidByKey(leftNode, targetKey, false);
+            (leftNode, removed, dirtyChanged) = _removeBidByKey(book, leftNode, targetKey, false);
         }
 
-        if (removed == bytes32(0)) return (root, bytes32(0));
-        if (rightmost && _bit(targetKey, branchDepth)) {
-            return (_replaceRightmostRightChild(root, leftNode, rightNode, true), removed);
+        if (removed == bytes32(0)) return (root, bytes32(0), false);
+        if (rightmost && goRight) {
+            bool branchDirty;
+            (newRoot, branchDirty) = _replaceRightmostRightChild(book, root, leftNode, rightNode);
+            return (newRoot, removed, dirtyChanged || branchDirty);
         }
-        return (_replaceBranch(leftNode, rightNode), removed);
+        return (_replaceBranch(book, leftNode, rightNode), removed, dirtyChanged);
     }
 
     /// @notice Remove one ask leaf by exact ask sort key.
@@ -789,54 +797,58 @@ contract RadixMatchingEngine {
     /// @return newRoot Updated subtree root.
     /// @return removed Live leaf that was removed, or zero if absent.
     /// @dev Mirrors `_removeBidByKey` using inverted-price ask keys.
-    function _removeAskByKey(bytes32 root, uint64 targetKey, bool rightmost)
+    function _removeAskByKey(Book storage book, bytes32 root, uint64 targetKey, bool rightmost)
         private
-        returns (bytes32 newRoot, bytes32 removed)
+        returns (bytes32 newRoot, bytes32 removed, bool dirtyChanged)
     {
-        bytes32 leftNode = tree[root].leftNode;
+        bytes32 leftNode = book.tree[root].leftNode;
         if (leftNode == bytes32(0)) {
-            return _askSortKey(root) == targetKey ? (bytes32(0), root) : (root, bytes32(0));
+            return _askSortKey(root) == targetKey ? (bytes32(0), root, false) : (root, bytes32(0), false);
         }
 
-        bytes32 rightNode = tree[root].rightNode;
+        bytes32 rightNode = book.tree[root].rightNode;
         uint64 leftKey = _askSortKey(leftNode);
         uint8 branchDepth = _commonPrefix(leftKey, _askSortKey(rightNode));
-        if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0));
+        if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0), false);
 
-        if (_bit(targetKey, branchDepth)) {
-            (rightNode, removed) = _removeAskByKey(rightNode, targetKey, rightmost);
+        bool goRight = _bit(targetKey, branchDepth);
+        if (goRight) {
+            (rightNode, removed, dirtyChanged) = _removeAskByKey(book, rightNode, targetKey, rightmost);
         } else {
-            (leftNode, removed) = _removeAskByKey(leftNode, targetKey, false);
+            (leftNode, removed, dirtyChanged) = _removeAskByKey(book, leftNode, targetKey, false);
         }
 
-        if (removed == bytes32(0)) return (root, bytes32(0));
-        if (rightmost && _bit(targetKey, branchDepth)) {
-            return (_replaceRightmostRightChild(root, leftNode, rightNode, false), removed);
+        if (removed == bytes32(0)) return (root, bytes32(0), false);
+        if (rightmost && goRight) {
+            bool branchDirty;
+            (newRoot, branchDirty) = _replaceRightmostRightChild(book, root, leftNode, rightNode);
+            return (newRoot, removed, dirtyChanged || branchDirty);
         }
-        return (_replaceBranch(leftNode, rightNode), removed);
+        return (_replaceBranch(book, leftNode, rightNode), removed, dirtyChanged);
     }
 
     /// @notice Update a right-spine branch after only its right child changed.
     /// @param branchNode Existing branch node used as the stable right-spine anchor.
     /// @param leftNode Existing left child.
     /// @param rightNode Replacement right child.
-    /// @param isBid True if the branch belongs to the bid tree.
-    /// @return Replacement subtree root.
+    /// @return newNode Replacement subtree root.
+    /// @return dirtyChanged True if a stable branch anchor was retained with a new right child.
     /// @dev
     /// This is the rightmost-branch optimization. The packed branch word is left in place when the
     /// right child changes, so ancestors on the same right spine do not need to be rewritten. The
     /// branch quantity/path can therefore become stale until the next same-side insertion calls
     /// `_materializeRightSpine`.
-    function _replaceRightmostRightChild(bytes32 branchNode, bytes32 leftNode, bytes32 rightNode, bool isBid)
+    function _replaceRightmostRightChild(Book storage book, bytes32 branchNode, bytes32 leftNode, bytes32 rightNode)
         private
-        returns (bytes32)
+        returns (bytes32 newNode, bool dirtyChanged)
     {
-        if (rightNode == bytes32(0)) return leftNode;
-        if (rightNode == branchNode || rightNode == leftNode) return _replaceBranch(leftNode, rightNode);
+        if (rightNode == bytes32(0)) return (leftNode, false);
+        if (rightNode == branchNode || rightNode == leftNode) {
+            return (_replaceBranch(book, leftNode, rightNode), false);
+        }
 
-        tree[branchNode].rightNode = rightNode;
-        _setRightSpineDirty(isBid);
-        return branchNode;
+        book.tree[branchNode].rightNode = rightNode;
+        return (branchNode, true);
     }
 
     /// @notice Collapse or rewrite a branch after one or both children changed.
@@ -847,7 +859,7 @@ contract RadixMatchingEngine {
     /// If one child was consumed or canceled, the other child is promoted. If both remain, the
     /// branch address is recomputed from the child nodes and its pointers are written. Callers pass
     /// children in already-valid left/right order.
-    function _replaceBranch(bytes32 leftNode, bytes32 rightNode) private returns (bytes32) {
+    function _replaceBranch(Book storage book, bytes32 leftNode, bytes32 rightNode) private returns (bytes32) {
         bytes32 newBranch;
         if (leftNode == bytes32(0)) {
             newBranch = rightNode;
@@ -856,7 +868,7 @@ contract RadixMatchingEngine {
         } else {
             newBranch = _branchNodeForChildren(leftNode, rightNode);
             // Replacement callers preserve left/right ordering from an existing valid branch.
-            tree[newBranch] = Branch({leftNode: leftNode, rightNode: rightNode});
+            book.tree[newBranch] = Branch({leftNode: leftNode, rightNode: rightNode});
         }
 
         return newBranch;
@@ -867,12 +879,12 @@ contract RadixMatchingEngine {
     /// @return Exact subtree root.
     /// @dev Only the right spine can contain stable anchors. Left subtrees remain exact because the
     /// optimization is used only for right-child updates.
-    function _materializeRightSpine(bytes32 node) private returns (bytes32) {
-        bytes32 leftNode = tree[node].leftNode;
+    function _materializeRightSpine(Book storage book, bytes32 node) private returns (bytes32) {
+        bytes32 leftNode = book.tree[node].leftNode;
         if (leftNode == bytes32(0)) return node;
 
-        bytes32 rightNode = _materializeRightSpine(tree[node].rightNode);
-        return _replaceBranch(leftNode, rightNode);
+        bytes32 rightNode = _materializeRightSpine(book, book.tree[node].rightNode);
+        return _replaceBranch(book, leftNode, rightNode);
     }
 
     /// @notice Return the aggregate quantity for a fully crossing same-price subtree on the global right spine.
@@ -889,17 +901,18 @@ contract RadixMatchingEngine {
     /// subtrees intentionally fall back to the recursive matcher because their quote value cannot be
     /// computed from one price.
     function _samePriceRightSpineFillQuantity(
+        Book storage book,
         bytes32 node,
         uint24 limitPrice,
         uint192 remaining,
         bool restingIsBid,
         bool dirty
     ) private view returns (uint192 fillQuantity) {
-        uint24 price = _singlePriceSubtree(node);
+        uint24 price = _singlePriceSubtree(book, node);
         if (price == 0) return 0;
         if (restingIsBid ? price < limitPrice : price > limitPrice) return 0;
 
-        fillQuantity = dirty ? _actualSubtreeQuantity(node) : _quantity(node);
+        fillQuantity = dirty ? _actualSubtreeQuantity(book, node) : _quantity(node);
         if (fillQuantity > remaining) return 0;
     }
 
@@ -909,13 +922,13 @@ contract RadixMatchingEngine {
     /// @dev Used only when a right-spine anchor may be stale and its packed quantity cannot be
     /// trusted. Left subtrees below a dirty right spine are exact, but recursion is simpler and
     /// still bounded by the radix tree depth plus the consumed same-price subtree size.
-    function _actualSubtreeQuantity(bytes32 node) private view returns (uint192 quantity) {
-        bytes32 leftNode = tree[node].leftNode;
+    function _actualSubtreeQuantity(Book storage book, bytes32 node) private view returns (uint192 quantity) {
+        bytes32 leftNode = book.tree[node].leftNode;
         if (leftNode == bytes32(0)) return _quantity(node);
 
-        quantity = _actualSubtreeQuantity(leftNode);
+        quantity = _actualSubtreeQuantity(book, leftNode);
         unchecked {
-            quantity += _actualSubtreeQuantity(tree[node].rightNode);
+            quantity += _actualSubtreeQuantity(book, book.tree[node].rightNode);
         }
     }
 
@@ -930,7 +943,10 @@ contract RadixMatchingEngine {
     /// for honest state because nonce assignment is unique; if corruption makes them equal, this
     /// reverts before overwriting ownership or branch data.
     /// Callers pass nonzero children; empty-subtree cases are handled before this helper is reached.
-    function _storeBranch(bytes32 a, bytes32 b, uint64 aKey, uint64 bKey) private returns (bytes32 branchNode) {
+    function _storeBranch(Book storage book, bytes32 a, bytes32 b, uint64 aKey, uint64 bKey)
+        private
+        returns (bytes32 branchNode)
+    {
         uint8 branchDepth = _commonPrefix(aKey, bKey);
         if (branchDepth == 64) revert DuplicateOrder();
 
@@ -943,7 +959,7 @@ contract RadixMatchingEngine {
 
         branchNode = _branchNodeForChildren(a, b);
         // Walkers use leftNode as the branch sentinel, so stored branches are always two-child.
-        tree[branchNode] = Branch({leftNode: leftNode, rightNode: rightNode});
+        book.tree[branchNode] = Branch({leftNode: leftNode, rightNode: rightNode});
     }
 
     /// @notice Compute the self-addressed branch node for two children.
@@ -979,17 +995,17 @@ contract RadixMatchingEngine {
     /// Price zero is invalid for live orders, so zero is safe as the sentinel. The function only
     /// checks the leftmost and rightmost leaf because branch ordering invariants guarantee every
     /// leaf between them is within that price range.
-    function _singlePriceSubtree(bytes32 node) private view returns (uint24 price) {
+    function _singlePriceSubtree(Book storage book, bytes32 node) private view returns (uint24 price) {
         bytes32 leftmost = node;
         while (true) {
-            bytes32 leftNode = tree[leftmost].leftNode;
+            bytes32 leftNode = book.tree[leftmost].leftNode;
             if (leftNode == bytes32(0)) break;
             leftmost = leftNode;
         }
 
         bytes32 rightmost = node;
         while (true) {
-            bytes32 rightNode = tree[rightmost].rightNode;
+            bytes32 rightNode = book.tree[rightmost].rightNode;
             if (rightNode == bytes32(0)) break;
             rightmost = rightNode;
         }
@@ -1005,9 +1021,9 @@ contract RadixMatchingEngine {
     /// For bids, the leftmost leaf has the lowest bid price. For asks, the leftmost leaf has the
     /// highest ask price because ask sort keys invert price. In both cases this is the "worst"
     /// price that must cross before an entire subtree can be aggregate-consumed.
-    function _leftmostLeafPrice(bytes32 node) private view returns (uint24 price) {
+    function _leftmostLeafPrice(Book storage book, bytes32 node) private view returns (uint24 price) {
         while (true) {
-            bytes32 leftNode = tree[node].leftNode;
+            bytes32 leftNode = book.tree[node].leftNode;
             if (leftNode == bytes32(0)) {
                 price = _price(node);
                 break;
@@ -1021,28 +1037,39 @@ contract RadixMatchingEngine {
     /// @param restingIsBid True if the consumed subtree is from the bid tree.
     /// @return quoteAmount Total quote value of the consumed subtree.
     /// @dev
-    /// Same-price subtrees can be emitted as one aggregate `OrderMatched` event because every maker
+    /// Same-price subtrees can be emitted as one aggregate match event because every maker
     /// fills at the same price. Mixed-price subtrees recurse right first to preserve execution
     /// priority in emitted match events.
-    function _consumeSubtree(bytes32 node, bool restingIsBid) private returns (uint256 quoteAmount) {
+    function _consumeSubtree(bytes32 bookId, Book storage book, bytes32 node, bool restingIsBid)
+        private
+        returns (uint256 quoteAmount)
+    {
         uint192 quantity = _quantity(node);
-        bytes32 leftNode = tree[node].leftNode;
+        bytes32 leftNode = book.tree[node].leftNode;
         if (leftNode == bytes32(0)) {
             quoteAmount = _quoteValue(_price(node), quantity);
-            emit OrderMatched(node, restingIsBid, quantity, quoteAmount);
+            if (restingIsBid) {
+                emit BidMatched(bookId, node, quantity, quoteAmount);
+            } else {
+                emit AskMatched(bookId, node, quantity, quoteAmount);
+            }
             return quoteAmount;
         }
 
-        uint24 price = _singlePriceSubtree(node);
+        uint24 price = _singlePriceSubtree(book, node);
         if (price != 0) {
             quoteAmount = _quoteValue(price, quantity);
-            emit OrderMatched(node, restingIsBid, quantity, quoteAmount);
+            if (restingIsBid) {
+                emit BidMatched(bookId, node, quantity, quoteAmount);
+            } else {
+                emit AskMatched(bookId, node, quantity, quoteAmount);
+            }
             return quoteAmount;
         }
 
-        quoteAmount = _consumeSubtree(tree[node].rightNode, restingIsBid);
+        quoteAmount = _consumeSubtree(bookId, book, book.tree[node].rightNode, restingIsBid);
         unchecked {
-            quoteAmount += _consumeSubtree(leftNode, restingIsBid);
+            quoteAmount += _consumeSubtree(bookId, book, leftNode, restingIsBid);
         }
     }
 
@@ -1104,41 +1131,42 @@ contract RadixMatchingEngine {
     /// @notice Return whether a side has optimized right-spine anchors that need materialization before insert.
     /// @param isBid True for the bid tree, false for the ask tree.
     /// @return dirty True if the side's right spine contains stale branch aggregate words.
-    function _rightSpineDirty(bool isBid) private view returns (bool dirty) {
+    function _rightSpineDirty(Book storage book, bool isBid) private view returns (bool dirty) {
         uint256 flag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
-        assembly {
-            dirty := iszero(iszero(and(sload(nextNonce.slot), flag)))
-        }
+        dirty = book.nonceAndFlags & flag != 0;
     }
 
     /// @notice Mark a side's right spine dirty.
     /// @param isBid True for the bid tree, false for the ask tree.
-    function _setRightSpineDirty(bool isBid) private {
+    function _setRightSpineDirty(Book storage book, bool isBid) private {
         uint256 flag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
-        assembly {
-            let nonceSlot := sload(nextNonce.slot)
-            if iszero(and(nonceSlot, flag)) { sstore(nextNonce.slot, or(nonceSlot, flag)) }
+        uint256 nonceAndFlags = book.nonceAndFlags;
+        if (nonceAndFlags & flag == 0) {
+            book.nonceAndFlags = nonceAndFlags | flag;
         }
     }
 
-    /// @notice Clear a side's right-spine dirty bit after materialization.
-    /// @param isBid True for the bid tree, false for the ask tree.
-    function _clearRightSpineDirty(bool isBid) private {
-        uint256 flag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
-        assembly {
-            sstore(nextNonce.slot, and(sload(nextNonce.slot), not(flag)))
-        }
+    /// @notice Return the low 40-bit nonce for a book.
+    function _nextNonce(Book storage book) internal view returns (uint40) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint40(book.nonceAndFlags & _NONCE_MASK);
     }
 
-    /// @notice Build the side metadata key for an original order.
-    /// @param order Packed order.
-    /// @return Zero-quantity key with the same price and nonce.
-    /// @dev
-    /// Zero-quantity orders are invalid external inputs, so this namespace can store bid/ask side
-    /// markers without colliding with real orders. The side marker is what lets `cancel` decide
-    /// which root to search after an order has partially or fully filled.
-    function _sideKey(bytes32 order) private pure returns (bytes32) {
-        return bytes32(uint256(order) & _PATH_MASK);
+    /// @notice Initialize an empty book.
+    function _initializeBook(Book storage book) internal {
+        if (_nextNonce(book) != 0) return;
+        book.nonceAndFlags = uint256(type(uint40).max);
+    }
+
+    /// @notice Build the globally unique owner key for an order in a book.
+    function _orderId(bytes32 bookId, bytes32 order) internal pure returns (bytes32 id) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            let ptr := mload(0x40)
+            mstore(ptr, bookId)
+            mstore(add(ptr, 0x20), order)
+            id := keccak256(ptr, 0x40)
+        }
     }
 
     /// @notice Compute quote value for a base quantity at a 24-bit integer price.
@@ -1146,7 +1174,7 @@ contract RadixMatchingEngine {
     /// @param quantity Base quantity.
     /// @return Quote amount.
     /// @dev The product is at most 216 bits, so it cannot overflow `uint256`.
-    function _quoteValue(uint24 price, uint192 quantity) private pure returns (uint256) {
+    function _quoteValue(uint24 price, uint192 quantity) internal pure returns (uint256) {
         unchecked {
             return uint256(price) * uint256(quantity);
         }
@@ -1156,12 +1184,18 @@ contract RadixMatchingEngine {
     /// @param order Packed node.
     /// @return price 24-bit price.
     /// @return quantity 192-bit quantity.
-    function _priceAndQuantity(bytes32 order) private pure returns (uint24 price, uint192 quantity) {
+    function _priceAndQuantity(bytes32 order) internal pure returns (uint24 price, uint192 quantity) {
         uint256 packed = uint256(order);
         // forge-lint: disable-next-line(unsafe-typecast)
         price = uint24(packed >> _PRICE_SHIFT);
         // forge-lint: disable-next-line(unsafe-typecast)
         quantity = uint192((packed >> _QUANTITY_SHIFT) & _QUANTITY_MASK);
+    }
+
+    /// @notice Decode and validate an incoming order before nonce assignment.
+    function _validateIncomingOrder(bytes32 order) internal pure returns (uint24 price, uint192 quantity) {
+        (price, quantity) = _priceAndQuantity(order);
+        if (price == 0 || quantity == 0 || uint256(order) & _NONCE_MASK != 0) revert InvalidOrder();
     }
 
     /// @notice Enter the transient reentrancy guard.

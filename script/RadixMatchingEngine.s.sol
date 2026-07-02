@@ -2,15 +2,12 @@
 pragma solidity 0.8.28;
 
 import {Script} from "forge-std/Script.sol";
-import {RadixMatchingEngine} from "../src/RadixMatchingEngine.sol";
+import {RoutingEngine} from "../src/RoutingEngine.sol";
 
 contract RadixMatchingEngineScript is Script {
-    function run() public returns (RadixMatchingEngine engine) {
-        address baseToken = vm.envAddress("BASE_TOKEN");
-        address quoteToken = vm.envAddress("QUOTE_TOKEN");
-
+    function run() public returns (RoutingEngine engine) {
         vm.startBroadcast();
-        engine = new RadixMatchingEngine(baseToken, quoteToken);
+        engine = new RoutingEngine();
         vm.stopBroadcast();
     }
 }
