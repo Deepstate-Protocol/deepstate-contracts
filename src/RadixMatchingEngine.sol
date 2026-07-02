@@ -242,7 +242,40 @@ abstract contract RadixMatchingEngine {
         if (originalQuantity == 0) revert InvalidOrder();
         isBid = state.isBid;
 
-        bytes32 removed;
+        bytes32 removed = _removeOrderFromBook(book, order, isBid);
+
+        (baseAmount, quoteAmount) = _cancelAmounts(order, removed, isBid, originalQuantity);
+
+        delete orderOf[orderKey];
+
+        emit OrderCancelled(bookId, order, owner, baseAmount, quoteAmount);
+    }
+
+    function _cancelAmounts(bytes32 order, bytes32 removed, bool isBid, uint192 originalQuantity)
+        private
+        pure
+        returns (uint256 baseAmount, uint256 quoteAmount)
+    {
+        uint192 remainingQuantity;
+        if (removed != bytes32(0)) {
+            remainingQuantity = _quantity(removed);
+        }
+        if (remainingQuantity > originalQuantity) revert InvalidOrder();
+        uint192 filledQuantity;
+        unchecked {
+            filledQuantity = originalQuantity - remainingQuantity;
+        }
+        uint24 limitPrice = _price(order);
+        if (isBid) {
+            baseAmount = filledQuantity;
+            quoteAmount = _quoteValue(limitPrice, remainingQuantity);
+        } else {
+            baseAmount = remainingQuantity;
+            quoteAmount = _quoteValue(limitPrice, filledQuantity);
+        }
+    }
+
+    function _removeOrderFromBook(Book storage book, bytes32 order, bool isBid) private returns (bytes32 removed) {
         if (isBid) {
             bytes32 root = book.tree[_ROOT_NODE].rightNode;
             bytes32 newRoot;
@@ -266,28 +299,6 @@ abstract contract RadixMatchingEngine {
                 if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, false);
             }
         }
-
-        uint192 remainingQuantity;
-        if (removed != bytes32(0)) {
-            remainingQuantity = _quantity(removed);
-        }
-        if (remainingQuantity > originalQuantity) revert InvalidOrder();
-        uint192 filledQuantity;
-        unchecked {
-            filledQuantity = originalQuantity - remainingQuantity;
-        }
-        uint24 limitPrice = _price(order);
-        if (isBid) {
-            baseAmount = filledQuantity;
-            quoteAmount = _quoteValue(limitPrice, remainingQuantity);
-        } else {
-            baseAmount = remainingQuantity;
-            quoteAmount = _quoteValue(limitPrice, filledQuantity);
-        }
-
-        delete orderOf[orderKey];
-
-        emit OrderCancelled(bookId, order, owner, baseAmount, quoteAmount);
     }
 
     /// @notice Rest unmatched quantity in one book.
@@ -476,36 +487,35 @@ abstract contract RadixMatchingEngine {
             return (newNode, fillQuantity, quoteAmount, false);
         }
 
-        bytes32 rightNode = book.tree[node].rightNode;
-        if (_price(leftNode) == _price(rightNode)) {
-            fillQuantity = _samePriceRightSpineFillQuantity(book, node, limitPrice, remaining, false, dirty);
-            if (fillQuantity != 0) {
-                quoteAmount = _quoteValue(_price(node), fillQuantity);
-                emit AskMatched(bookId, dirty ? _withQuantity(node, fillQuantity) : node, fillQuantity, quoteAmount);
-                return (bytes32(0), fillQuantity, quoteAmount, false);
-            }
-        }
-
         bytes32 newRightNode;
         uint192 rightFillQuantity;
         uint256 rightQuoteAmount;
-        (newRightNode, rightFillQuantity, rightQuoteAmount, dirtyChanged) =
-            _matchAskRightSpine(bookId, book, rightNode, limitPrice, remaining, dirty);
+        {
+            bytes32 rightNode = book.tree[node].rightNode;
+            if (_price(leftNode) == _price(rightNode)) {
+                fillQuantity = _samePriceRightSpineFillQuantity(book, node, limitPrice, remaining, false, dirty);
+                if (fillQuantity != 0) {
+                    quoteAmount = _quoteValue(_price(node), fillQuantity);
+                    emit AskMatched(bookId, dirty ? _withQuantity(node, fillQuantity) : node, fillQuantity, quoteAmount);
+                    return (bytes32(0), fillQuantity, quoteAmount, false);
+                }
+            }
+
+            (newRightNode, rightFillQuantity, rightQuoteAmount, dirtyChanged) =
+                _matchAskRightSpine(bookId, book, rightNode, limitPrice, remaining, dirty);
+        }
         if (rightFillQuantity == 0) return (node, 0, 0, false);
 
-        uint192 leftFillQuantity = 0;
-        uint256 leftQuoteAmount = 0;
         bytes32 newLeftNode = leftNode;
         unchecked {
             remaining -= rightFillQuantity;
         }
 
         if (remaining != 0) {
-            (newLeftNode, leftFillQuantity, leftQuoteAmount) =
-                _matchAskSubtree(bookId, book, leftNode, limitPrice, remaining);
+            (newLeftNode, fillQuantity, quoteAmount) = _matchAskSubtree(bookId, book, leftNode, limitPrice, remaining);
         }
 
-        if (leftFillQuantity == 0) {
+        if (fillQuantity == 0) {
             bool branchDirty;
             (newNode, branchDirty) = _replaceRightmostRightChild(book, node, newLeftNode, newRightNode);
             dirtyChanged = dirtyChanged || branchDirty;
@@ -513,8 +523,8 @@ abstract contract RadixMatchingEngine {
             newNode = _replaceBranch(book, newLeftNode, newRightNode);
         }
         unchecked {
-            fillQuantity = rightFillQuantity + leftFillQuantity;
-            quoteAmount = rightQuoteAmount + leftQuoteAmount;
+            fillQuantity += rightFillQuantity;
+            quoteAmount += rightQuoteAmount;
         }
     }
 
@@ -541,30 +551,29 @@ abstract contract RadixMatchingEngine {
             return (bytes32(0), nodeQuantity, quoteAmount);
         }
 
-        bytes32 rightNode = book.tree[node].rightNode;
         bytes32 newRightNode;
         uint192 rightFillQuantity;
         uint256 rightQuoteAmount;
-        (newRightNode, rightFillQuantity, rightQuoteAmount) =
-            _matchAskSubtree(bookId, book, rightNode, limitPrice, remaining);
+        {
+            bytes32 rightNode = book.tree[node].rightNode;
+            (newRightNode, rightFillQuantity, rightQuoteAmount) =
+                _matchAskSubtree(bookId, book, rightNode, limitPrice, remaining);
+        }
         if (rightFillQuantity == 0) return (node, 0, 0);
 
-        uint192 leftFillQuantity = 0;
-        uint256 leftQuoteAmount = 0;
         bytes32 newLeftNode = leftNode;
         unchecked {
             remaining -= rightFillQuantity;
         }
 
         if (remaining != 0) {
-            (newLeftNode, leftFillQuantity, leftQuoteAmount) =
-                _matchAskSubtree(bookId, book, leftNode, limitPrice, remaining);
+            (newLeftNode, fillQuantity, quoteAmount) = _matchAskSubtree(bookId, book, leftNode, limitPrice, remaining);
         }
 
         newNode = _replaceBranch(book, newLeftNode, newRightNode);
         unchecked {
-            fillQuantity = rightFillQuantity + leftFillQuantity;
-            quoteAmount = rightQuoteAmount + leftQuoteAmount;
+            fillQuantity += rightFillQuantity;
+            quoteAmount += rightQuoteAmount;
         }
     }
 
@@ -595,36 +604,35 @@ abstract contract RadixMatchingEngine {
             return (newNode, fillQuantity, quoteAmount, false);
         }
 
-        bytes32 rightNode = book.tree[node].rightNode;
-        if (_price(leftNode) == _price(rightNode)) {
-            fillQuantity = _samePriceRightSpineFillQuantity(book, node, limitPrice, remaining, true, dirty);
-            if (fillQuantity != 0) {
-                quoteAmount = _quoteValue(_price(node), fillQuantity);
-                emit BidMatched(bookId, dirty ? _withQuantity(node, fillQuantity) : node, fillQuantity, quoteAmount);
-                return (bytes32(0), fillQuantity, quoteAmount, false);
-            }
-        }
-
         bytes32 newRightNode;
         uint192 rightFillQuantity;
         uint256 rightQuoteAmount;
-        (newRightNode, rightFillQuantity, rightQuoteAmount, dirtyChanged) =
-            _matchBidRightSpine(bookId, book, rightNode, limitPrice, remaining, dirty);
+        {
+            bytes32 rightNode = book.tree[node].rightNode;
+            if (_price(leftNode) == _price(rightNode)) {
+                fillQuantity = _samePriceRightSpineFillQuantity(book, node, limitPrice, remaining, true, dirty);
+                if (fillQuantity != 0) {
+                    quoteAmount = _quoteValue(_price(node), fillQuantity);
+                    emit BidMatched(bookId, dirty ? _withQuantity(node, fillQuantity) : node, fillQuantity, quoteAmount);
+                    return (bytes32(0), fillQuantity, quoteAmount, false);
+                }
+            }
+
+            (newRightNode, rightFillQuantity, rightQuoteAmount, dirtyChanged) =
+                _matchBidRightSpine(bookId, book, rightNode, limitPrice, remaining, dirty);
+        }
         if (rightFillQuantity == 0) return (node, 0, 0, false);
 
-        uint192 leftFillQuantity = 0;
-        uint256 leftQuoteAmount = 0;
         bytes32 newLeftNode = leftNode;
         unchecked {
             remaining -= rightFillQuantity;
         }
 
         if (remaining != 0) {
-            (newLeftNode, leftFillQuantity, leftQuoteAmount) =
-                _matchBidSubtree(bookId, book, leftNode, limitPrice, remaining);
+            (newLeftNode, fillQuantity, quoteAmount) = _matchBidSubtree(bookId, book, leftNode, limitPrice, remaining);
         }
 
-        if (leftFillQuantity == 0) {
+        if (fillQuantity == 0) {
             bool branchDirty;
             (newNode, branchDirty) = _replaceRightmostRightChild(book, node, newLeftNode, newRightNode);
             dirtyChanged = dirtyChanged || branchDirty;
@@ -632,8 +640,8 @@ abstract contract RadixMatchingEngine {
             newNode = _replaceBranch(book, newLeftNode, newRightNode);
         }
         unchecked {
-            fillQuantity = rightFillQuantity + leftFillQuantity;
-            quoteAmount = rightQuoteAmount + leftQuoteAmount;
+            fillQuantity += rightFillQuantity;
+            quoteAmount += rightQuoteAmount;
         }
     }
 
@@ -660,30 +668,29 @@ abstract contract RadixMatchingEngine {
             return (bytes32(0), nodeQuantity, quoteAmount);
         }
 
-        bytes32 rightNode = book.tree[node].rightNode;
         bytes32 newRightNode;
         uint192 rightFillQuantity;
         uint256 rightQuoteAmount;
-        (newRightNode, rightFillQuantity, rightQuoteAmount) =
-            _matchBidSubtree(bookId, book, rightNode, limitPrice, remaining);
+        {
+            bytes32 rightNode = book.tree[node].rightNode;
+            (newRightNode, rightFillQuantity, rightQuoteAmount) =
+                _matchBidSubtree(bookId, book, rightNode, limitPrice, remaining);
+        }
         if (rightFillQuantity == 0) return (node, 0, 0);
 
-        uint192 leftFillQuantity = 0;
-        uint256 leftQuoteAmount = 0;
         bytes32 newLeftNode = leftNode;
         unchecked {
             remaining -= rightFillQuantity;
         }
 
         if (remaining != 0) {
-            (newLeftNode, leftFillQuantity, leftQuoteAmount) =
-                _matchBidSubtree(bookId, book, leftNode, limitPrice, remaining);
+            (newLeftNode, fillQuantity, quoteAmount) = _matchBidSubtree(bookId, book, leftNode, limitPrice, remaining);
         }
 
         newNode = _replaceBranch(book, newLeftNode, newRightNode);
         unchecked {
-            fillQuantity = rightFillQuantity + leftFillQuantity;
-            quoteAmount = rightQuoteAmount + leftQuoteAmount;
+            fillQuantity += rightFillQuantity;
+            quoteAmount += rightQuoteAmount;
         }
     }
 
@@ -1137,13 +1144,6 @@ abstract contract RadixMatchingEngine {
         if (nonceAndFlags & flag == 0) {
             book.nonceAndFlags = nonceAndFlags | flag;
         }
-    }
-
-    /// @notice Clear a side's right-spine dirty bit after materialization.
-    /// @param isBid True for the bid tree, false for the ask tree.
-    function _clearRightSpineDirty(Book storage book, bool isBid) private {
-        uint256 flag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
-        book.nonceAndFlags &= ~flag;
     }
 
     /// @notice Return the low 40-bit nonce for a book.

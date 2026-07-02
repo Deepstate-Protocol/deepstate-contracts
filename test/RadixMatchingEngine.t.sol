@@ -507,6 +507,7 @@ contract RadixMatchingEngineTest is Test {
     }
 
     function testFuzz_CancelZeroQuantityDoesNotMutate(uint24 price, uint40 nonce, address caller) public {
+        vm.assume(caller != address(0));
         bytes32 order = _order(price, 0, nonce);
 
         bytes32 bidRootBefore = engine.bidRoot();
@@ -525,6 +526,18 @@ contract RadixMatchingEngineTest is Test {
         assertEq(base.balanceOf(address(engine)), engineBaseBefore);
         assertEq(quote.balanceOf(address(engine)), engineQuoteBefore);
         assertEq(engine.ownerOfOrder(order), address(0));
+    }
+
+    function test_CancelOwnedZeroQuantityOrderRevertsInvalidOrder() public {
+        bytes32 order = _order(777, 0, 123);
+        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
+        vm.store(address(engine), _ownerOfOrderSlot(order), _orderStateSlotValue(alice, true));
+
+        vm.prank(alice);
+        vm.expectRevert(bytes4(keccak256("InvalidOrder()")));
+        engine.cancel(order);
+
+        assertEq(vm.load(address(engine), _ownerOfOrderSlot(order)), _orderStateSlotValue(alice, true));
     }
 
     function testFuzz_CancelUnknownOrderDoesNotMutate(uint24 price, uint192 quantity, uint40 nonce, address caller)

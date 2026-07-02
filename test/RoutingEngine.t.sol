@@ -31,6 +31,17 @@ contract RoutingEngineHarness is RoutingEngine {
     function setNonceAndFlags(bytes32 id, uint256 nonceAndFlags) external {
         books[id].nonceAndFlags = nonceAndFlags;
     }
+
+    function restBookForTest(
+        bytes32 id,
+        uint256 nonceAndFlags,
+        uint24 price,
+        uint192 quantity,
+        bool isBid,
+        address owner
+    ) external returns (bytes32 restingOrder, uint40 nextNonceAfter) {
+        return _restBook(id, books[id], nonceAndFlags, price, quantity, isBid, owner);
+    }
 }
 
 contract RoutingEngineTest is Test {
@@ -70,7 +81,9 @@ contract RoutingEngineTest is Test {
         assertEq(resting, _order(10, 5, MAX_ORDER_NONCE));
         assertEq(engine.nextNonce(address(token0), address(token1), 0), MAX_ORDER_NONCE - 1);
         assertEq(engine.poolEpoch(engine.poolId(address(token0), address(token1))), 0);
-        assertEq(engine.ownerOfOrder(engine.orderId(id, resting)), alice);
+        bytes32 orderId = engine.orderId(id, resting);
+        assertEq(engine.ownerOfOrder(orderId), alice);
+        assertTrue(engine.isBidOrder(orderId));
         assertEq(token1.balanceOf(address(engine)), 50);
     }
 
@@ -124,6 +137,13 @@ contract RoutingEngineTest is Test {
         assertEq(engine.nextNonce(address(token0), address(token1), 1), MAX_ORDER_NONCE);
         assertEq(engine.ownerOfOrder(engine.orderId(oldBook, resting)), alice);
         assertEq(engine.ownerOfOrder(engine.orderId(newBook, resting)), address(0));
+    }
+
+    function test_RestBookHarnessRejectsExhaustedNonce() public {
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+
+        vm.expectRevert(bytes4(keccak256("NonceExhausted()")));
+        engine.restBookForTest(id, 1, 10, 5, true, alice);
     }
 
     function _fill(uint256 epoch, bytes32 order, bool isBid, bool noRest, bool fillOrKill)

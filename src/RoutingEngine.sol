@@ -188,20 +188,18 @@ contract RoutingEngine is RadixMatchingEngine {
             token1Delta = -int256(quoteAmount);
 
             if (remaining != 0 && !params.noRest) {
-                uint256 restRoutedNonceAndFlags = routedNonce == 0 ? routedNonceAndFlags : routedBook.nonceAndFlags;
-                (bytes32 restBookId, Book storage restBook, uint256 restNonceAndFlags) = _restableBook(
+                restingOrder = _restRemaining(
                     params.token0,
                     params.token1,
                     params.epoch,
                     routedBookId,
                     routedBook,
-                    restRoutedNonceAndFlags,
-                    routedNonce == 0
+                    routedNonceAndFlags,
+                    routedNonce == 0,
+                    limitPrice,
+                    remaining,
+                    true
                 );
-                uint40 nextNonceAfter;
-                (restingOrder, nextNonceAfter) =
-                    _restBook(restBookId, restBook, restNonceAndFlags, limitPrice, remaining, true, msg.sender);
-                _rotateIfExhausted(params.token0, params.token1, nextNonceAfter);
                 uint256 collateral = _quoteValue(limitPrice, remaining);
                 // forge-lint: disable-next-line(unsafe-typecast)
                 token1Delta -= int256(collateral);
@@ -213,23 +211,43 @@ contract RoutingEngine is RadixMatchingEngine {
             token1Delta = int256(quoteAmount);
 
             if (remaining != 0 && !params.noRest) {
-                uint256 restRoutedNonceAndFlags = routedNonce == 0 ? routedNonceAndFlags : routedBook.nonceAndFlags;
-                (bytes32 restBookId, Book storage restBook, uint256 restNonceAndFlags) = _restableBook(
+                restingOrder = _restRemaining(
                     params.token0,
                     params.token1,
                     params.epoch,
                     routedBookId,
                     routedBook,
-                    restRoutedNonceAndFlags,
-                    routedNonce == 0
+                    routedNonceAndFlags,
+                    routedNonce == 0,
+                    limitPrice,
+                    remaining,
+                    false
                 );
-                uint40 nextNonceAfter;
-                (restingOrder, nextNonceAfter) =
-                    _restBook(restBookId, restBook, restNonceAndFlags, limitPrice, remaining, false, msg.sender);
-                _rotateIfExhausted(params.token0, params.token1, nextNonceAfter);
                 token0Delta -= int256(uint256(remaining));
             }
         }
+    }
+
+    function _restRemaining(
+        address token0,
+        address token1,
+        uint256 routedEpoch,
+        bytes32 routedBookId,
+        Book storage routedBook,
+        uint256 routedNonceAndFlags,
+        bool routedBookWasEmpty,
+        uint24 limitPrice,
+        uint192 remaining,
+        bool isBid
+    ) private returns (bytes32 restingOrder) {
+        if (!routedBookWasEmpty) routedNonceAndFlags = routedBook.nonceAndFlags;
+        (bytes32 restBookId, Book storage restBook, uint256 restNonceAndFlags) = _restableBook(
+            token0, token1, routedEpoch, routedBookId, routedBook, routedNonceAndFlags, routedBookWasEmpty
+        );
+        uint40 nextNonceAfter;
+        (restingOrder, nextNonceAfter) =
+            _restBook(restBookId, restBook, restNonceAndFlags, limitPrice, remaining, isBid, msg.sender);
+        _rotateIfExhausted(token0, token1, nextNonceAfter);
     }
 
     function _restableBook(
@@ -255,6 +273,7 @@ contract RoutingEngine is RadixMatchingEngine {
             nonceAndFlags = book.nonceAndFlags;
         }
 
+        // forge-lint: disable-next-line(unsafe-typecast)
         uint40 nonce = uint40(nonceAndFlags);
         if (nonce == 0) {
             nonceAndFlags = uint256(type(uint40).max);
