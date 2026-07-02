@@ -256,7 +256,7 @@ abstract contract RadixMatchingEngine {
         pure
         returns (uint256 baseAmount, uint256 quoteAmount)
     {
-        uint192 remainingQuantity;
+        uint192 remainingQuantity = 0;
         if (removed != bytes32(0)) {
             remainingQuantity = _quantity(removed);
         }
