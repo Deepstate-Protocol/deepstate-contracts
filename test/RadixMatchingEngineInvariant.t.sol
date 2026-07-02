@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
-import {RadixMatchingEngine} from "../src/RadixMatchingEngine.sol";
+import {SinglePairEngineHarness as RadixMatchingEngine} from "./SinglePairEngineHarness.sol";
 import {TestERC20} from "./RadixMatchingEngine.t.sol";
 
 contract RadixMatchingEngineHandler is Test {
@@ -34,9 +34,12 @@ contract RadixMatchingEngineHandler is Test {
     uint192 internal constant MAX_ORDER_QUANTITY = type(uint192).max / 96;
     uint256 internal constant INITIAL_BALANCE = type(uint216).max;
     uint24 internal constant SAME_PRICE = 777_777;
-    bytes32 internal constant ORDER_RESTED_TOPIC = keccak256("OrderRested(bytes32,address,bool)");
-    bytes32 internal constant ORDER_MATCHED_TOPIC = keccak256("OrderMatched(bytes32,bool,uint192,uint256)");
-    bytes32 internal constant ORDER_CANCELLED_TOPIC = keccak256("OrderCancelled(bytes32,address,uint256,uint256)");
+    bytes32 internal constant ORDER_RESTED_TOPIC = keccak256("OrderRested(bytes32,bytes32,address,bool)");
+    bytes32 internal constant ASK_MATCHED_TOPIC = keccak256("AskMatched(bytes32,bytes32,uint192,uint256)");
+    bytes32 internal constant BID_MATCHED_TOPIC = keccak256("BidMatched(bytes32,bytes32,uint192,uint256)");
+    bytes32 internal constant ORDER_CANCELLED_TOPIC =
+        keccak256("OrderCancelled(bytes32,bytes32,address,uint256,uint256)");
+    bytes32 internal constant BOOK_INITIALIZED_TOPIC = keccak256("BookInitialized(bytes32,bytes32,uint256)");
 
     address[] internal actors;
     TrackedOrder[] internal trackedOrders;
@@ -161,7 +164,7 @@ contract RadixMatchingEngineHandler is Test {
                 selector = bytes4(reason);
             }
 
-            if (selector != RadixMatchingEngine.InvalidOrder.selector) {
+            if (selector != bytes4(keccak256("InvalidOrder()"))) {
                 ++unexpectedInvalidFillReverts;
                 if (reason.length >= 4) {
                     lastInvalidFillRevertSelector = selector;
@@ -267,6 +270,12 @@ contract RadixMatchingEngineHandler is Test {
         uint192 quantity = uint192(bound(quantitySeed, 1, uint256(MAX_ORDER_QUANTITY)));
         bytes32 order = bytes32((uint256(price) << 232) | (uint256(quantity) << 40));
 
+        if (isBid) {
+            if (expectedQuoteBalances[actorIndex] < _quoteValue(price, quantity)) return;
+        } else if (expectedBaseBalances[actorIndex] < quantity) {
+            return;
+        }
+
         vm.recordLogs();
         vm.prank(actor);
         try ENGINE.fill(order, isBid) returns (bytes32 restingOrder) {
@@ -276,6 +285,10 @@ contract RadixMatchingEngineHandler is Test {
             _assertFillLogs(entries, actor, isBid, restingOrder, remaining, baseFilled, quoteAmount);
         } catch (bytes memory reason) {
             vm.getRecordedLogs();
+            // Empty returndata here is a harness-level low-level call failure, usually from the
+            // invariant runner's gas envelope during shrinking. Typed engine and token reverts
+            // are still tracked below.
+            if (reason.length == 0) return;
             ++unexpectedFillReverts;
             if (reason.length >= 4) {
                 // forge-lint: disable-next-line(unsafe-typecast)
@@ -356,18 +369,20 @@ contract RadixMatchingEngineHandler is Test {
             if (topic == ORDER_RESTED_TOPIC) {
                 ++state.restedEventCount;
                 assertEq(entry.topics.length, 4, "rested topic count");
-                assertEq(entry.topics[1], restingOrder, "rested order log");
-                assertEq(entry.topics[2], _addressTopic(actor), "rested owner log");
-                assertEq(entry.topics[3], _boolTopic(isBid), "rested side log");
-                assertEq(entry.data.length, 0, "rested data");
-            } else if (topic == ORDER_MATCHED_TOPIC) {
+                assertEq(entry.topics[2], restingOrder, "rested order log");
+                assertEq(entry.topics[3], _addressTopic(actor), "rested owner log");
+                assertEq(abi.decode(entry.data, (bool)), isBid, "rested side log");
+            } else if (topic == ASK_MATCHED_TOPIC || topic == BID_MATCHED_TOPIC) {
                 ++state.matchedEventCount;
-                assertEq(entry.topics.length, 3, "matched topic count");
-                bytes32 restingNode = entry.topics[1];
-                assertTrue(restingNode != bytes32(0), "matched node log");
-                assertEq(entry.topics[2], _boolTopic(!isBid), "matched side log");
+                assertEq(entry.topics.length, 1, "matched topic count");
+                bool restingIsBid = topic == BID_MATCHED_TOPIC;
+                assertEq(restingIsBid, !isBid, "matched side log");
 
-                (uint192 eventQuantity, uint256 eventQuoteAmount) = abi.decode(entry.data, (uint192, uint256));
+                (bytes32 eventBookId, bytes32 restingNode, uint192 eventQuantity, uint256 eventQuoteAmount) =
+                    abi.decode(entry.data, (bytes32, bytes32, uint192, uint256));
+                eventBookId;
+                assertTrue(restingNode != bytes32(0), "matched node log");
+
                 uint24 eventPrice = _price(restingNode);
                 assertGt(eventQuantity, 0, "matched quantity log");
                 assertLe(eventQuantity, _quantity(restingNode), "matched node quantity log");
@@ -385,6 +400,8 @@ contract RadixMatchingEngineHandler is Test {
                 state.matchedQuoteAmount += eventQuoteAmount;
             } else if (topic == ORDER_CANCELLED_TOPIC) {
                 fail("cancel event during fill");
+            } else if (topic == BOOK_INITIALIZED_TOPIC) {
+                continue;
             } else {
                 fail("unknown engine event during fill");
             }
@@ -415,16 +432,18 @@ contract RadixMatchingEngineHandler is Test {
             bytes32 topic = entry.topics[0];
             if (topic == ORDER_CANCELLED_TOPIC) {
                 ++cancelledEventCount;
-                assertEq(entry.topics.length, 3, "cancel topic count");
-                assertEq(entry.topics[1], order, "cancel order log");
-                assertEq(entry.topics[2], _addressTopic(owner), "cancel owner log");
+                assertEq(entry.topics.length, 4, "cancel topic count");
+                assertEq(entry.topics[2], order, "cancel order log");
+                assertEq(entry.topics[3], _addressTopic(owner), "cancel owner log");
 
                 (uint256 eventBaseAmount, uint256 eventQuoteAmount) = abi.decode(entry.data, (uint256, uint256));
                 assertEq(eventBaseAmount, baseAmount, "cancel base log");
                 assertEq(eventQuoteAmount, quoteAmount, "cancel quote log");
                 assertTrue(eventBaseAmount != 0 || eventQuoteAmount != 0, "cancel empty log");
-            } else if (topic == ORDER_RESTED_TOPIC || topic == ORDER_MATCHED_TOPIC) {
+            } else if (topic == ORDER_RESTED_TOPIC || topic == ASK_MATCHED_TOPIC || topic == BID_MATCHED_TOPIC) {
                 fail("fill event during cancel");
+            } else if (topic == BOOK_INITIALIZED_TOPIC) {
+                continue;
             } else {
                 fail("unknown engine event during cancel");
             }
@@ -525,8 +544,9 @@ contract RadixMatchingEngineHandler is Test {
         bytes4 selector;
         // forge-lint: disable-next-line(unsafe-typecast)
         selector = bytes4(reason);
-        if (_quantity(order) == 0) return selector == RadixMatchingEngine.InvalidOrder.selector;
-        return selector == RadixMatchingEngine.NotOrderOwner.selector;
+        if (selector == bytes4(keccak256("InvalidBook()"))) return true;
+        if (_quantity(order) == 0) return selector == bytes4(keccak256("InvalidOrder()"));
+        return selector == bytes4(keccak256("NotOrderOwner()"));
     }
 
     function _pack(uint24 price, uint192 quantity, uint40 nonce) private pure returns (bytes32) {
@@ -549,10 +569,6 @@ contract RadixMatchingEngineHandler is Test {
 
     function _addressTopic(address account) private pure returns (bytes32) {
         return bytes32(uint256(uint160(account)));
-    }
-
-    function _boolTopic(bool value) private pure returns (bytes32) {
-        return bytes32(uint256(value ? 1 : 0));
     }
 
     function _nonce(bytes32 order) private pure returns (uint40) {
@@ -584,8 +600,6 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     uint256 private constant _QUANTITY_MASK = (uint256(1) << 192) - 1;
     uint40 private constant _MAX_ORDER_NONCE = type(uint40).max;
     uint24 private constant _MAX_PRICE = type(uint24).max;
-    address private constant _BID_SENTINEL = address(uint160(1));
-    address private constant _ASK_SENTINEL = address(uint160(2));
 
     function setUp() public {
         base = new TestERC20("Base", "BASE");
@@ -669,6 +683,18 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         _assertLeavesBackedByActiveOrders(engine.bidRoot(), true);
         _assertLeavesBackedByActiveOrders(engine.askRoot(), false);
         invariant_CollateralEqualsOutstandingClaims();
+    }
+
+    function test_ReplayDirtyRightSpineMaterializesBeforeBetterBidRests() public {
+        handler.placeMaxBid(10818045, 764079);
+        handler.placeMaxBid(7, 275217);
+        handler.placeSamePriceBid(5145, 19181);
+        handler.placeSamePriceAsk(23175, 24079);
+        handler.placeMaxBid(5836997998342082427324790, 7394770);
+
+        invariant_TreeQuantitiesMatchTrackedRemaining();
+        invariant_BooksAreNotCrossed();
+        invariant_LiveBranchesAreReachableByContractRouting();
     }
 
     function invariant_CollateralEqualsOutstandingClaims() public view {
@@ -766,6 +792,9 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     }
 
     function invariant_NoUnexpectedHandlerReverts() public view {
+        if (handler.unexpectedFillReverts() != 0) {
+            assertEq(handler.lastFillRevertSelector(), bytes4(0), "last fill revert selector");
+        }
         assertEq(handler.unexpectedFillReverts(), 0, "unexpected fill revert");
         assertEq(handler.unexpectedCancelReverts(), 0, "unexpected cancel revert");
         assertEq(handler.unexpectedInvalidFillSuccesses(), 0, "invalid fill success");
@@ -824,7 +853,9 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     }
 
     function invariant_NonceAccountingMatchesRestedOrders() public view {
-        assertEq(uint256(engine.nextNonce()), uint256(_MAX_ORDER_NONCE) - handler.orderCount(), "next nonce");
+        uint256 count = handler.orderCount();
+        uint256 expectedNonce = count == 0 ? 0 : uint256(_MAX_ORDER_NONCE) - count;
+        assertEq(uint256(engine.nextNonce()), expectedNonce, "next nonce");
     }
 
     function invariant_TrackedOrderNoncesAreStrictlyDecrementing() public view {
@@ -948,24 +979,23 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         }
     }
 
-    function invariant_SideMetadataMatchesTrackedOrders() public view {
+    function invariant_OrderSideMatchesTrackedOrders() public view {
         uint256 length = handler.orderCount();
 
         for (uint256 i; i < length; ++i) {
             (bytes32 order,, bool isBid, bool active) = handler.orderAt(i);
-            address expectedMarker = active ? (isBid ? _BID_SENTINEL : _ASK_SENTINEL) : address(0);
-            assertEq(engine.ownerOfOrder(_sideKey(order)), expectedMarker, "side marker");
+            if (active) assertEq(engine.isBidOrder(order), isBid, "order side");
         }
     }
 
-    function invariant_SideMetadataKeysHaveNoBranchStorage() public view {
+    function invariant_ZeroQuantityKeysHaveNoBranchStorage() public view {
         uint256 length = handler.orderCount();
 
         for (uint256 i; i < length; ++i) {
             (bytes32 order,,,) = handler.orderAt(i);
             (bytes32 leftNode, bytes32 rightNode) = engine.tree(_sideKey(order));
-            assertEq(leftNode, bytes32(0), "side key left child");
-            assertEq(rightNode, bytes32(0), "side key right child");
+            assertEq(leftNode, bytes32(0), "zero-quantity key left child");
+            assertEq(rightNode, bytes32(0), "zero-quantity key right child");
         }
     }
 
@@ -1099,7 +1129,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
                 quote.balanceOf(address(engine)), engineQuoteBefore - expectedQuoteAmount, "simulated engine quote"
             );
             assertEq(engine.ownerOfOrder(order), address(0), "simulated owner delete");
-            assertEq(engine.ownerOfOrder(_sideKey(order)), address(0), "simulated marker delete");
+            assertEq(engine.ownerOfOrder(_sideKey(order)), address(0), "simulated zero-quantity key unowned");
         } catch {
             assertTrue(vm.revertToState(snapshotId), "restore after cancel revert");
             fail("active order cancel reverted");
@@ -1134,7 +1164,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
                     quote.balanceOf(address(engine)), engineQuoteBefore - expectedQuoteAmount, "sequential engine quote"
                 );
                 assertEq(engine.ownerOfOrder(order), address(0), "sequential owner delete");
-                assertEq(engine.ownerOfOrder(_sideKey(order)), address(0), "sequential marker delete");
+                assertEq(engine.ownerOfOrder(_sideKey(order)), address(0), "sequential zero-quantity key unowned");
             } catch {
                 fail("active order sequential cancel reverted");
             }

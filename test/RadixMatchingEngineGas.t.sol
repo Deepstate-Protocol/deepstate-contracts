@@ -2,24 +2,33 @@
 pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {RadixMatchingEngine} from "../src/RadixMatchingEngine.sol";
+import {RoutingEngine} from "../src/RoutingEngine.sol";
 import {TestERC20} from "./RadixMatchingEngine.t.sol";
 
 contract RadixMatchingEngineGasTest is Test {
     uint40 internal constant MAX_ORDER_NONCE = type(uint40).max;
+    uint256 internal constant QUANTITY_SHIFT = 40;
+    uint256 internal constant QUANTITY_MASK = (uint256(1) << 192) - 1;
 
     TestERC20 internal base;
     TestERC20 internal quote;
-    RadixMatchingEngine internal engine;
+    RoutingEngine internal engine;
 
     address internal alice = address(0xA11CE);
     address internal bob = address(0xB0B);
     address internal carol = address(0xCA201);
 
     function setUp() public {
-        base = new TestERC20("Base", "BASE");
-        quote = new TestERC20("Quote", "QUOTE");
-        engine = new RadixMatchingEngine(address(base), address(quote));
+        TestERC20 tokenA = new TestERC20("Base", "BASE");
+        TestERC20 tokenB = new TestERC20("Quote", "QUOTE");
+        if (address(tokenA) < address(tokenB)) {
+            base = tokenA;
+            quote = tokenB;
+        } else {
+            base = tokenB;
+            quote = tokenA;
+        }
+        engine = new RoutingEngine();
 
         _fundAndApprove(alice);
         _fundAndApprove(bob);
@@ -30,11 +39,11 @@ contract RadixMatchingEngineGasTest is Test {
         vm.pauseGasMetering();
         vm.prank(alice);
         vm.resumeGasMetering();
-        bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
+        bytes32 restingBid = _fill(_order(100, 5, 0), true);
         vm.pauseGasMetering();
 
         assertEq(restingBid, _order(100, 5, type(uint40).max));
-        assertEq(engine.bidRoot(), restingBid);
+        assertEq(_bidRoot(), restingBid);
         vm.resumeGasMetering();
     }
 
@@ -42,91 +51,91 @@ contract RadixMatchingEngineGasTest is Test {
         vm.pauseGasMetering();
         vm.prank(alice);
         vm.resumeGasMetering();
-        bytes32 restingAsk = engine.fill(_order(100, 5, 0), false);
+        bytes32 restingAsk = _fill(_order(100, 5, 0), false);
         vm.pauseGasMetering();
 
         assertEq(restingAsk, _order(100, 5, type(uint40).max));
-        assertEq(engine.askRoot(), restingAsk);
+        assertEq(_askRoot(), restingAsk);
         vm.resumeGasMetering();
     }
 
     function testGas_FillBidFullyMatchesSingleAsk() public {
         vm.pauseGasMetering();
         vm.prank(bob);
-        bytes32 restingAsk = engine.fill(_order(90, 5, 0), false);
+        bytes32 restingAsk = _fill(_order(90, 5, 0), false);
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
+        bytes32 restingBid = _fill(_order(100, 5, 0), true);
         vm.pauseGasMetering();
 
         assertEq(restingBid, bytes32(0));
-        assertEq(engine.askRoot(), bytes32(0));
-        assertEq(engine.ownerOfOrder(restingAsk), bob);
+        assertEq(_askRoot(), bytes32(0));
+        assertEq(_ownerOfOrder(restingAsk), bob);
         vm.resumeGasMetering();
     }
 
     function testGas_FillAskFullyMatchesSingleBid() public {
         vm.pauseGasMetering();
         vm.prank(bob);
-        bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
+        bytes32 restingBid = _fill(_order(100, 5, 0), true);
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        bytes32 restingAsk = engine.fill(_order(90, 5, 0), false);
+        bytes32 restingAsk = _fill(_order(90, 5, 0), false);
         vm.pauseGasMetering();
 
         assertEq(restingAsk, bytes32(0));
-        assertEq(engine.bidRoot(), bytes32(0));
-        assertEq(engine.ownerOfOrder(restingBid), bob);
+        assertEq(_bidRoot(), bytes32(0));
+        assertEq(_ownerOfOrder(restingBid), bob);
         vm.resumeGasMetering();
     }
 
     function testGas_FillBidPartiallyMatchesSingleAsk() public {
         vm.pauseGasMetering();
         vm.prank(bob);
-        bytes32 restingAsk = engine.fill(_order(90, 5, 0), false);
+        bytes32 restingAsk = _fill(_order(90, 5, 0), false);
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
+        bytes32 restingBid = _fill(_order(100, 2, 0), true);
         vm.pauseGasMetering();
 
         assertEq(restingBid, bytes32(0));
-        assertEq(engine.askRoot(), _order(90, 3, type(uint40).max));
-        assertEq(engine.ownerOfOrder(restingAsk), bob);
+        assertEq(_askRoot(), _order(90, 3, type(uint40).max));
+        assertEq(_ownerOfOrder(restingAsk), bob);
         vm.resumeGasMetering();
     }
 
     function testGas_FillAskPartiallyMatchesSingleBid() public {
         vm.pauseGasMetering();
         vm.prank(bob);
-        bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
+        bytes32 restingBid = _fill(_order(100, 5, 0), true);
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
+        bytes32 restingAsk = _fill(_order(90, 2, 0), false);
         vm.pauseGasMetering();
 
         assertEq(restingAsk, bytes32(0));
-        assertEq(engine.bidRoot(), _order(100, 3, type(uint40).max));
-        assertEq(engine.ownerOfOrder(restingBid), bob);
+        assertEq(_bidRoot(), _order(100, 3, type(uint40).max));
+        assertEq(_ownerOfOrder(restingBid), bob);
         vm.resumeGasMetering();
     }
 
     function testGas_FillBidConsumesAskAndRestsRemainder() public {
         vm.pauseGasMetering();
         vm.prank(bob);
-        engine.fill(_order(90, 3, 0), false);
+        _fill(_order(90, 3, 0), false);
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
+        bytes32 restingBid = _fill(_order(100, 5, 0), true);
         vm.pauseGasMetering();
 
         assertEq(restingBid, _order(100, 2, type(uint40).max - 1));
-        assertEq(engine.bidRoot(), restingBid);
-        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(_bidRoot(), restingBid);
+        assertEq(_askRoot(), bytes32(0));
         vm.resumeGasMetering();
     }
 
@@ -135,18 +144,18 @@ contract RadixMatchingEngineGasTest is Test {
         bytes32 firstAsk;
         for (uint256 i; i < 16; ++i) {
             vm.prank(bob);
-            bytes32 restingAsk = engine.fill(_order(90, 1, 0), false);
+            bytes32 restingAsk = _fill(_order(90, 1, 0), false);
             if (i == 0) firstAsk = restingAsk;
         }
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        bytes32 restingBid = engine.fill(_order(90, 16, 0), true);
+        bytes32 restingBid = _fill(_order(90, 16, 0), true);
         vm.pauseGasMetering();
 
         assertEq(restingBid, bytes32(0));
-        assertEq(engine.askRoot(), bytes32(0));
-        assertEq(engine.ownerOfOrder(firstAsk), bob);
+        assertEq(_askRoot(), bytes32(0));
+        assertEq(_ownerOfOrder(firstAsk), bob);
         vm.resumeGasMetering();
     }
 
@@ -155,21 +164,21 @@ contract RadixMatchingEngineGasTest is Test {
         bytes32 firstAsk;
         for (uint256 i; i < 16; ++i) {
             vm.prank(bob);
-            bytes32 restingAsk = engine.fill(_order(90, 1, 0), false);
+            bytes32 restingAsk = _fill(_order(90, 1, 0), false);
             if (i == 0) firstAsk = restingAsk;
         }
 
         vm.prank(alice);
-        engine.fill(_order(90, 1, 0), true);
+        _fill(_order(90, 1, 0), true);
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        bytes32 restingBid = engine.fill(_order(90, 15, 0), true);
+        bytes32 restingBid = _fill(_order(90, 15, 0), true);
         vm.pauseGasMetering();
 
         assertEq(restingBid, bytes32(0));
-        assertEq(engine.askRoot(), bytes32(0));
-        assertEq(engine.ownerOfOrder(firstAsk), bob);
+        assertEq(_askRoot(), bytes32(0));
+        assertEq(_ownerOfOrder(firstAsk), bob);
         vm.resumeGasMetering();
     }
 
@@ -178,21 +187,21 @@ contract RadixMatchingEngineGasTest is Test {
         bytes32 firstBid;
         for (uint256 i; i < 16; ++i) {
             vm.prank(bob);
-            bytes32 restingBid = engine.fill(_order(90, 1, 0), true);
+            bytes32 restingBid = _fill(_order(90, 1, 0), true);
             if (i == 0) firstBid = restingBid;
         }
 
         vm.prank(alice);
-        engine.fill(_order(90, 1, 0), false);
+        _fill(_order(90, 1, 0), false);
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        bytes32 restingAsk = engine.fill(_order(90, 15, 0), false);
+        bytes32 restingAsk = _fill(_order(90, 15, 0), false);
         vm.pauseGasMetering();
 
         assertEq(restingAsk, bytes32(0));
-        assertEq(engine.bidRoot(), bytes32(0));
-        assertEq(engine.ownerOfOrder(firstBid), bob);
+        assertEq(_bidRoot(), bytes32(0));
+        assertEq(_ownerOfOrder(firstBid), bob);
         vm.resumeGasMetering();
     }
 
@@ -205,11 +214,11 @@ contract RadixMatchingEngineGasTest is Test {
 
         vm.prank(seller);
         vm.resumeGasMetering();
-        bytes32 restingAsk = engine.fill(_order(1, 65, 0), false);
+        bytes32 restingAsk = _fill(_order(1, 65, 0), false);
         vm.pauseGasMetering();
 
         assertEq(restingAsk, bytes32(0));
-        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(_bidRoot(), bytes32(0));
         vm.resumeGasMetering();
     }
 
@@ -223,41 +232,45 @@ contract RadixMatchingEngineGasTest is Test {
 
         vm.prank(buyer);
         vm.resumeGasMetering();
-        bytes32 restingBid = engine.fill(_order(type(uint24).max, 64, 0), true);
+        bytes32 restingBid = _fill(_order(type(uint24).max, 64, 0), true);
         vm.pauseGasMetering();
 
         assertEq(restingBid, bytes32(0));
-        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(_askRoot(), bytes32(0));
         vm.resumeGasMetering();
     }
 
     function testGas_CancelFullDepthBidCombRightmost() public {
         vm.pauseGasMetering();
         bytes32 targetBid = _buildFullDepthBidNonceComb();
+        _assertRightSpine(_bidRoot(), targetBid, 64);
+        assertEq(_subtreeQuantity(_bidRoot()), 65);
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(targetBid);
+        (uint256 baseAmount, uint256 quoteAmount) = _cancel(targetBid);
         vm.pauseGasMetering();
 
         assertEq(baseAmount, 0);
         assertEq(quoteAmount, type(uint24).max);
-        assertEq(engine.ownerOfOrder(targetBid), address(0));
+        assertEq(_ownerOfOrder(targetBid), address(0));
         vm.resumeGasMetering();
     }
 
     function testGas_CancelMaxValidDepthAskCombRightmost() public {
         vm.pauseGasMetering();
         bytes32 targetAsk = _buildMaxValidDepthAskNonceComb();
+        _assertRightSpine(_askRoot(), targetAsk, 63);
+        assertEq(_subtreeQuantity(_askRoot()), 64);
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(targetAsk);
+        (uint256 baseAmount, uint256 quoteAmount) = _cancel(targetAsk);
         vm.pauseGasMetering();
 
         assertEq(baseAmount, 1);
         assertEq(quoteAmount, 0);
-        assertEq(engine.ownerOfOrder(targetAsk), address(0));
+        assertEq(_ownerOfOrder(targetAsk), address(0));
         vm.resumeGasMetering();
     }
 
@@ -266,86 +279,86 @@ contract RadixMatchingEngineGasTest is Test {
         _buildSamePriceBidNonceComb(1);
 
         vm.prank(bob);
-        bytes32 targetAsk = engine.fill(_order(2, 1, 0), false);
+        bytes32 targetAsk = _fill(_order(2, 1, 0), false);
 
         vm.prank(bob);
         vm.resumeGasMetering();
-        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(targetAsk);
+        (uint256 baseAmount, uint256 quoteAmount) = _cancel(targetAsk);
         vm.pauseGasMetering();
 
         assertEq(baseAmount, 1);
         assertEq(quoteAmount, 0);
-        assertEq(engine.ownerOfOrder(targetAsk), address(0));
+        assertEq(_ownerOfOrder(targetAsk), address(0));
         vm.resumeGasMetering();
     }
 
     function testGas_CancelUnfilledBid() public {
         vm.pauseGasMetering();
         vm.prank(alice);
-        bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
+        bytes32 restingBid = _fill(_order(100, 5, 0), true);
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(restingBid);
+        (uint256 baseAmount, uint256 quoteAmount) = _cancel(restingBid);
         vm.pauseGasMetering();
 
         assertEq(baseAmount, 0);
         assertEq(quoteAmount, 500);
-        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(_bidRoot(), bytes32(0));
         vm.resumeGasMetering();
     }
 
     function testGas_CancelUnfilledAsk() public {
         vm.pauseGasMetering();
         vm.prank(alice);
-        bytes32 restingAsk = engine.fill(_order(100, 5, 0), false);
+        bytes32 restingAsk = _fill(_order(100, 5, 0), false);
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(restingAsk);
+        (uint256 baseAmount, uint256 quoteAmount) = _cancel(restingAsk);
         vm.pauseGasMetering();
 
         assertEq(baseAmount, 5);
         assertEq(quoteAmount, 0);
-        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(_askRoot(), bytes32(0));
         vm.resumeGasMetering();
     }
 
     function testGas_CancelFilledBidClaim() public {
         vm.pauseGasMetering();
         vm.prank(alice);
-        bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
+        bytes32 restingBid = _fill(_order(100, 5, 0), true);
 
         vm.prank(bob);
-        engine.fill(_order(90, 5, 0), false);
+        _fill(_order(90, 5, 0), false);
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(restingBid);
+        (uint256 baseAmount, uint256 quoteAmount) = _cancel(restingBid);
         vm.pauseGasMetering();
 
         assertEq(baseAmount, 5);
         assertEq(quoteAmount, 0);
-        assertEq(engine.ownerOfOrder(restingBid), address(0));
+        assertEq(_ownerOfOrder(restingBid), address(0));
         vm.resumeGasMetering();
     }
 
     function testGas_CancelPartialBid() public {
         vm.pauseGasMetering();
         vm.prank(alice);
-        bytes32 restingBid = engine.fill(_order(100, 5, 0), true);
+        bytes32 restingBid = _fill(_order(100, 5, 0), true);
 
         vm.prank(bob);
-        engine.fill(_order(90, 2, 0), false);
+        _fill(_order(90, 2, 0), false);
 
         vm.prank(alice);
         vm.resumeGasMetering();
-        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(restingBid);
+        (uint256 baseAmount, uint256 quoteAmount) = _cancel(restingBid);
         vm.pauseGasMetering();
 
         assertEq(baseAmount, 2);
         assertEq(quoteAmount, 300);
-        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(_bidRoot(), bytes32(0));
         vm.resumeGasMetering();
     }
 
@@ -359,13 +372,47 @@ contract RadixMatchingEngineGasTest is Test {
         vm.stopPrank();
     }
 
+    function _fill(bytes32 order, bool isBid) internal returns (bytes32 restingOrder) {
+        restingOrder = engine.fill(
+            RoutingEngine.FillParams({
+                token0: address(base),
+                token1: address(quote),
+                epoch: 0,
+                order: order,
+                isBid: isBid,
+                noRest: false,
+                fillOrKill: false
+            })
+        );
+    }
+
+    function _cancel(bytes32 order) internal returns (uint256 baseAmount, uint256 quoteAmount) {
+        return engine.cancel(address(base), address(quote), 0, order);
+    }
+
+    function _bidRoot() internal view returns (bytes32 bidRoot) {
+        (, bidRoot) = engine.roots(address(base), address(quote), 0);
+    }
+
+    function _askRoot() internal view returns (bytes32 askRoot) {
+        (askRoot,) = engine.roots(address(base), address(quote), 0);
+    }
+
+    function _ownerOfOrder(bytes32 order) internal view returns (address owner) {
+        owner = engine.ownerOfOrder(engine.orderId(_bookId(), order));
+    }
+
+    function _tree(bytes32 node) internal view returns (bytes32 leftNode, bytes32 rightNode) {
+        return engine.tree(_bookId(), node);
+    }
+
     function _buildFullDepthBidNonceComb() internal returns (bytes32 targetOrder) {
         uint64 targetKey = type(uint64).max;
         quote.mint(alice, 2_000_000_000);
 
         vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
         vm.prank(alice);
-        targetOrder = engine.fill(_order(type(uint24).max, 1, 0), true);
+        targetOrder = _fill(_order(type(uint24).max, 1, 0), true);
 
         for (uint256 depth; depth < 64; ++depth) {
             uint64 siblingKey = targetKey ^ uint64(uint256(1) << (63 - depth));
@@ -376,7 +423,7 @@ contract RadixMatchingEngineGasTest is Test {
 
             vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
             vm.prank(alice);
-            engine.fill(_order(price, 1, 0), true);
+            _fill(_order(price, 1, 0), true);
         }
     }
 
@@ -385,7 +432,7 @@ contract RadixMatchingEngineGasTest is Test {
 
         vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
         vm.prank(alice);
-        targetOrder = engine.fill(_order(1, 1, 0), false);
+        targetOrder = _fill(_order(1, 1, 0), false);
 
         uint256 orderIndex = 1;
         for (uint256 depth; depth < 23; ++depth) {
@@ -397,7 +444,7 @@ contract RadixMatchingEngineGasTest is Test {
 
             vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
             vm.prank(alice);
-            engine.fill(_order(price, 1, 0), false);
+            _fill(_order(price, 1, 0), false);
 
             unchecked {
                 ++orderIndex;
@@ -412,7 +459,7 @@ contract RadixMatchingEngineGasTest is Test {
 
             vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
             vm.prank(alice);
-            engine.fill(_order(1, 1, 0), false);
+            _fill(_order(1, 1, 0), false);
         }
     }
 
@@ -422,7 +469,7 @@ contract RadixMatchingEngineGasTest is Test {
 
         vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
         vm.prank(alice);
-        targetOrder = engine.fill(_order(price, 1, 0), true);
+        targetOrder = _fill(_order(price, 1, 0), true);
 
         for (uint256 depth = 24; depth < 64; ++depth) {
             uint64 siblingKey = targetKey ^ uint64(uint256(1) << (63 - depth));
@@ -431,7 +478,7 @@ contract RadixMatchingEngineGasTest is Test {
 
             vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
             vm.prank(alice);
-            engine.fill(_order(price, 1, 0), true);
+            _fill(_order(price, 1, 0), true);
         }
     }
 
@@ -439,7 +486,39 @@ contract RadixMatchingEngineGasTest is Test {
         return bytes32((uint256(price) << 232) | (uint256(quantity) << 40) | uint256(nonce));
     }
 
-    function _nextNonceSlot() internal pure returns (bytes32) {
-        return bytes32(uint256(4));
+    function _quantity(bytes32 order) internal pure returns (uint192) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint192((uint256(order) >> QUANTITY_SHIFT) & QUANTITY_MASK);
+    }
+
+    function _assertRightSpine(bytes32 root, bytes32 expectedLeaf, uint256 expectedBranchCount) internal view {
+        bytes32 node = root;
+        for (uint256 i; i < expectedBranchCount;) {
+            (bytes32 leftNode, bytes32 rightNode) = _tree(node);
+            assertTrue(leftNode != bytes32(0));
+            assertTrue(rightNode != bytes32(0));
+            node = rightNode;
+            unchecked {
+                ++i;
+            }
+        }
+        assertEq(node, expectedLeaf);
+    }
+
+    function _subtreeQuantity(bytes32 node) internal view returns (uint192 quantity) {
+        if (node == bytes32(0)) return 0;
+
+        (bytes32 leftNode, bytes32 rightNode) = _tree(node);
+        if (leftNode == bytes32(0)) return _quantity(node);
+
+        return _subtreeQuantity(leftNode) + _subtreeQuantity(rightNode);
+    }
+
+    function _bookId() internal view returns (bytes32) {
+        return engine.bookId(address(base), address(quote), 0);
+    }
+
+    function _nextNonceSlot() internal view returns (bytes32) {
+        return keccak256(abi.encode(_bookId(), uint256(0)));
     }
 }
