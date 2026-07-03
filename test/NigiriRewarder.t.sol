@@ -105,6 +105,58 @@ contract NigiriRewarderTest is Test {
         assertEq(rewarder.balances(id, address(token0), MAX_ORDER_NONCE), 0);
     }
 
+    function test_SettersAndValidationBranches() public {
+        vm.expectRevert(bytes4(keccak256("InvalidEngine()")));
+        new NigiriRewarder(address(this), address(0), address(rewardToken));
+
+        vm.expectRevert(bytes4(keccak256("InvalidRewardToken()")));
+        new NigiriRewarder(address(this), address(engine), address(0));
+
+        RoutingEngine replacementEngine = new RoutingEngine();
+        RewardTestERC20 replacementRewardToken = new RewardTestERC20("Reward2", "RWD2");
+
+        rewarder.setEngine(address(replacementEngine));
+        assertEq(rewarder.engine(), address(replacementEngine));
+
+        rewarder.setRewardToken(address(replacementRewardToken));
+        assertEq(rewarder.rewardToken(), address(replacementRewardToken));
+
+        vm.expectRevert(bytes4(keccak256("InvalidEngine()")));
+        rewarder.setEngine(address(0));
+
+        vm.expectRevert(bytes4(keccak256("InvalidRewardToken()")));
+        rewarder.setRewardToken(address(0));
+    }
+
+    function test_OnlyEngineAndZeroBalanceDistributionBranches() public {
+        vm.expectRevert(bytes4(keccak256("NotEngine()")));
+        rewarder.execute(bytes32("pool"), bytes32("book"), address(token0), 1, MAX_ORDER_NONCE);
+
+        rewarder.distributeRewards(bytes32("book"), _order(10, 1, MAX_ORDER_NONCE), address(token0));
+        assertEq(rewardToken.balanceOf(alice), 0);
+    }
+
+    function test_DistributeRewardsRevertsWhenOrderOwnerIsGone() public {
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+
+        vm.prank(alice);
+        bytes32 aliceBid = engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        vm.warp(block.timestamp + 11);
+
+        vm.prank(bob);
+        engine.fill(_fill(0, _order(11, 7, 0), true, false, false));
+
+        assertEq(rewarder.balances(id, address(token0), MAX_ORDER_NONCE), 55);
+
+        vm.prank(alice);
+        engine.cancel(address(token0), address(token1), 0, aliceBid);
+
+        rewardToken.mint(address(rewarder), 55);
+        vm.expectRevert(bytes4(keccak256("NoOrderOwner()")));
+        rewarder.distributeRewards(id, aliceBid, address(token0));
+    }
+
     function test_RewarderAccruesWhenTopBidIsPartiallyFilled() public {
         bytes32 pid = engine.poolId(address(token0), address(token1));
         bytes32 id = engine.bookId(address(token0), address(token1), 0);

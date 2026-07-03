@@ -5,14 +5,16 @@ INVARIANT_DEPTH ?= 64
 INVARIANT_SHARDS ?= 8
 INVARIANT_SHARD ?= 1
 COVERAGE_FILE ?= src/RadixMatchingEngine.sol
+COVERAGE_FILES ?= src/NigiriRewarder.sol,src/RadixMatchingEngine.sol,src/RoutingEngine.sol
+COVERAGE_EXCLUSIONS ?= coverage.exclusions.json
 # Coverage compiles tests under different optimizer settings than the regular
 # test target. Skip the large integration test dispatcher here; `make test`
 # still runs it, and these thresholds cover the remaining focused suites.
 COVERAGE_SKIP ?= RadixMatchingEngine.t.sol
-COVERAGE_MIN_LINES ?= 78
-COVERAGE_MIN_STATEMENTS ?= 77
-COVERAGE_MIN_BRANCHES ?= 70
-COVERAGE_MIN_FUNCS ?= 91
+COVERAGE_MIN_LINES ?= 100
+COVERAGE_MIN_STATEMENTS ?= 100
+COVERAGE_MIN_BRANCHES ?= 100
+COVERAGE_MIN_FUNCS ?= 100
 SLITHER ?= uv tool run --from slither-analyzer slither
 HALMOS ?= uv tool run --from halmos halmos
 HALMOS_ARGS ?= --match-contract RadixMatchingEngineFormalTest --match-test '^testFuzz_Formal' --solver z3 --solver-timeout-assertion 120s --no-status
@@ -68,7 +70,9 @@ coverage-check:
 	fi; \
 	cat "$$tmp"; \
 	python3 script/check_forge_coverage.py "$$tmp" \
-		--file "$(COVERAGE_FILE)" \
+		--files "$(COVERAGE_FILES)" \
+		--lcov lcov.info \
+		--exclude "$(COVERAGE_EXCLUSIONS)" \
 		--min-lines "$(COVERAGE_MIN_LINES)" \
 		--min-statements "$(COVERAGE_MIN_STATEMENTS)" \
 		--min-branches "$(COVERAGE_MIN_BRANCHES)" \
