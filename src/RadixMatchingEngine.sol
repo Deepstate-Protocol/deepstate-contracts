@@ -587,7 +587,7 @@ abstract contract RadixMatchingEngine {
             fillQuantity += rightFillQuantity;
             quoteAmount += rightQuoteAmount;
         }
-        if (matchFlags & _MATCH_HOOK != 0) _refreshRecordedTopNonce(book, newNode, true);
+        if (matchFlags & _MATCH_HOOK != 0) _refreshRecordedTopNonce(book, newNode);
     }
 
     /// @notice Recursively match an incoming bid against an exact ask subtree.
@@ -714,7 +714,7 @@ abstract contract RadixMatchingEngine {
             fillQuantity += rightFillQuantity;
             quoteAmount += rightQuoteAmount;
         }
-        if (matchFlags & _MATCH_HOOK != 0) _refreshRecordedTopNonce(book, newNode, true);
+        if (matchFlags & _MATCH_HOOK != 0) _refreshRecordedTopNonce(book, newNode);
     }
 
     /// @notice Recursively match an incoming ask against an exact bid subtree.
@@ -1154,7 +1154,7 @@ abstract contract RadixMatchingEngine {
     /// @dev A zero incoming nonce in transient top-change storage means the immediate match/cancel
     /// site could not know the next top order yet. Ancestor frames call this after rebuilding
     /// `newNode`.
-    function _refreshRecordedTopNonce(Book storage book, bytes32 newNode, bool validChange) private {
+    function _refreshRecordedTopNonce(Book storage book, bytes32 newNode) private {
         uint192 outgoingAmount;
         uint40 incomingNonce;
         /// @solidity memory-safe-assembly
@@ -1163,10 +1163,6 @@ abstract contract RadixMatchingEngine {
             incomingNonce := tload(_TOP_CHANGE_INCOMING_NONCE_SLOT)
         }
         if (outgoingAmount == 0 && incomingNonce == 0) return;
-        if (!validChange) {
-            _clearTopOrderChange();
-            return;
-        }
         if (incomingNonce != 0 || newNode == bytes32(0)) return;
         incomingNonce = _replacementTopNonce(book, newNode);
         /// @solidity memory-safe-assembly
@@ -1201,15 +1197,6 @@ abstract contract RadixMatchingEngine {
         assembly {
             outgoingAmount := tload(_TOP_CHANGE_OUTGOING_AMOUNT_SLOT)
             incomingNonce := tload(_TOP_CHANGE_INCOMING_NONCE_SLOT)
-            tstore(_TOP_CHANGE_OUTGOING_AMOUNT_SLOT, 0)
-            tstore(_TOP_CHANGE_INCOMING_NONCE_SLOT, 0)
-        }
-    }
-
-    /// @notice Clear any recorded top-order change without consuming it.
-    function _clearTopOrderChange() private {
-        /// @solidity memory-safe-assembly
-        assembly {
             tstore(_TOP_CHANGE_OUTGOING_AMOUNT_SLOT, 0)
             tstore(_TOP_CHANGE_INCOMING_NONCE_SLOT, 0)
         }

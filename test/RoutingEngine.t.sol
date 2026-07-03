@@ -78,6 +78,7 @@ contract RoutingEngineTest is Test {
         bytes32 resting = engine.fill(_fill(0, bid, true, false, false));
 
         bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        assertEq(engine.activeBookId(address(token0), address(token1)), id);
         assertEq(resting, _order(10, 5, MAX_ORDER_NONCE));
         assertEq(engine.nextNonce(address(token0), address(token1), 0), MAX_ORDER_NONCE - 1);
         assertEq(engine.poolEpoch(engine.poolId(address(token0), address(token1))), 0);
@@ -85,6 +86,23 @@ contract RoutingEngineTest is Test {
         assertEq(engine.ownerOfOrder(orderId), alice);
         assertTrue(engine.isBidOrder(orderId));
         assertEq(token1.balanceOf(address(engine)), 50);
+    }
+
+    function test_InvalidTokenAndHookConfigBranches() public {
+        vm.expectRevert(bytes4(keccak256("InvalidToken()")));
+        engine.activeBookId(address(token1), address(token0));
+
+        vm.expectRevert(bytes4(keccak256("InvalidToken()")));
+        engine.nextNonce(address(0), address(token1), 0);
+
+        vm.expectRevert(bytes4(keccak256("InvalidToken()")));
+        engine.setPoolHookConfig(address(token1), address(token0), address(this), true, false);
+
+        vm.expectRevert(bytes4(keccak256("InvalidHook()")));
+        engine.setPoolHookConfig(address(token0), address(token1), address(0), true, false);
+
+        engine.setPoolHookConfig(address(token0), address(token1), address(0), false, false);
+        assertEq(engine.poolHook(engine.poolId(address(token0), address(token1))), address(0));
     }
 
     function test_FillRouteMatchesOldEpochAndNetsTransfers() public {
@@ -109,6 +127,55 @@ contract RoutingEngineTest is Test {
         assertEq(quoteAmount, 30);
     }
 
+    function test_FillRouteNetsRepeatedTouchedTokens() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), false, false, false));
+
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+
+        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](2);
+        route[0] = _fill(0, _order(10, 2, 0), true, true, false);
+        route[1] = _fill(0, _order(10, 3, 0), true, true, false);
+
+        vm.prank(bob);
+        engine.fillRoute(route);
+
+        assertEq(token0.balanceOf(bob), bobToken0Before + 5);
+        assertEq(token1.balanceOf(bob), bobToken1Before - 50);
+    }
+
+    function test_FillRouteZeroDeltaLegDoesNotTouchTokens() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), false, false, false));
+
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+
+        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](1);
+        route[0] = _fill(0, _order(9, 1, 0), true, true, false);
+
+        vm.prank(bob);
+        engine.fillRoute(route);
+
+        assertEq(token0.balanceOf(bob), bobToken0Before);
+        assertEq(token1.balanceOf(bob), bobToken1Before);
+    }
+
+    function test_BookHookFlagWithoutPoolHookReturnsCleanly() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), false, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        uint256 nonce = engine.nextNonce(address(token0), address(token1), 0);
+        engine.setNonceAndFlags(id, nonce | (uint256(1) << 43));
+
+        vm.prank(bob);
+        engine.fill(_fill(0, _order(10, 1, 0), true, true, false));
+
+        assertEq(token0.balanceOf(bob), 1_000_001);
+    }
+
     function test_FillOrKillRevertsWhenRouteLegCannotFullyMatch() public {
         vm.prank(alice);
         engine.fill(_fill(0, _order(10, 1, 0), false, false, false));
@@ -119,6 +186,16 @@ contract RoutingEngineTest is Test {
         vm.prank(bob);
         vm.expectRevert(bytes4(keccak256("FillOrKill()")));
         engine.fillRoute(route);
+    }
+
+    function test_EmptyBookNoRestAndFillOrKillRevertInvalidBook() public {
+        vm.prank(alice);
+        vm.expectRevert(bytes4(keccak256("InvalidBook()")));
+        engine.fill(_fill(7, _order(10, 5, 0), true, true, false));
+
+        vm.prank(alice);
+        vm.expectRevert(bytes4(keccak256("InvalidBook()")));
+        engine.fill(_fill(7, _order(10, 5, 0), true, false, true));
     }
 
     function test_RestThatExhaustsNonceRotatesAndInitializesNextBook() public {
@@ -137,6 +214,75 @@ contract RoutingEngineTest is Test {
         assertEq(engine.nextNonce(address(token0), address(token1), 1), MAX_ORDER_NONCE);
         assertEq(engine.ownerOfOrder(engine.orderId(oldBook, resting)), alice);
         assertEq(engine.ownerOfOrder(engine.orderId(newBook, resting)), address(0));
+    }
+
+    function test_RestInExhaustedBookUsesNextActiveEpoch() public {
+        bytes32 oldBook = engine.bookId(address(token0), address(token1), 0);
+        engine.setNonceAndFlags(oldBook, 1);
+
+        vm.prank(alice);
+        bytes32 resting = engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 newBook = engine.bookId(address(token0), address(token1), 1);
+        assertEq(engine.poolEpoch(engine.poolId(address(token0), address(token1))), 1);
+        assertEq(resting, _order(10, 5, MAX_ORDER_NONCE));
+        assertEq(engine.ownerOfOrder(engine.orderId(newBook, resting)), alice);
+    }
+
+    function test_RestInNonceOneBookWithHookFlagsUsesNextActiveEpoch() public {
+        engine.setPoolHookConfig(address(token0), address(token1), address(this), true, true);
+
+        bytes32 oldBook = engine.bookId(address(token0), address(token1), 0);
+        engine.setNonceAndFlags(oldBook, 1 | (uint256(1) << 42) | (uint256(1) << 43));
+
+        vm.prank(alice);
+        bytes32 resting = engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 newBook = engine.bookId(address(token0), address(token1), 1);
+        assertEq(engine.poolEpoch(engine.poolId(address(token0), address(token1))), 1);
+        assertEq(engine.ownerOfOrder(engine.orderId(newBook, resting)), alice);
+    }
+
+    function test_StaleEmptyRoutedEpochCannotInitializeWhenPoolAdvanced() public {
+        bytes32 oldBook = engine.bookId(address(token0), address(token1), 0);
+        engine.setNonceAndFlags(oldBook, 1);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        vm.prank(bob);
+        vm.expectRevert(bytes4(keccak256("InvalidBook()")));
+        engine.fill(_fill(2, _order(11, 5, 0), true, false, false));
+    }
+
+    function test_HookFlagsAreCarriedAcrossNonceExhaustionRotation() public {
+        engine.setPoolHookConfig(address(token0), address(token1), address(this), true, true);
+
+        bytes32 oldBook = engine.bookId(address(token0), address(token1), 0);
+        engine.setNonceAndFlags(oldBook, 2 | (uint256(1) << 42) | (uint256(1) << 43));
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 newBook = engine.bookId(address(token0), address(token1), 1);
+        assertEq(engine.nextNonce(address(token0), address(token1), 1), MAX_ORDER_NONCE);
+
+        vm.prank(bob);
+        bytes32 resting = engine.fill(_fill(1, _order(11, 5, 0), true, false, false));
+        assertEq(engine.ownerOfOrder(engine.orderId(newBook, resting)), bob);
+    }
+
+    function test_RotationDoesNotOverwriteInitializedNextBook() public {
+        bytes32 oldBook = engine.bookId(address(token0), address(token1), 0);
+        bytes32 newBook = engine.bookId(address(token0), address(token1), 1);
+        engine.setNonceAndFlags(oldBook, 2);
+        engine.setNonceAndFlags(newBook, MAX_ORDER_NONCE - 7);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        assertEq(engine.poolEpoch(engine.poolId(address(token0), address(token1))), 1);
+        assertEq(engine.nextNonce(address(token0), address(token1), 1), MAX_ORDER_NONCE - 7);
     }
 
     function test_RestBookHarnessRejectsExhaustedNonce() public {
