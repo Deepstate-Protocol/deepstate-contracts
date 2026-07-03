@@ -169,9 +169,19 @@ abstract contract RadixMatchingEngine {
 
     /// @dev Guards external entrypoints through transient storage.
     modifier nonReentrant() {
-        _enter();
+        /// @solidity memory-safe-assembly
+        assembly {
+            if tload(_REENTRANCY_GUARD_SLOT) {
+                mstore(0x00, 0x37ed32e8) // `ReentrantCall()`.
+                revert(0x1c, 0x04)
+            }
+            tstore(_REENTRANCY_GUARD_SLOT, 1)
+        }
         _;
-        _exit();
+        /// @solidity memory-safe-assembly
+        assembly {
+            tstore(_REENTRANCY_GUARD_SLOT, 0)
+        }
     }
 
     /// @notice Return the maker that owns an order id, or zero if the order has been claimed/canceled.
@@ -403,14 +413,19 @@ abstract contract RadixMatchingEngine {
         restingOrder = _pack(price, quantity, nonce);
         orderOf[_orderId(bookId, restingOrder)] = OrderState({owner: owner, isBid: isBid});
 
-        _insertRestingOrder(book, restingOrder, isBid, hookEnabled);
+        _insertRestingOrder(book, restingOrder, price, nonce, isBid, hookEnabled);
 
         emit OrderRested(bookId, restingOrder, owner, isBid);
     }
 
-    function _insertRestingOrder(Book storage book, bytes32 restingOrder, bool isBid, bool hookEnabled) private {
-        uint40 nonce = _nonce(restingOrder);
-        uint24 price = _price(restingOrder);
+    function _insertRestingOrder(
+        Book storage book,
+        bytes32 restingOrder,
+        uint24 price,
+        uint40 nonce,
+        bool isBid,
+        bool hookEnabled
+    ) private {
         if (isBid) {
             bytes32 root = book.tree[_ROOT_NODE].rightNode;
             book.tree[_ROOT_NODE].rightNode =
@@ -1080,13 +1095,15 @@ abstract contract RadixMatchingEngine {
     /// @notice Pack a branch node from a raw path key and aggregate quantity.
     /// @param key Raw `price || nonce` path key used as the branch address suffix.
     /// @param quantity Aggregate quantity represented by the branch.
-    /// @return Packed branch node.
-    function _branchNode(uint64 key, uint192 quantity) private pure returns (bytes32) {
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint24 prefixPrice = uint24(key >> 40);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint40 prefixNonce = uint40(key);
-        return _pack(prefixPrice, quantity, prefixNonce);
+    /// @return node Packed branch node.
+    function _branchNode(uint64 key, uint192 quantity) private pure returns (bytes32 node) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            node := or(
+                or(shl(_PRICE_SHIFT, shr(_QUANTITY_SHIFT, key)), shl(_QUANTITY_SHIFT, quantity)),
+                and(key, 0xffffffffff)
+            )
+        }
     }
 
     /// @notice Return the common price for a subtree, or zero if the subtree spans multiple prices.
@@ -1245,31 +1262,35 @@ abstract contract RadixMatchingEngine {
 
     /// @notice Build the bid sort key from an order or branch node.
     /// @param order Packed node.
-    /// @return Bid sort key: `price || nonce`.
+    /// @return key Bid sort key: `price || nonce`.
     /// @dev Higher keys are better bids: higher price first, then higher nonce for earlier time.
-    function _bidSortKey(bytes32 order) private pure returns (uint64) {
-        uint256 packed = uint256(order);
-        return uint64(((packed >> _PRICE_SHIFT) << _QUANTITY_SHIFT) | (packed & _NONCE_MASK));
+    function _bidSortKey(bytes32 order) private pure returns (uint64 key) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            key := or(shl(_QUANTITY_SHIFT, shr(_PRICE_SHIFT, order)), and(order, 0xffffffffff))
+        }
     }
 
     /// @notice Build the ask sort key from an order or branch node.
     /// @param order Packed node.
-    /// @return Ask sort key: `(maxPrice - price) || nonce`.
+    /// @return key Ask sort key: `(maxPrice - price) || nonce`.
     /// @dev Higher keys are better asks: lower price first after inversion, then higher nonce for earlier time.
-    function _askSortKey(bytes32 order) private pure returns (uint64) {
-        uint256 packed = uint256(order);
-        unchecked {
-            return uint64(((_MAX_PRICE - (packed >> _PRICE_SHIFT)) << _QUANTITY_SHIFT) | (packed & _NONCE_MASK));
+    function _askSortKey(bytes32 order) private pure returns (uint64 key) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            key := or(shl(_QUANTITY_SHIFT, sub(0xffffff, shr(_PRICE_SHIFT, order))), and(order, 0xffffffffff))
         }
     }
 
     /// @notice Build the raw address path key from a node.
     /// @param order Packed node.
-    /// @return Raw `price || nonce` key, ignoring quantity.
+    /// @return key Raw `price || nonce` key, ignoring quantity.
     /// @dev Branch addresses use raw path keys for both sides of the book.
-    function _pathKey(bytes32 order) private pure returns (uint64) {
-        uint256 packed = uint256(order);
-        return uint64(((packed >> _PRICE_SHIFT) << _QUANTITY_SHIFT) | (packed & _NONCE_MASK));
+    function _pathKey(bytes32 order) private pure returns (uint64 key) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            key := or(shl(_QUANTITY_SHIFT, shr(_PRICE_SHIFT, order)), and(order, 0xffffffffff))
+        }
     }
 
     /// @notice Count matching leading bits between two 64-bit radix keys.
@@ -1291,10 +1312,11 @@ abstract contract RadixMatchingEngine {
     /// @notice Read one bit from a 64-bit radix key by depth.
     /// @param key Sort or path key.
     /// @param depth Zero-based bit depth, where 0 is the most significant bit.
-    /// @return True if the selected bit is one.
-    function _bit(uint64 key, uint8 depth) private pure returns (bool) {
-        unchecked {
-            return ((key >> (63 - depth)) & 1) == 1;
+    /// @return one True if the selected bit is one.
+    function _bit(uint64 key, uint8 depth) private pure returns (bool one) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            one := and(shr(sub(63, depth), key), 1)
         }
     }
 
@@ -1355,69 +1377,62 @@ abstract contract RadixMatchingEngine {
     /// @return price 24-bit price.
     /// @return quantity 192-bit quantity.
     function _priceAndQuantity(bytes32 order) internal pure returns (uint24 price, uint192 quantity) {
-        uint256 packed = uint256(order);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        price = uint24(packed >> _PRICE_SHIFT);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        quantity = uint192((packed >> _QUANTITY_SHIFT) & _QUANTITY_MASK);
+        /// @solidity memory-safe-assembly
+        assembly {
+            price := shr(_PRICE_SHIFT, order)
+            quantity := and(shr(_QUANTITY_SHIFT, order), 0xffffffffffffffffffffffffffffffffffffffffffffffff)
+        }
     }
 
     /// @notice Decode and validate an incoming order before nonce assignment.
     function _validateIncomingOrder(bytes32 order) internal pure returns (uint24 price, uint192 quantity) {
-        (price, quantity) = _priceAndQuantity(order);
-        if (price == 0 || quantity == 0 || uint256(order) & _NONCE_MASK != 0) revert InvalidOrder();
-    }
-
-    /// @notice Enter the transient reentrancy guard.
-    /// @dev
-    /// Uses EIP-1153 transient storage, available under the configured Cancun EVM version. The slot
-    /// is cleared by `_exit` at the end of successful external calls and automatically discarded at
-    /// transaction end. Reverts roll the transient write back with the rest of the call frame.
-    function _enter() private {
         /// @solidity memory-safe-assembly
         assembly {
-            if tload(_REENTRANCY_GUARD_SLOT) {
-                mstore(0x00, 0x37ed32e8) // `ReentrantCall()`.
+            price := shr(_PRICE_SHIFT, order)
+            quantity := and(shr(_QUANTITY_SHIFT, order), 0xffffffffffffffffffffffffffffffffffffffffffffffff)
+            if or(or(iszero(price), iszero(quantity)), and(order, 0xffffffffff)) {
+                mstore(0x00, 0xaf610693) // `InvalidOrder()`.
                 revert(0x1c, 0x04)
             }
-            tstore(_REENTRANCY_GUARD_SLOT, 1)
-        }
-    }
-
-    /// @notice Exit the transient reentrancy guard.
-    /// @dev Clears the guard slot for later calls in the same transaction.
-    function _exit() private {
-        /// @solidity memory-safe-assembly
-        assembly {
-            tstore(_REENTRANCY_GUARD_SLOT, 0)
         }
     }
 
     /// @notice Replace the quantity field of a packed order while preserving price and nonce.
     /// @param order Original packed order or leaf.
     /// @param quantity New remaining quantity.
-    /// @return Packed node with updated quantity.
+    /// @return updated Packed node with updated quantity.
     /// @dev Used for partial fills. The returned reduced leaf intentionally has no owner mapping;
     /// ownership remains on the original full-quantity order key.
-    function _withQuantity(bytes32 order, uint192 quantity) private pure returns (bytes32) {
-        return bytes32((uint256(order) & _PATH_MASK) | (uint256(quantity) << _QUANTITY_SHIFT));
+    function _withQuantity(bytes32 order, uint192 quantity) private pure returns (bytes32 updated) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            updated := or(
+                and(order, 0xffffff000000000000000000000000000000000000000000000000ffffffffff),
+                shl(_QUANTITY_SHIFT, quantity)
+            )
+        }
     }
 
     /// @notice Pack price, quantity, and nonce into a node.
     /// @param price 24-bit price.
     /// @param quantity 192-bit quantity.
     /// @param nonce 40-bit nonce or branch path suffix.
-    /// @return Packed `bytes32` node.
-    function _pack(uint24 price, uint192 quantity, uint40 nonce) private pure returns (bytes32) {
-        return bytes32((uint256(price) << _PRICE_SHIFT) | (uint256(quantity) << _QUANTITY_SHIFT) | uint256(nonce));
+    /// @return packed Packed `bytes32` node.
+    function _pack(uint24 price, uint192 quantity, uint40 nonce) private pure returns (bytes32 packed) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            packed := or(or(shl(_PRICE_SHIFT, price), shl(_QUANTITY_SHIFT, quantity)), nonce)
+        }
     }
 
     /// @notice Extract the price field from a packed node.
     /// @param order Packed node.
-    /// @return 24-bit price.
-    function _price(bytes32 order) private pure returns (uint24) {
-        // forge-lint: disable-next-line(unsafe-typecast)
-        return uint24(uint256(order) >> _PRICE_SHIFT);
+    /// @return price 24-bit price.
+    function _price(bytes32 order) private pure returns (uint24 price) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            price := shr(_PRICE_SHIFT, order)
+        }
     }
 
     /// @notice Extract the low 40-bit nonce/path suffix from a packed node.
