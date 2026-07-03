@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.28;
 
+import {Ownable} from "solady/auth/Ownable.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import {IHook} from "./interfaces/IHook.sol";
 import {RadixMatchingEngine} from "./RadixMatchingEngine.sol";
 
 /// @title Routing Engine
@@ -10,7 +12,7 @@ import {RadixMatchingEngine} from "./RadixMatchingEngine.sol";
 /// `keccak256(token0, token1, epoch)`, so the packed order node can stay unchanged while storage is
 /// isolated by book. Batch fills defer ERC20 settlement until all matching and resting mutations
 /// have completed, then net by token using transient storage keyed directly by token address.
-contract RoutingEngine is RadixMatchingEngine {
+contract RoutingEngine is RadixMatchingEngine, Ownable {
     using SafeTransferLib for address;
 
     /// @notice One routed fill leg.
@@ -31,11 +33,58 @@ contract RoutingEngine is RadixMatchingEngine {
         bool fillOrKill;
     }
 
+    uint256 private constant _POOL_EPOCH_MASK = (uint256(1) << 254) - 1;
+    uint256 private constant _POOL_HOOK_TOKEN0_ACTIVE = uint256(1) << 254;
+    uint256 private constant _POOL_HOOK_TOKEN1_ACTIVE = uint256(1) << 255;
+    uint256 private constant _POOL_HOOK_ACTIVE_MASK = _POOL_HOOK_TOKEN0_ACTIVE | _POOL_HOOK_TOKEN1_ACTIVE;
+    uint256 private constant _BOOK_HOOK_TOKEN0_ACTIVE = uint256(1) << 42;
+    uint256 private constant _BOOK_HOOK_TOKEN1_ACTIVE = uint256(1) << 43;
+    uint256 private constant _BOOK_HOOK_ACTIVE_MASK = _BOOK_HOOK_TOKEN0_ACTIVE | _BOOK_HOOK_TOKEN1_ACTIVE;
+
     /// @notice Latest restable epoch for each sorted token pair.
-    mapping(bytes32 poolId => uint256 epoch) public poolEpoch;
+    mapping(bytes32 poolId => uint256 epochAndHookFlags) private _poolEpochAndHookFlags;
+
+    /// @notice Optional top-of-book hook config by sorted-token pool.
+    mapping(bytes32 poolId => address hook) public poolHook;
 
     /// @notice Emitted when a book is initialized.
-    event BookInitialized(bytes32 indexed poolId, bytes32 indexed bookId, uint256 indexed epoch);
+    event BookInitialized(bytes32 poolId, bytes32 bookId, uint256 epoch);
+
+    /// @notice Emitted when top-of-book hooks are configured for a pool.
+    event PoolHookConfigured(bytes32 poolId, address hook, bool token0Active, bool token1Active);
+
+    /// @notice Hook config is invalid.
+    error InvalidHook();
+
+    constructor() {
+        _initializeOwner(msg.sender);
+    }
+
+    /// @notice Configure optional canonical top-of-book hooks for a sorted token pair.
+    /// @param token0 Lower token address in the pair.
+    /// @param token1 Higher token address in the pair.
+    /// @param hook Hook contract called when a top buyer changes.
+    /// @param token0Active True to hook token0 buyers, i.e. top bids.
+    /// @param token1Active True to hook token1 buyers, i.e. top asks.
+    function setPoolHookConfig(address token0, address token1, address hook, bool token0Active, bool token1Active)
+        external
+        onlyOwner
+    {
+        _requireSortedTokens(token0, token1);
+
+        uint256 activeFlags;
+        if (token0Active) activeFlags |= _POOL_HOOK_TOKEN0_ACTIVE;
+        if (token1Active) activeFlags |= _POOL_HOOK_TOKEN1_ACTIVE;
+        if (activeFlags != 0 && hook == address(0)) revert InvalidHook();
+
+        bytes32 pid = poolId(token0, token1);
+        uint256 poolState = _poolEpoch(_poolEpochAndHookFlags[pid]) | activeFlags;
+        _poolEpochAndHookFlags[pid] = poolState;
+        poolHook[pid] = hook;
+        _setBookHookFlags(books[bookId(token0, token1, _poolEpoch(poolState))], _bookHookFlags(poolState));
+
+        emit PoolHookConfigured(pid, hook, token0Active, token1Active);
+    }
 
     /// @notice Submit one bid or ask and optionally rest unmatched quantity in the active epoch.
     /// @param params Fill parameters.
@@ -89,8 +138,9 @@ contract RoutingEngine is RadixMatchingEngine {
 
         bool isBid;
         address owner;
-        (owner, isBid, baseAmount, quoteAmount) = _cancelBook(id, book, order, msg.sender);
-        isBid;
+        uint256 hookFlags = _cancelHookFlags(book.nonceAndFlags);
+        (owner, isBid, baseAmount, quoteAmount) = _cancelBook(id, book, order, msg.sender, hookFlags);
+        if (_cancelHookEnabled(hookFlags, isBid)) _executeTopOrderHook(token0, token1, id, isBid);
 
         if (baseAmount != 0) token0.safeTransfer(owner, baseAmount);
         if (quoteAmount != 0) token1.safeTransfer(owner, quoteAmount);
@@ -127,7 +177,12 @@ contract RoutingEngine is RadixMatchingEngine {
     /// @notice Return the active book id for a sorted token pair.
     function activeBookId(address token0, address token1) external view returns (bytes32) {
         _requireSortedTokens(token0, token1);
-        return bookId(token0, token1, poolEpoch[poolId(token0, token1)]);
+        return bookId(token0, token1, poolEpoch(poolId(token0, token1)));
+    }
+
+    /// @notice Return the active restable epoch for a sorted-token pool id.
+    function poolEpoch(bytes32 pid) public view returns (uint256) {
+        return _poolEpoch(_poolEpochAndHookFlags[pid]);
     }
 
     /// @notice Return the low 40-bit next nonce for a book.
@@ -160,7 +215,6 @@ contract RoutingEngine is RadixMatchingEngine {
         returns (bytes32 restingOrder, int256 token0Delta, int256 token1Delta)
     {
         _requireSortedTokens(params.token0, params.token1);
-
         bytes32 routedBookId = bookId(params.token0, params.token1, params.epoch);
         Book storage routedBook = books[routedBookId];
         uint256 routedNonceAndFlags = routedBook.nonceAndFlags;
@@ -172,13 +226,8 @@ contract RoutingEngine is RadixMatchingEngine {
         uint192 baseFilled;
         uint256 quoteAmount;
 
-        if (routedNonce == 0) {
-            if (params.noRest || params.fillOrKill) revert InvalidBook();
-            (limitPrice, remaining) = _validateIncomingOrder(params.order);
-        } else {
-            (limitPrice, remaining, baseFilled, quoteAmount) =
-                _matchBook(routedBookId, routedBook, params.order, params.isBid);
-        }
+        (limitPrice, remaining, baseFilled, quoteAmount) =
+            _matchOrValidate(params, routedBookId, routedBook, routedNonce);
 
         if (remaining != 0 && params.fillOrKill) revert FillOrKill();
 
@@ -228,6 +277,23 @@ contract RoutingEngine is RadixMatchingEngine {
         }
     }
 
+    function _matchOrValidate(
+        FillParams calldata params,
+        bytes32 routedBookId,
+        Book storage routedBook,
+        uint40 routedNonce
+    ) private returns (uint24 limitPrice, uint192 remaining, uint192 baseFilled, uint256 quoteAmount) {
+        if (routedNonce == 0) {
+            if (params.noRest || params.fillOrKill) revert InvalidBook();
+            (limitPrice, remaining) = _validateIncomingOrder(params.order);
+        } else {
+            bool hookEnabled = _bookHookEnabled(routedBook.nonceAndFlags, !params.isBid);
+            (limitPrice, remaining, baseFilled, quoteAmount) =
+                _matchBook(routedBookId, routedBook, params.order, params.isBid, hookEnabled);
+            if (hookEnabled) _executeTopOrderHook(params.token0, params.token1, routedBookId, !params.isBid);
+        }
+    }
+
     function _restRemaining(
         address token0,
         address token1,
@@ -245,9 +311,27 @@ contract RoutingEngine is RadixMatchingEngine {
             token0, token1, routedEpoch, routedBookId, routedBook, routedNonceAndFlags, routedBookWasEmpty
         );
         uint40 nextNonceAfter;
-        (restingOrder, nextNonceAfter) =
-            _restBook(restBookId, restBook, restNonceAndFlags, limitPrice, remaining, isBid, msg.sender);
+        bool hookEnabled = _bookHookEnabled(restNonceAndFlags, isBid);
+        (restingOrder, nextNonceAfter) = _restSelectedBook(
+            token0, token1, restBookId, restBook, restNonceAndFlags, limitPrice, remaining, isBid, hookEnabled
+        );
         _rotateIfExhausted(token0, token1, nextNonceAfter);
+    }
+
+    function _restSelectedBook(
+        address token0,
+        address token1,
+        bytes32 id,
+        Book storage book,
+        uint256 nonceAndFlags,
+        uint24 limitPrice,
+        uint192 remaining,
+        bool isBid,
+        bool hookEnabled
+    ) private returns (bytes32 restingOrder, uint40 nextNonceAfter) {
+        (restingOrder, nextNonceAfter) =
+            _restBook(id, book, nonceAndFlags, limitPrice, remaining, isBid, msg.sender, hookEnabled);
+        if (hookEnabled) _executeTopOrderHook(token0, token1, id, isBid);
     }
 
     function _restableBook(
@@ -260,7 +344,8 @@ contract RoutingEngine is RadixMatchingEngine {
         bool requireRoutedEpochActive
     ) private returns (bytes32 id, Book storage book, uint256 nonceAndFlags) {
         bytes32 pid = poolId(token0, token1);
-        uint256 epoch = poolEpoch[pid];
+        uint256 poolState = _poolEpochAndHookFlags[pid];
+        uint256 epoch = _poolEpoch(poolState);
         if (requireRoutedEpochActive && routedEpoch != epoch) revert InvalidBook();
 
         if (epoch == routedEpoch) {
@@ -276,19 +361,22 @@ contract RoutingEngine is RadixMatchingEngine {
         // forge-lint: disable-next-line(unsafe-typecast)
         uint40 nonce = uint40(nonceAndFlags);
         if (nonce == 0) {
-            nonceAndFlags = uint256(type(uint40).max);
+            nonceAndFlags = uint256(type(uint40).max) | _bookHookFlags(poolState);
             emit BookInitialized(pid, id, epoch);
             return (id, book, nonceAndFlags);
         }
 
         if (nonce == 1) {
+            uint256 bookHookFlags = _bookHookFlags(poolState);
+            if (bookHookFlags != 0) _setBookHookFlags(book, 0);
             unchecked {
                 epoch += 1;
             }
-            poolEpoch[pid] = epoch;
+            poolState = _withPoolEpoch(poolState, epoch);
+            _poolEpochAndHookFlags[pid] = poolState;
             id = bookId(token0, token1, epoch);
             book = books[id];
-            nonceAndFlags = uint256(type(uint40).max);
+            nonceAndFlags = uint256(type(uint40).max) | bookHookFlags;
             emit BookInitialized(pid, id, epoch);
         }
     }
@@ -297,16 +385,72 @@ contract RoutingEngine is RadixMatchingEngine {
         if (nextNonceAfter != 1) return;
 
         bytes32 pid = poolId(token0, token1);
+        uint256 poolState = _poolEpochAndHookFlags[pid];
+        uint256 oldEpoch = _poolEpoch(poolState);
+        uint256 bookHookFlags = _bookHookFlags(poolState);
+        if (bookHookFlags != 0) _setBookHookFlags(books[bookId(token0, token1, oldEpoch)], 0);
+
         uint256 epoch;
         unchecked {
-            epoch = poolEpoch[pid] + 1;
+            epoch = oldEpoch + 1;
         }
-        poolEpoch[pid] = epoch;
+        _poolEpochAndHookFlags[pid] = _withPoolEpoch(poolState, epoch);
 
         bytes32 id = bookId(token0, token1, epoch);
         Book storage nextBook = books[id];
-        _initializeBook(nextBook);
+        _initializeBookWithHookFlags(nextBook, bookHookFlags);
         emit BookInitialized(pid, id, epoch);
+    }
+
+    function _executeTopOrderHook(address token0, address token1, bytes32 id, bool isBid) private {
+        (uint192 outgoingAmount, uint40 incomingNonce) = _takeTopOrderChange();
+        if (outgoingAmount == 0 && incomingNonce == 0) return;
+
+        bytes32 pid = poolId(token0, token1);
+        address hook = poolHook[pid];
+        if (hook == address(0)) return;
+
+        address token = isBid ? token0 : token1;
+        try IHook(hook).execute(pid, id, token, outgoingAmount, incomingNonce) {} catch {}
+    }
+
+    function _poolEpoch(uint256 poolState) private pure returns (uint256) {
+        return poolState & _POOL_EPOCH_MASK;
+    }
+
+    function _withPoolEpoch(uint256 poolState, uint256 epoch) private pure returns (uint256) {
+        return (poolState & _POOL_HOOK_ACTIVE_MASK) | epoch;
+    }
+
+    function _bookHookEnabled(uint256 nonceAndFlags, bool isBid) private pure returns (bool) {
+        uint256 flag = isBid ? _BOOK_HOOK_TOKEN0_ACTIVE : _BOOK_HOOK_TOKEN1_ACTIVE;
+        return nonceAndFlags & flag != 0;
+    }
+
+    function _cancelHookFlags(uint256 nonceAndFlags) private pure returns (uint256 flags) {
+        if (nonceAndFlags & _BOOK_HOOK_TOKEN0_ACTIVE != 0) flags |= _CANCEL_HOOK_BID;
+        if (nonceAndFlags & _BOOK_HOOK_TOKEN1_ACTIVE != 0) flags |= _CANCEL_HOOK_ASK;
+    }
+
+    function _cancelHookEnabled(uint256 hookFlags, bool isBid) private pure returns (bool) {
+        uint256 flag = isBid ? _CANCEL_HOOK_BID : _CANCEL_HOOK_ASK;
+        return hookFlags & flag != 0;
+    }
+
+    function _bookHookFlags(uint256 poolState) private pure returns (uint256 flags) {
+        if (poolState & _POOL_HOOK_TOKEN0_ACTIVE != 0) flags |= _BOOK_HOOK_TOKEN0_ACTIVE;
+        if (poolState & _POOL_HOOK_TOKEN1_ACTIVE != 0) flags |= _BOOK_HOOK_TOKEN1_ACTIVE;
+    }
+
+    function _setBookHookFlags(Book storage book, uint256 flags) private {
+        uint256 nonceAndFlags = book.nonceAndFlags;
+        uint256 nextNonceAndFlags = (nonceAndFlags & ~_BOOK_HOOK_ACTIVE_MASK) | flags;
+        if (nextNonceAndFlags != nonceAndFlags) book.nonceAndFlags = nextNonceAndFlags;
+    }
+
+    function _initializeBookWithHookFlags(Book storage book, uint256 flags) private {
+        if (_nextNonce(book) != 0) return;
+        book.nonceAndFlags = uint256(type(uint40).max) | flags;
     }
 
     function _requireSortedTokens(address token0, address token1) internal pure virtual {

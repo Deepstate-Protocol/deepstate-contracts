@@ -129,12 +129,10 @@ contract RadixMatchingEngineTest is Test {
     uint256 internal constant BID_RIGHT_SPINE_DIRTY = uint256(1) << 40;
     uint256 internal constant ASK_RIGHT_SPINE_DIRTY = uint256(1) << 41;
 
-    event OrderRested(bytes32 indexed bookId, bytes32 indexed order, address indexed owner, bool isBid);
+    event OrderRested(bytes32 bookId, bytes32 order, address owner, bool isBid);
     event AskMatched(bytes32 bookId, bytes32 restingOrder, uint192 quantity, uint256 quoteAmount);
     event BidMatched(bytes32 bookId, bytes32 restingOrder, uint192 quantity, uint256 quoteAmount);
-    event OrderCancelled(
-        bytes32 indexed bookId, bytes32 indexed order, address indexed owner, uint256 baseAmount, uint256 quoteAmount
-    );
+    event OrderCancelled(bytes32 bookId, bytes32 order, address owner, uint256 baseAmount, uint256 quoteAmount);
 
     TestERC20 internal base;
     TestERC20 internal quote;
@@ -264,7 +262,7 @@ contract RadixMatchingEngineTest is Test {
     function test_RestMatchClaimAndCancelEvents() public {
         bytes32 expectedAsk = _order(90, 2, MAX_ORDER_NONCE);
 
-        vm.expectEmit(true, true, true, true, address(engine));
+        vm.expectEmit(false, false, false, true, address(engine));
         emit OrderRested(_bookId(), expectedAsk, bob, false);
 
         vm.prank(bob);
@@ -276,7 +274,7 @@ contract RadixMatchingEngineTest is Test {
 
         vm.expectEmit(false, false, false, true, address(engine));
         emit AskMatched(_bookId(), restingAsk, 2, 180);
-        vm.expectEmit(true, true, true, true, address(engine));
+        vm.expectEmit(false, false, false, true, address(engine));
         emit OrderRested(_bookId(), expectedBid, alice, true);
 
         vm.prank(alice);
@@ -284,7 +282,7 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(restingBid, expectedBid);
 
-        vm.expectEmit(true, true, false, true, address(engine));
+        vm.expectEmit(false, false, false, true, address(engine));
         emit OrderCancelled(_bookId(), restingAsk, bob, 0, 180);
 
         vm.prank(bob);
@@ -293,7 +291,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(bobBaseAmount, 0);
         assertEq(bobQuoteAmount, 180);
 
-        vm.expectEmit(true, true, false, true, address(engine));
+        vm.expectEmit(false, false, false, true, address(engine));
         emit OrderCancelled(_bookId(), restingBid, alice, 0, 100);
 
         vm.prank(alice);
@@ -306,7 +304,7 @@ contract RadixMatchingEngineTest is Test {
     function test_BidRestMatchClaimAndCancelEvents() public {
         bytes32 expectedBid = _order(100, 2, MAX_ORDER_NONCE);
 
-        vm.expectEmit(true, true, true, true, address(engine));
+        vm.expectEmit(false, false, false, true, address(engine));
         emit OrderRested(_bookId(), expectedBid, alice, true);
 
         vm.prank(alice);
@@ -318,7 +316,7 @@ contract RadixMatchingEngineTest is Test {
 
         vm.expectEmit(false, false, false, true, address(engine));
         emit BidMatched(_bookId(), restingBid, 2, 200);
-        vm.expectEmit(true, true, true, true, address(engine));
+        vm.expectEmit(false, false, false, true, address(engine));
         emit OrderRested(_bookId(), expectedAsk, bob, false);
 
         vm.prank(bob);
@@ -327,7 +325,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(restingAsk, expectedAsk);
         assertTrue(engine.isBidOrder(restingBid));
 
-        vm.expectEmit(true, true, false, true, address(engine));
+        vm.expectEmit(false, false, false, true, address(engine));
         emit OrderCancelled(_bookId(), restingBid, alice, 2, 0);
 
         vm.prank(alice);
@@ -337,7 +335,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(aliceQuoteAmount, 0);
         assertEq(engine.ownerOfOrder(_order(100, 0, MAX_ORDER_NONCE)), address(0));
 
-        vm.expectEmit(true, true, false, true, address(engine));
+        vm.expectEmit(false, false, false, true, address(engine));
         emit OrderCancelled(_bookId(), restingAsk, bob, 1, 0);
 
         vm.prank(bob);

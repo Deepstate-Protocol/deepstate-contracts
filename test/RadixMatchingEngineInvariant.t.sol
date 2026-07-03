@@ -368,32 +368,11 @@ contract RadixMatchingEngineHandler is Test {
             bytes32 topic = entry.topics[0];
             if (topic == ORDER_RESTED_TOPIC) {
                 ++state.restedEventCount;
-                assertEq(entry.topics.length, 4, "rested topic count");
-                assertEq(entry.topics[2], restingOrder, "rested order log");
-                assertEq(entry.topics[3], _addressTopic(actor), "rested owner log");
-                assertEq(abi.decode(entry.data, (bool)), isBid, "rested side log");
+                _assertRestedLog(entry, actor, isBid, restingOrder);
             } else if (topic == ASK_MATCHED_TOPIC || topic == BID_MATCHED_TOPIC) {
                 ++state.matchedEventCount;
-                assertEq(entry.topics.length, 1, "matched topic count");
-                bool restingIsBid = topic == BID_MATCHED_TOPIC;
-                assertEq(restingIsBid, !isBid, "matched side log");
-
-                (bytes32 eventBookId, bytes32 restingNode, uint192 eventQuantity, uint256 eventQuoteAmount) =
-                    abi.decode(entry.data, (bytes32, bytes32, uint192, uint256));
-                eventBookId;
-                assertTrue(restingNode != bytes32(0), "matched node log");
-
-                uint24 eventPrice = _price(restingNode);
-                assertGt(eventQuantity, 0, "matched quantity log");
-                assertLe(eventQuantity, _quantity(restingNode), "matched node quantity log");
-                assertEq(eventQuoteAmount, _quoteValue(eventPrice, eventQuantity), "matched quote price log");
-                if (state.sawMatchedPrice) {
-                    if (isBid) {
-                        assertGe(eventPrice, state.previousMatchedPrice, "matched ask price order");
-                    } else {
-                        assertLe(eventPrice, state.previousMatchedPrice, "matched bid price order");
-                    }
-                }
+                (uint24 eventPrice, uint192 eventQuantity, uint256 eventQuoteAmount) =
+                    _assertMatchedLog(entry, topic, isBid, state.sawMatchedPrice, state.previousMatchedPrice);
                 state.sawMatchedPrice = true;
                 state.previousMatchedPrice = eventPrice;
                 state.matchedQuantity += eventQuantity;
@@ -432,14 +411,7 @@ contract RadixMatchingEngineHandler is Test {
             bytes32 topic = entry.topics[0];
             if (topic == ORDER_CANCELLED_TOPIC) {
                 ++cancelledEventCount;
-                assertEq(entry.topics.length, 4, "cancel topic count");
-                assertEq(entry.topics[2], order, "cancel order log");
-                assertEq(entry.topics[3], _addressTopic(owner), "cancel owner log");
-
-                (uint256 eventBaseAmount, uint256 eventQuoteAmount) = abi.decode(entry.data, (uint256, uint256));
-                assertEq(eventBaseAmount, baseAmount, "cancel base log");
-                assertEq(eventQuoteAmount, quoteAmount, "cancel quote log");
-                assertTrue(eventBaseAmount != 0 || eventQuoteAmount != 0, "cancel empty log");
+                _assertCancelledLog(entry, order, owner, baseAmount, quoteAmount);
             } else if (topic == ORDER_RESTED_TOPIC || topic == ASK_MATCHED_TOPIC || topic == BID_MATCHED_TOPIC) {
                 fail("fill event during cancel");
             } else if (topic == BOOK_INITIALIZED_TOPIC) {
@@ -450,6 +422,70 @@ contract RadixMatchingEngineHandler is Test {
         }
 
         assertEq(cancelledEventCount, 1, "cancel event count");
+    }
+
+    function _assertRestedLog(Vm.Log memory entry, address actor, bool isBid, bytes32 restingOrder) private pure {
+        assertEq(entry.topics.length, 1, "rested topic count");
+        (bytes32 eventBookId, bytes32 eventOrder, address eventOwner, bool eventIsBid) =
+            abi.decode(entry.data, (bytes32, bytes32, address, bool));
+        eventBookId;
+        assertEq(eventOrder, restingOrder, "rested order log");
+        assertEq(eventOwner, actor, "rested owner log");
+        assertEq(eventIsBid, isBid, "rested side log");
+    }
+
+    function _assertMatchedLog(
+        Vm.Log memory entry,
+        bytes32 topic,
+        bool incomingIsBid,
+        bool sawMatchedPrice,
+        uint24 previousMatchedPrice
+    ) private pure returns (uint24 eventPrice, uint192 eventQuantity, uint256 eventQuoteAmount) {
+        assertEq(entry.topics.length, 1, "matched topic count");
+        bool restingIsBid = topic == BID_MATCHED_TOPIC;
+        assertEq(restingIsBid, !incomingIsBid, "matched side log");
+
+        (bytes32 eventBookId, bytes32 restingNode, uint192 quantity, uint256 quoteAmount) =
+            abi.decode(entry.data, (bytes32, bytes32, uint192, uint256));
+        eventBookId;
+        assertTrue(restingNode != bytes32(0), "matched node log");
+
+        eventPrice = _price(restingNode);
+        assertGt(quantity, 0, "matched quantity log");
+        assertLe(quantity, _quantity(restingNode), "matched node quantity log");
+        assertEq(quoteAmount, _quoteValue(eventPrice, quantity), "matched quote price log");
+        if (sawMatchedPrice) {
+            if (incomingIsBid) {
+                assertGe(eventPrice, previousMatchedPrice, "matched ask price order");
+            } else {
+                assertLe(eventPrice, previousMatchedPrice, "matched bid price order");
+            }
+        }
+        eventQuantity = quantity;
+        eventQuoteAmount = quoteAmount;
+    }
+
+    function _assertCancelledLog(
+        Vm.Log memory entry,
+        bytes32 order,
+        address owner,
+        uint256 baseAmount,
+        uint256 quoteAmount
+    ) private pure {
+        assertEq(entry.topics.length, 1, "cancel topic count");
+        (
+            bytes32 eventBookId,
+            bytes32 eventOrder,
+            address eventOwner,
+            uint256 eventBaseAmount,
+            uint256 eventQuoteAmount
+        ) = abi.decode(entry.data, (bytes32, bytes32, address, uint256, uint256));
+        eventBookId;
+        assertEq(eventOrder, order, "cancel order log");
+        assertEq(eventOwner, owner, "cancel owner log");
+        assertEq(eventBaseAmount, baseAmount, "cancel base log");
+        assertEq(eventQuoteAmount, quoteAmount, "cancel quote log");
+        assertTrue(eventBaseAmount != 0 || eventQuoteAmount != 0, "cancel empty log");
     }
 
     function _applyCancel(uint256 index) private {
@@ -565,10 +601,6 @@ contract RadixMatchingEngineHandler is Test {
 
     function _quoteValue(uint24 price, uint192 quantity) private pure returns (uint256) {
         return uint256(price) * uint256(quantity);
-    }
-
-    function _addressTopic(address account) private pure returns (bytes32) {
-        return bytes32(uint256(uint160(account)));
     }
 
     function _nonce(bytes32 order) private pure returns (uint40) {
