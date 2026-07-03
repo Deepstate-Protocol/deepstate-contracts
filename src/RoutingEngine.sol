@@ -33,6 +33,20 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         bool fillOrKill;
     }
 
+    /// @notice Packed protocol fee configuration.
+    /// @dev `recipient == address(0)` disables fees. `bps` is capped to 100.
+    struct FeeConfig {
+        address recipient;
+        uint16 bps;
+    }
+
+    struct RouteState {
+        address[] touched;
+        uint256 touchedCount;
+        address[] feeTouched;
+        uint256 feeTouchedCount;
+    }
+
     uint256 private constant _POOL_EPOCH_MASK = (uint256(1) << 254) - 1;
     uint256 private constant _POOL_HOOK_TOKEN0_ACTIVE = uint256(1) << 254;
     uint256 private constant _POOL_HOOK_TOKEN1_ACTIVE = uint256(1) << 255;
@@ -40,6 +54,9 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     uint256 private constant _BOOK_HOOK_TOKEN0_ACTIVE = uint256(1) << 42;
     uint256 private constant _BOOK_HOOK_TOKEN1_ACTIVE = uint256(1) << 43;
     uint256 private constant _BOOK_HOOK_ACTIVE_MASK = _BOOK_HOOK_TOKEN0_ACTIVE | _BOOK_HOOK_TOKEN1_ACTIVE;
+    uint256 private constant _BPS_DENOMINATOR = 10_000;
+    uint16 private constant _MAX_FEE_BPS = 100;
+    uint256 private constant _FEE_DELTA_DOMAIN = uint256(1) << 255;
 
     /// @notice Latest restable epoch for each sorted token pair.
     mapping(bytes32 poolId => uint256 epochAndHookFlags) private _poolEpochAndHookFlags;
@@ -47,17 +64,36 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     /// @notice Optional top-of-book hook config by sorted-token pool.
     mapping(bytes32 poolId => address hook) public poolHook;
 
+    /// @notice Protocol fee configuration. A zero recipient disables fees.
+    FeeConfig public feeConfig;
+
     /// @notice Emitted when a book is initialized.
     event BookInitialized(bytes32 poolId, bytes32 bookId, uint256 epoch);
 
     /// @notice Emitted when top-of-book hooks are configured for a pool.
     event PoolHookConfigured(bytes32 poolId, address hook, bool token0Active, bool token1Active);
 
+    /// @notice Emitted when protocol fill fees are configured.
+    event FeeConfigured(address recipient, uint16 bps);
+
     /// @notice Hook config is invalid.
     error InvalidHook();
+    /// @notice Fee config is invalid.
+    error InvalidFeeConfig();
 
     constructor() {
         _initializeOwner(msg.sender);
+    }
+
+    /// @notice Configure protocol fees taken from taker output on matched quantity.
+    /// @param recipient Fee recipient. Zero disables fees and requires `bps == 0`.
+    /// @param bps Fee in basis points, capped at 100.
+    function setFeeConfig(address recipient, uint16 bps) external onlyOwner {
+        if (bps > _MAX_FEE_BPS || (recipient == address(0) && bps != 0)) revert InvalidFeeConfig();
+
+        feeConfig = FeeConfig({recipient: recipient, bps: bps});
+
+        emit FeeConfigured(recipient, bps);
     }
 
     /// @notice Configure optional canonical top-of-book hooks for a sorted token pair.
@@ -92,31 +128,40 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     function fill(FillParams calldata params) external nonReentrant returns (bytes32 restingOrder) {
         int256 token0Delta;
         int256 token1Delta;
+        uint256 feeAmount;
         (restingOrder, token0Delta, token1Delta) = _executeFill(params);
-        _settleDelta(params.token0, token0Delta);
-        _settleDelta(params.token1, token1Delta);
+
+        FeeConfig memory config = feeConfig;
+        if (config.recipient != address(0)) {
+            (token0Delta, token1Delta, feeAmount) = _applyFillFee(params.isBid, token0Delta, token1Delta, config.bps);
+        }
+
+        _settleDeltas(params.token0, token0Delta, params.token1, token1Delta);
+        if (feeAmount != 0) {
+            (params.isBid ? params.token0 : params.token1).safeTransfer(config.recipient, feeAmount);
+        }
     }
 
     /// @notice Execute multiple routed fills atomically and settle each touched token once.
     /// @param fills Sequential route legs.
     function fillRoute(FillParams[] calldata fills) external nonReentrant {
         uint256 length = fills.length;
-        address[] memory touched = new address[](length * 2);
-        uint256 touchedCount;
+        RouteState memory route;
+        route.touched = new address[](length * 2);
+        FeeConfig memory config = feeConfig;
+        if (config.recipient != address(0)) route.feeTouched = new address[](length);
 
         for (uint256 i; i < length;) {
-            FillParams calldata params = fills[i];
-            int256 token0Delta;
-            int256 token1Delta;
-            (, token0Delta, token1Delta) = _executeFill(params);
-            touchedCount = _addDelta(params.token0, token0Delta, touched, touchedCount);
-            touchedCount = _addDelta(params.token1, token1Delta, touched, touchedCount);
+            _executeRouteLeg(fills[i], config, route);
             unchecked {
                 ++i;
             }
         }
 
-        _settleTouched(touched, touchedCount);
+        _settleTouched(route.touched, route.touchedCount);
+        if (config.recipient != address(0)) {
+            _settleFees(config.recipient, route.feeTouched, route.feeTouchedCount);
+        }
     }
 
     /// @notice Cancel open quantity or claim filled proceeds from one book.
@@ -275,6 +320,21 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
                 token0Delta -= int256(uint256(remaining));
             }
         }
+    }
+
+    function _executeRouteLeg(FillParams calldata params, FeeConfig memory config, RouteState memory route) private {
+        int256 token0Delta;
+        int256 token1Delta;
+        uint256 feeAmount;
+        (, token0Delta, token1Delta) = _executeFill(params);
+        if (config.recipient != address(0)) {
+            (token0Delta, token1Delta, feeAmount) = _applyFillFee(params.isBid, token0Delta, token1Delta, config.bps);
+            route.feeTouchedCount = _addFee(
+                params.isBid ? params.token0 : params.token1, feeAmount, route.feeTouched, route.feeTouchedCount
+            );
+        }
+        route.touchedCount = _addDelta(params.token0, token0Delta, route.touched, route.touchedCount);
+        route.touchedCount = _addDelta(params.token1, token1Delta, route.touched, route.touchedCount);
     }
 
     function _matchOrValidate(
@@ -484,6 +544,31 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         return touchedCount;
     }
 
+    function _addFee(address token, uint256 amount, address[] memory touched, uint256 touchedCount)
+        private
+        returns (uint256)
+    {
+        if (amount == 0) return touchedCount;
+
+        if (!_isTouched(token, touched, touchedCount)) {
+            touched[touchedCount] = token;
+            unchecked {
+                ++touchedCount;
+            }
+        }
+
+        bytes32 slot = _feeSlot(token);
+        uint256 current;
+        assembly {
+            current := tload(slot)
+        }
+        uint256 next = current + amount;
+        assembly {
+            tstore(slot, next)
+        }
+        return touchedCount;
+    }
+
     function _isTouched(address token, address[] memory touched, uint256 touchedCount) private pure returns (bool) {
         for (uint256 i; i < touchedCount;) {
             if (touched[i] == token) return true;
@@ -501,13 +586,12 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
             int256 amount;
             assembly {
                 amount := tload(slot)
-                tstore(slot, 0)
             }
 
-            if (amount < 0) {
-                // forge-lint: disable-next-line(unsafe-typecast)
-                token.safeTransferFrom(msg.sender, address(this), uint256(-amount));
-            } else if (amount > 0) {
+            if (amount > 0) {
+                assembly {
+                    tstore(slot, 0)
+                }
                 // forge-lint: disable-next-line(unsafe-typecast)
                 token.safeTransfer(msg.sender, uint256(amount));
             }
@@ -516,15 +600,91 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
                 ++i;
             }
         }
+
+        for (uint256 i; i < touchedCount;) {
+            address token = touched[i];
+            bytes32 slot = bytes32(uint256(uint160(token)));
+            int256 amount;
+            assembly {
+                amount := tload(slot)
+            }
+
+            if (amount < 0) {
+                assembly {
+                    tstore(slot, 0)
+                }
+                // forge-lint: disable-next-line(unsafe-typecast)
+                token.safeTransferFrom(msg.sender, address(this), uint256(-amount));
+            }
+
+            unchecked {
+                ++i;
+            }
+        }
     }
 
-    function _settleDelta(address token, int256 amount) private {
-        if (amount < 0) {
+    function _settleDeltas(address token0, int256 amount0, address token1, int256 amount1) private {
+        if (amount0 > 0) {
             // forge-lint: disable-next-line(unsafe-typecast)
-            token.safeTransferFrom(msg.sender, address(this), uint256(-amount));
-        } else if (amount > 0) {
-            // forge-lint: disable-next-line(unsafe-typecast)
-            token.safeTransfer(msg.sender, uint256(amount));
+            token0.safeTransfer(msg.sender, uint256(amount0));
         }
+        if (amount1 > 0) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            token1.safeTransfer(msg.sender, uint256(amount1));
+        }
+        if (amount0 < 0) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            token0.safeTransferFrom(msg.sender, address(this), uint256(-amount0));
+        }
+        if (amount1 < 0) {
+            // forge-lint: disable-next-line(unsafe-typecast)
+            token1.safeTransferFrom(msg.sender, address(this), uint256(-amount1));
+        }
+    }
+
+    function _settleFees(address recipient, address[] memory touched, uint256 touchedCount) private {
+        for (uint256 i; i < touchedCount;) {
+            address token = touched[i];
+            bytes32 slot = _feeSlot(token);
+            uint256 amount;
+            assembly {
+                amount := tload(slot)
+                tstore(slot, 0)
+            }
+
+            if (amount != 0) token.safeTransfer(recipient, amount);
+
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    function _applyFillFee(bool isBid, int256 token0Delta, int256 token1Delta, uint16 feeBps)
+        private
+        pure
+        returns (int256 nextToken0Delta, int256 nextToken1Delta, uint256 feeAmount)
+    {
+        nextToken0Delta = token0Delta;
+        nextToken1Delta = token1Delta;
+        if (feeBps == 0) return (token0Delta, token1Delta, 0);
+
+        if (isBid) {
+            if (token0Delta <= 0) return (token0Delta, token1Delta, 0);
+            // forge-lint: disable-next-line(unsafe-typecast)
+            feeAmount = (uint256(token0Delta) * uint256(feeBps)) / _BPS_DENOMINATOR;
+            // forge-lint: disable-next-line(unsafe-typecast)
+            nextToken0Delta = token0Delta - int256(feeAmount);
+        } else {
+            if (token1Delta <= 0) return (token0Delta, token1Delta, 0);
+            // forge-lint: disable-next-line(unsafe-typecast)
+            feeAmount = (uint256(token1Delta) * uint256(feeBps)) / _BPS_DENOMINATOR;
+            // forge-lint: disable-next-line(unsafe-typecast)
+            nextToken1Delta = token1Delta - int256(feeAmount);
+        }
+    }
+
+    function _feeSlot(address token) private pure returns (bytes32) {
+        return bytes32(_FEE_DELTA_DOMAIN | uint256(uint160(token)));
     }
 }

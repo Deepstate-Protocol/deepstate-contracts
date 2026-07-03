@@ -45,9 +45,32 @@
   },
   "src/RoutingEngine.sol": {
     "reason": "Foundry --ir-minimum coverage does not anchor executed id-hash assembly, transient netting assembly, and storage-reference assignment instructions.",
-    "lines": [153, 154, 155, 156, 164, 165, 166, 167, 168, 352, 356, 357, 358, 478, 482, 484, 503, 504],
-    "statements": 18,
+    "lines": [
+      198,
+      199,
+      200,
+      201,
+      209,
+      210,
+      211,
+      212,
+      213,
+      412,
+      538,
+      542,
+      544,
+      563,
+      567,
+      569,
+      588,
+      593,
+      609,
+      614,
+      651,
+      652
+    ],
+    "statements": 22,
     "functions": [],
-    "branches": ["351:16:1"]
+    "branches": []
   }
 }

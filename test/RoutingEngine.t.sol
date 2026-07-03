@@ -53,6 +53,7 @@ contract RoutingEngineTest is Test {
 
     address internal alice = address(0xA11CE);
     address internal bob = address(0xB0B);
+    address internal feeRecipient = address(0xFEE);
 
     function setUp() public {
         RoutingTestERC20 a = new RoutingTestERC20("A", "A");
@@ -103,6 +104,140 @@ contract RoutingEngineTest is Test {
 
         engine.setPoolHookConfig(address(token0), address(token1), address(0), false, false);
         assertEq(engine.poolHook(engine.poolId(address(token0), address(token1))), address(0));
+    }
+
+    function test_FeeConfigValidationAndGetter() public {
+        vm.expectRevert(bytes4(keccak256("InvalidFeeConfig()")));
+        engine.setFeeConfig(feeRecipient, 101);
+
+        vm.expectRevert(bytes4(keccak256("InvalidFeeConfig()")));
+        engine.setFeeConfig(address(0), 1);
+
+        engine.setFeeConfig(feeRecipient, 100);
+        (address recipient, uint16 bps) = engine.feeConfig();
+        assertEq(recipient, feeRecipient);
+        assertEq(bps, 100);
+
+        engine.setFeeConfig(address(0), 0);
+        (recipient, bps) = engine.feeConfig();
+        assertEq(recipient, address(0));
+        assertEq(bps, 0);
+    }
+
+    function test_BidFillTakesFeeFromOutgoingBaseOnly() public {
+        engine.setFeeConfig(feeRecipient, 100);
+
+        vm.prank(alice);
+        bytes32 ask = engine.fill(_fill(0, _order(10, 10_000, 0), false, false, false));
+
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+
+        vm.prank(bob);
+        engine.fill(_fill(0, _order(10, 10_000, 0), true, true, false));
+
+        assertEq(token0.balanceOf(bob), bobToken0Before + 9_900);
+        assertEq(token1.balanceOf(bob), bobToken1Before - 100_000);
+        assertEq(token0.balanceOf(feeRecipient), 100);
+        assertEq(token1.balanceOf(feeRecipient), 0);
+
+        vm.prank(alice);
+        (, uint256 quoteAmount) = engine.cancel(address(token0), address(token1), 0, ask);
+        assertEq(quoteAmount, 100_000);
+        assertEq(token0.balanceOf(feeRecipient), 100);
+        assertEq(token1.balanceOf(feeRecipient), 0);
+    }
+
+    function test_FeeRecipientWithZeroBpsDoesNotTakeFee() public {
+        engine.setFeeConfig(feeRecipient, 0);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 10_000, 0), false, false, false));
+
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+
+        vm.prank(bob);
+        engine.fill(_fill(0, _order(10, 10_000, 0), true, true, false));
+
+        assertEq(token0.balanceOf(bob), bobToken0Before + 10_000);
+        assertEq(token1.balanceOf(bob), bobToken1Before - 100_000);
+        assertEq(token0.balanceOf(feeRecipient), 0);
+    }
+
+    function test_AskFillTakesFeeFromOutgoingQuoteOnly() public {
+        engine.setFeeConfig(feeRecipient, 100);
+
+        vm.prank(alice);
+        bytes32 bid = engine.fill(_fill(0, _order(10, 10_000, 0), true, false, false));
+
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+
+        vm.prank(bob);
+        engine.fill(_fill(0, _order(10, 10_000, 0), false, true, false));
+
+        assertEq(token0.balanceOf(bob), bobToken0Before - 10_000);
+        assertEq(token1.balanceOf(bob), bobToken1Before + 99_000);
+        assertEq(token0.balanceOf(feeRecipient), 0);
+        assertEq(token1.balanceOf(feeRecipient), 1_000);
+
+        vm.prank(alice);
+        (uint256 baseAmount,) = engine.cancel(address(token0), address(token1), 0, bid);
+        assertEq(baseAmount, 10_000);
+        assertEq(token0.balanceOf(feeRecipient), 0);
+        assertEq(token1.balanceOf(feeRecipient), 1_000);
+    }
+
+    function test_FillRouteFeeIsCarvedBeforeRemainderCanRestAndCancel() public {
+        engine.setFeeConfig(feeRecipient, 100);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 10_000, 0), false, false, false));
+
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+
+        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](2);
+        route[0] = _fill(0, _order(10, 10_000, 0), true, true, false);
+        route[1] = _fill(0, _order(20, 5_000, 0), false, false, false);
+
+        vm.prank(bob);
+        engine.fillRoute(route);
+
+        bytes32 restingAsk = _order(20, 5_000, MAX_ORDER_NONCE - 1);
+        assertEq(token0.balanceOf(bob), bobToken0Before + 4_900);
+        assertEq(token1.balanceOf(bob), bobToken1Before - 100_000);
+        assertEq(token0.balanceOf(feeRecipient), 100);
+        assertEq(
+            engine.ownerOfOrder(engine.orderId(engine.bookId(address(token0), address(token1), 0), restingAsk)), bob
+        );
+
+        vm.prank(bob);
+        (uint256 baseAmount,) = engine.cancel(address(token0), address(token1), 0, restingAsk);
+
+        assertEq(baseAmount, 5_000);
+        assertEq(token0.balanceOf(bob), bobToken0Before + 9_900);
+        assertEq(token0.balanceOf(feeRecipient), 100);
+    }
+
+    function test_OldEpochMatchRemainderRestsInActiveEpoch() public {
+        bytes32 oldBook = engine.bookId(address(token0), address(token1), 0);
+        engine.setNonceAndFlags(oldBook, 2);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 pid = engine.poolId(address(token0), address(token1));
+        assertEq(engine.poolEpoch(pid), 1);
+
+        vm.prank(bob);
+        bytes32 restingAsk = engine.fill(_fill(0, _order(10, 7, 0), false, false, false));
+
+        bytes32 newBook = engine.bookId(address(token0), address(token1), 1);
+        assertEq(restingAsk, _order(10, 2, MAX_ORDER_NONCE));
+        assertEq(engine.ownerOfOrder(engine.orderId(newBook, restingAsk)), bob);
+        assertEq(engine.ownerOfOrder(engine.orderId(oldBook, restingAsk)), address(0));
     }
 
     function test_FillRouteMatchesOldEpochAndNetsTransfers() public {
