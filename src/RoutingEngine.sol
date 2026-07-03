@@ -33,13 +33,6 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         bool fillOrKill;
     }
 
-    /// @notice Packed protocol fee configuration.
-    /// @dev `recipient == address(0)` disables fees. `bps` is capped to 100.
-    struct FeeConfig {
-        address recipient;
-        uint16 bps;
-    }
-
     struct RouteState {
         address[] touched;
         uint256 touchedCount;
@@ -57,6 +50,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     uint256 private constant _BPS_DENOMINATOR = 10_000;
     uint16 private constant _MAX_FEE_BPS = 100;
     uint256 private constant _FEE_DELTA_DOMAIN = uint256(1) << 255;
+    uint256 private constant _BOOK_NONCE_MASK = (uint256(1) << 40) - 1;
 
     /// @notice Latest restable epoch for each sorted token pair.
     mapping(bytes32 poolId => uint256 epochAndHookFlags) private _poolEpochAndHookFlags;
@@ -64,8 +58,8 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     /// @notice Optional top-of-book hook config by sorted-token pool.
     mapping(bytes32 poolId => address hook) public poolHook;
 
-    /// @notice Protocol fee configuration. A zero recipient disables fees.
-    FeeConfig public feeConfig;
+    /// @dev Protocol fee config packed as `recipient | bps << 160`. A zero recipient disables fees.
+    uint256 private _feeConfig;
 
     /// @notice Emitted when a book is initialized.
     event BookInitialized(bytes32 poolId, bytes32 bookId, uint256 epoch);
@@ -91,9 +85,18 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     function setFeeConfig(address recipient, uint16 bps) external onlyOwner {
         if (bps > _MAX_FEE_BPS || (recipient == address(0) && bps != 0)) revert InvalidFeeConfig();
 
-        feeConfig = FeeConfig({recipient: recipient, bps: bps});
+        _feeConfig = uint256(uint160(recipient)) | (uint256(bps) << 160);
 
         emit FeeConfigured(recipient, bps);
+    }
+
+    /// @notice Protocol fee configuration. A zero recipient disables fees.
+    function feeConfig() external view returns (address recipient, uint16 bps) {
+        uint256 config = _feeConfig;
+        // forge-lint: disable-next-line(unsafe-typecast)
+        recipient = address(uint160(config));
+        // forge-lint: disable-next-line(unsafe-typecast)
+        bps = uint16(config >> 160);
     }
 
     /// @notice Configure optional canonical top-of-book hooks for a sorted token pair.
@@ -131,14 +134,24 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         uint256 feeAmount;
         (restingOrder, token0Delta, token1Delta) = _executeFill(params);
 
-        FeeConfig memory config = feeConfig;
-        if (config.recipient != address(0)) {
-            (token0Delta, token1Delta, feeAmount) = _applyFillFee(params.isBid, token0Delta, token1Delta, config.bps);
+        uint256 config = _feeConfig;
+        if (config != 0) {
+            uint16 feeBps;
+            /// @solidity memory-safe-assembly
+            assembly {
+                feeBps := shr(160, config)
+            }
+            (token0Delta, token1Delta, feeAmount) = _applyFillFee(params.isBid, token0Delta, token1Delta, feeBps);
         }
 
         _settleDeltas(params.token0, token0Delta, params.token1, token1Delta);
         if (feeAmount != 0) {
-            (params.isBid ? params.token0 : params.token1).safeTransfer(config.recipient, feeAmount);
+            address feeRecipient;
+            /// @solidity memory-safe-assembly
+            assembly {
+                feeRecipient := config
+            }
+            (params.isBid ? params.token0 : params.token1).safeTransfer(feeRecipient, feeAmount);
         }
     }
 
@@ -148,8 +161,8 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         uint256 length = fills.length;
         RouteState memory route;
         route.touched = new address[](length * 2);
-        FeeConfig memory config = feeConfig;
-        if (config.recipient != address(0)) route.feeTouched = new address[](length);
+        uint256 config = _feeConfig;
+        if (config != 0) route.feeTouched = new address[](length);
 
         for (uint256 i; i < length;) {
             _executeRouteLeg(fills[i], config, route);
@@ -159,8 +172,13 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         }
 
         _settleTouched(route.touched, route.touchedCount);
-        if (config.recipient != address(0)) {
-            _settleFees(config.recipient, route.feeTouched, route.feeTouchedCount);
+        if (config != 0) {
+            address feeRecipient;
+            /// @solidity memory-safe-assembly
+            assembly {
+                feeRecipient := config
+            }
+            _settleFees(feeRecipient, route.feeTouched, route.feeTouchedCount);
         }
     }
 
@@ -206,11 +224,12 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     function bookId(address token0, address token1, uint256 epoch) public pure returns (bytes32 id) {
         /// @solidity memory-safe-assembly
         assembly {
-            let ptr := mload(0x40)
-            mstore(ptr, token0)
-            mstore(add(ptr, 0x20), token1)
-            mstore(add(ptr, 0x40), epoch)
-            id := keccak256(ptr, 0x60)
+            let freeMemoryPointer := mload(0x40)
+            mstore(0x00, token0)
+            mstore(0x20, token1)
+            mstore(0x40, epoch)
+            id := keccak256(0x00, 0x60)
+            mstore(0x40, freeMemoryPointer)
         }
     }
 
@@ -272,7 +291,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         uint256 quoteAmount;
 
         (limitPrice, remaining, baseFilled, quoteAmount) =
-            _matchOrValidate(params, routedBookId, routedBook, routedNonce);
+            _matchOrValidate(params, routedBookId, routedBook, routedNonceAndFlags);
 
         if (remaining != 0 && params.fillOrKill) revert FillOrKill();
 
@@ -322,13 +341,18 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         }
     }
 
-    function _executeRouteLeg(FillParams calldata params, FeeConfig memory config, RouteState memory route) private {
+    function _executeRouteLeg(FillParams calldata params, uint256 config, RouteState memory route) private {
         int256 token0Delta;
         int256 token1Delta;
         uint256 feeAmount;
         (, token0Delta, token1Delta) = _executeFill(params);
-        if (config.recipient != address(0)) {
-            (token0Delta, token1Delta, feeAmount) = _applyFillFee(params.isBid, token0Delta, token1Delta, config.bps);
+        if (config != 0) {
+            uint16 feeBps;
+            /// @solidity memory-safe-assembly
+            assembly {
+                feeBps := shr(160, config)
+            }
+            (token0Delta, token1Delta, feeAmount) = _applyFillFee(params.isBid, token0Delta, token1Delta, feeBps);
             route.feeTouchedCount = _addFee(
                 params.isBid ? params.token0 : params.token1, feeAmount, route.feeTouched, route.feeTouchedCount
             );
@@ -341,13 +365,15 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         FillParams calldata params,
         bytes32 routedBookId,
         Book storage routedBook,
-        uint40 routedNonce
+        uint256 routedNonceAndFlags
     ) private returns (uint24 limitPrice, uint192 remaining, uint192 baseFilled, uint256 quoteAmount) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint40 routedNonce = uint40(routedNonceAndFlags);
         if (routedNonce == 0) {
             if (params.noRest || params.fillOrKill) revert InvalidBook();
             (limitPrice, remaining) = _validateIncomingOrder(params.order);
         } else {
-            bool hookEnabled = _bookHookEnabled(routedBook.nonceAndFlags, !params.isBid);
+            bool hookEnabled = _bookHookEnabled(routedNonceAndFlags, !params.isBid);
             (limitPrice, remaining, baseFilled, quoteAmount) =
                 _matchBook(routedBookId, routedBook, params.order, params.isBid, hookEnabled);
             if (hookEnabled) _executeTopOrderHook(params.token0, params.token1, routedBookId, !params.isBid);
@@ -367,15 +393,24 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         bool isBid
     ) private returns (bytes32 restingOrder) {
         if (!routedBookWasEmpty) routedNonceAndFlags = routedBook.nonceAndFlags;
-        (bytes32 restBookId, Book storage restBook, uint256 restNonceAndFlags) = _restableBook(
-            token0, token1, routedEpoch, routedBookId, routedBook, routedNonceAndFlags, routedBookWasEmpty
-        );
+        bytes32 restBookId;
+        Book storage restBook;
+        uint256 restNonceAndFlags;
+        if (!routedBookWasEmpty && (routedNonceAndFlags & _BOOK_NONCE_MASK) > 1) {
+            restBookId = routedBookId;
+            restBook = routedBook;
+            restNonceAndFlags = routedNonceAndFlags;
+        } else {
+            (restBookId, restBook, restNonceAndFlags) = _restableBook(
+                token0, token1, routedEpoch, routedBookId, routedBook, routedNonceAndFlags, routedBookWasEmpty
+            );
+        }
         uint40 nextNonceAfter;
         bool hookEnabled = _bookHookEnabled(restNonceAndFlags, isBid);
         (restingOrder, nextNonceAfter) = _restSelectedBook(
             token0, token1, restBookId, restBook, restNonceAndFlags, limitPrice, remaining, isBid, hookEnabled
         );
-        _rotateIfExhausted(token0, token1, nextNonceAfter);
+        if (nextNonceAfter == 1) _rotateIfExhausted(token0, token1);
     }
 
     function _restSelectedBook(
@@ -420,14 +455,15 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
 
         // forge-lint: disable-next-line(unsafe-typecast)
         uint40 nonce = uint40(nonceAndFlags);
+        uint256 bookHookFlags;
+        if (poolState & _POOL_HOOK_ACTIVE_MASK != 0) bookHookFlags = _bookHookFlags(poolState);
         if (nonce == 0) {
-            nonceAndFlags = uint256(type(uint40).max) | _bookHookFlags(poolState);
+            nonceAndFlags = uint256(type(uint40).max) | bookHookFlags;
             emit BookInitialized(pid, id, epoch);
             return (id, book, nonceAndFlags);
         }
 
         if (nonce == 1) {
-            uint256 bookHookFlags = _bookHookFlags(poolState);
             if (bookHookFlags != 0) _setBookHookFlags(book, 0);
             unchecked {
                 epoch += 1;
@@ -441,9 +477,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         }
     }
 
-    function _rotateIfExhausted(address token0, address token1, uint40 nextNonceAfter) private {
-        if (nextNonceAfter != 1) return;
-
+    function _rotateIfExhausted(address token0, address token1) private {
         bytes32 pid = poolId(token0, token1);
         uint256 poolState = _poolEpochAndHookFlags[pid];
         uint256 oldEpoch = _poolEpoch(poolState);
@@ -514,8 +548,12 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     }
 
     function _requireSortedTokens(address token0, address token1) internal pure virtual {
-        if (token0 == address(0) || token1 == address(0) || token0 >= token1) {
-            revert InvalidToken();
+        /// @solidity memory-safe-assembly
+        assembly {
+            if or(iszero(token0), iszero(lt(token0, token1))) {
+                mstore(0x00, 0xc1ab6dc1) // `InvalidToken()`.
+                revert(0x1c, 0x04)
+            }
         }
     }
 
