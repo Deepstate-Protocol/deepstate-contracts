@@ -723,3 +723,9 @@ contract RadixMatchingEngineHookGasTest is RadixMatchingEngineGasTest {
         return nonce | BOOK_HOOK_TOKEN0_ACTIVE | BOOK_HOOK_TOKEN1_ACTIVE;
     }
 }
+
+contract RadixMatchingEngineFeeGasTest is RadixMatchingEngineGasTest {
+    function _afterSetUp() internal override {
+        engine.setFeeConfig(address(0xFEE), 100);
+    }
+}
