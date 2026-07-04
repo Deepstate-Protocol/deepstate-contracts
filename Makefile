@@ -5,7 +5,7 @@ INVARIANT_DEPTH ?= 64
 INVARIANT_SHARDS ?= 8
 INVARIANT_SHARD ?= 1
 COVERAGE_FILE ?= src/RadixMatchingEngine.sol
-COVERAGE_FILES ?= src/NigiriRewarder.sol,src/RadixMatchingEngine.sol,src/RoutingEngine.sol
+COVERAGE_FILES ?= src/RadixMatchingEngine.sol,src/RoutingEngine.sol
 COVERAGE_EXCLUSIONS ?= coverage.exclusions.json
 # Coverage compiles tests under different optimizer settings than the regular
 # test target. Skip the large integration test dispatcher here; `make test`

@@ -1,11 +1,4 @@
 {
-  "src/NigiriRewarder.sol": {
-    "reason": "Foundry --ir-minimum coverage does not anchor several executed modifier, assembly sload/sstore, and mapping-slot assembly instructions.",
-    "lines": [101, 137, 162, 213, 214, 215, 216, 217, 218, 219],
-    "statements": 10,
-    "functions": [],
-    "branches": []
-  },
   "src/RadixMatchingEngine.sol": {
     "reason": "Foundry --ir-minimum coverage does not anchor executed transient-storage, modifier, helper-return, and inline assembly instructions.",
     "lines": [

@@ -84,11 +84,11 @@ uv tool run --from halmos halmos --match-contract RadixMatchingEngineFormalTest 
 `invariant-deep-shard` and `invariant-deep-shards` split the deep invariant suite into deterministic batches with `INVARIANT_SHARDS` and `INVARIANT_SHARD`, which makes long 2048-run profiles easier to audit and retry.
 `make verify` and `make verify-deep` include `snapshot-runtime-check` so runtime gas drift is reviewed instead of silently accepted.
 Pull requests run both `make verify` and the additional security job for `make coverage-check` plus `make formal-halmos`.
-`coverage-check` emits `lcov.info` and fails unless `src/RadixMatchingEngine.sol` stays at 100% line, statement, branch, and function coverage in the Forge summary.
+`coverage-check` emits `lcov.info` and fails unless the tracked source contracts stay at 100% line, statement, branch, and function coverage after explicit exclusions.
 `make verify-security` is the heavyweight local gate: it runs the deep invariant profile, runtime gas snapshot check, build-size check, clean Slither gate, enforced contract-focused Forge LCOV plus summary coverage, and Halmos symbolic tests. `formal-kevm-build` and `formal-kevm` are optional KEVM/Kontrol targets and require Docker.
 
 Deploy script:
 
 ```sh
-BASE_TOKEN=0x... QUOTE_TOKEN=0x... forge script script/RadixMatchingEngine.s.sol:RadixMatchingEngineScript --rpc-url <rpc> --private-key <key> --broadcast
+forge script script/RadixMatchingEngine.s.sol:RadixMatchingEngineScript --rpc-url <rpc> --private-key <key> --broadcast
 ```

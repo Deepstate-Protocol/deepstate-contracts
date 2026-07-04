@@ -2,9 +2,12 @@
 pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
-import {NigiriRewarder} from "../src/NigiriRewarder.sol";
 import {RoutingEngine} from "../src/RoutingEngine.sol";
 import {TestERC20} from "./RadixMatchingEngine.t.sol";
+
+contract MockHook {
+    function execute(bytes32, bytes32, address, uint192, uint40) external {}
+}
 
 contract RadixMatchingEngineGasTest is Test {
     uint40 internal constant MAX_ORDER_NONCE = type(uint40).max;
@@ -710,12 +713,10 @@ contract RadixMatchingEngineGasTest is Test {
 }
 
 contract RadixMatchingEngineHookGasTest is RadixMatchingEngineGasTest {
-    NigiriRewarder internal hook;
-    TestERC20 internal hookRewardToken;
+    MockHook internal hook;
 
     function _afterSetUp() internal override {
-        hookRewardToken = new TestERC20("Hook Reward", "HOOK");
-        hook = new NigiriRewarder(address(this), address(engine), address(hookRewardToken));
+        hook = new MockHook();
         engine.setPoolHookConfig(address(base), address(quote), address(hook), true, true);
     }
 

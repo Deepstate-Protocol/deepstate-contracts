@@ -667,7 +667,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     /// @dev
     /// Matching/resting code records only two transient values: outgoing amount and incoming nonce.
     /// This function adds pool/book/token context at the top layer. Hook failures are intentionally
-    /// swallowed so a bad rewarder or hook cannot block the matching engine.
+    /// swallowed so a bad hook implementation cannot block the matching engine.
     function _executeTopOrderHook(address token0, address token1, bytes32 id, bool isBid) private {
         (uint192 outgoingAmount, uint40 incomingNonce) = _takeTopOrderChange();
         if (outgoingAmount == 0 && incomingNonce == 0) return;
