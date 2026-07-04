@@ -36,6 +36,18 @@ import {LibBit} from "solady/utils/LibBit.sol";
 /// every leaf. Makers later claim proceeds by calling `cancel` on their original order. This
 /// decouples matching from per-maker execution while preserving price-time priority.
 ///
+/// Right-spine optimization: fills and cancels near the best price often mutate only the rightmost
+/// path. In those cases the engine may keep a stable branch address and update only its right child
+/// pointer. The branch word can then have a stale aggregate quantity/path, so the corresponding
+/// book flag is set. Same-side insertion materializes the right spine back into exact aggregate
+/// nodes before adding a new leaf. Matching can still safely consume same-price dirty subtrees by
+/// recomputing their live quantity from child pointers.
+///
+/// Hook integration is deliberately thin. The core matcher records top-of-book changes in two
+/// transient slots: outgoing live amount and incoming nonce. The routing layer supplies pool, book,
+/// token, and hook address context after the core mutation returns. This keeps the tree logic
+/// book-local while allowing optional top-buyer reward hooks at the outer layer.
+///
 /// Token assumptions: this contract uses Solady safe transfer helpers and assumes deployment will
 /// choose standard, non-fee-on-transfer tokens. Deliberately malicious or inexact ERC20 behavior is
 /// out of scope for this engine and should be controlled at deployment/configuration time.
@@ -202,6 +214,7 @@ abstract contract RadixMatchingEngine {
     /// @param book Book storage selected by `bookId`.
     /// @param order Packed incoming order with price and quantity set, nonce bits set to zero.
     /// @param isBid True for a bid, false for an ask.
+    /// @param hookEnabled True when changes to the resting side's top order should be recorded.
     /// @return limitPrice Incoming limit price.
     /// @return remaining Incoming base quantity left unmatched.
     /// @return baseFilled Base quantity matched.
@@ -219,6 +232,16 @@ abstract contract RadixMatchingEngine {
         }
     }
 
+    /// @notice Match an incoming bid against the ask root.
+    /// @param bookId Book id whose ask tree is being consumed.
+    /// @param book Book storage selected by `bookId`.
+    /// @param limitPrice Highest ask price the bid will accept.
+    /// @param remaining Incoming bid quantity before matching.
+    /// @param hookEnabled True to record top-ask changes for the routing hook.
+    /// @return newRemaining Bid quantity left unmatched.
+    /// @return baseFilled Base quantity bought.
+    /// @return quoteAmount Quote paid at resting ask prices.
+    /// @dev The ask root lives in `tree[0].leftNode`.
     function _matchIncomingBid(
         bytes32 bookId,
         Book storage book,
@@ -242,6 +265,16 @@ abstract contract RadixMatchingEngine {
         if (_matchChangeDirty(matchChange) && newRoot != bytes32(0)) _setRightSpineDirty(book, false);
     }
 
+    /// @notice Match an incoming ask against the bid root.
+    /// @param bookId Book id whose bid tree is being consumed.
+    /// @param book Book storage selected by `bookId`.
+    /// @param limitPrice Lowest bid price the ask will accept.
+    /// @param remaining Incoming ask quantity before matching.
+    /// @param hookEnabled True to record top-bid changes for the routing hook.
+    /// @return newRemaining Ask quantity left unmatched.
+    /// @return baseFilled Base quantity sold.
+    /// @return quoteAmount Quote received at resting bid prices.
+    /// @dev The bid root lives in `tree[0].rightNode`.
     function _matchIncomingAsk(
         bytes32 bookId,
         Book storage book,
@@ -266,7 +299,11 @@ abstract contract RadixMatchingEngine {
     }
 
     /// @notice Cancel an open order or claim a filled order.
+    /// @param bookId Book id that scopes the original order.
+    /// @param book Book storage selected by `bookId`.
     /// @param order Original packed resting order returned by `fill`.
+    /// @param caller Account requesting cancel/claim.
+    /// @param hookFlags Compact side flags indicating whether cancel should record top changes.
     /// @return owner Owner paid by the router.
     /// @return isBid True if the original order was a bid.
     /// @return baseAmount Base tokens paid to the maker.
@@ -309,6 +346,17 @@ abstract contract RadixMatchingEngine {
         emit OrderCancelled(bookId, order, owner, baseAmount, quoteAmount);
     }
 
+    /// @notice Compute maker payout amounts after cancel/claim tree removal.
+    /// @param order Original full-quantity order node.
+    /// @param removed Live leaf removed from the tree, or zero if already fully filled.
+    /// @param isBid True if the original order was a bid.
+    /// @param originalQuantity Quantity encoded in the original order.
+    /// @return baseAmount Base tokens owed to the maker.
+    /// @return quoteAmount Quote tokens owed to the maker.
+    /// @dev
+    /// For bids, filled quantity pays base and unfilled quantity returns quote collateral. For asks,
+    /// unfilled quantity returns base and filled quantity pays quote. A removed live leaf may have a
+    /// smaller quantity than the original order because partial fills rewrite the leaf quantity.
     function _cancelAmounts(bytes32 order, bytes32 removed, bool isBid, uint192 originalQuantity)
         private
         pure
@@ -333,6 +381,12 @@ abstract contract RadixMatchingEngine {
         }
     }
 
+    /// @notice Remove the live leaf for an original order from the appropriate side of a book.
+    /// @param book Book storage containing both bid and ask trees.
+    /// @param order Original order node whose price/nonce identifies the live leaf.
+    /// @param isBid True to remove from the bid tree, false from the ask tree.
+    /// @param hookEnabled True to record a top-order change when the removed leaf was best.
+    /// @return removed Live leaf removed from the tree, or zero if the order was already absent.
     function _removeOrderFromBook(Book storage book, bytes32 order, bool isBid, bool hookEnabled)
         private
         returns (bytes32 removed)
@@ -378,8 +432,13 @@ abstract contract RadixMatchingEngine {
     /// @param quantity Unfilled base quantity to rest.
     /// @param isBid True to rest a bid, false to rest an ask.
     /// @param owner Maker owner.
+    /// @param hookEnabled True to record a top-order change if the new order becomes best.
     /// @return restingOrder Packed resting order with assigned nonce.
     /// @return nextNonceAfter The book nonce after assigning `restingOrder`.
+    /// @dev
+    /// Right-spine dirty flags are materialized before insertion on the same side. This preserves
+    /// exact branch quantities for the insertion path while allowing earlier best-price fills to
+    /// avoid rewriting ancestors.
     function _restBook(
         bytes32 bookId,
         Book storage book,
@@ -418,6 +477,13 @@ abstract contract RadixMatchingEngine {
         emit OrderRested(bookId, restingOrder, owner, isBid);
     }
 
+    /// @notice Insert an already nonce-assigned resting order into the selected side tree.
+    /// @param book Book storage containing both side roots.
+    /// @param restingOrder Packed leaf to insert.
+    /// @param price Order price.
+    /// @param nonce Assigned decrementing nonce.
+    /// @param isBid True for bid tree, false for ask tree.
+    /// @param hookEnabled True to record a top-order change if insertion improves the book.
     function _insertRestingOrder(
         Book storage book,
         bytes32 restingOrder,
@@ -504,6 +570,11 @@ abstract contract RadixMatchingEngine {
         }
     }
 
+    /// @notice Emit an ask match event from the right-spine matcher.
+    /// @dev
+    /// Dirty branch words may have stale quantity fields. For aggregate same-price fills, the event
+    /// node is rewritten with the actual fill quantity so offchain consumers see the consumed
+    /// amount even when the stored branch anchor was intentionally stale.
     function _emitAskRightSpineMatch(
         bytes32 bookId,
         bytes32 node,
@@ -516,6 +587,8 @@ abstract contract RadixMatchingEngine {
         );
     }
 
+    /// @notice Emit a bid match event from the right-spine matcher.
+    /// @dev Mirrors `_emitAskRightSpineMatch` for bid-side same-price aggregate fills.
     function _emitBidRightSpineMatch(
         bytes32 bookId,
         bytes32 node,
@@ -535,6 +608,7 @@ abstract contract RadixMatchingEngine {
     /// @return newNode Replacement node for this subtree after matching.
     /// @return fillQuantity Base quantity consumed from this subtree.
     /// @return quoteAmount Quote value consumed from this subtree.
+    /// @return matchChange Packed metadata for whether optimized right-spine anchors were retained.
     /// @dev
     /// The ask tree's rightmost path is best because ask prices are inverted in the sort key.
     /// Right-spine branch words may be stale after previous optimized updates, so this function
@@ -612,6 +686,10 @@ abstract contract RadixMatchingEngine {
     /// @return newNode Replacement node for this subtree after matching.
     /// @return fillQuantity Base quantity consumed from this subtree.
     /// @return quoteAmount Quote value consumed from this subtree.
+    /// @dev
+    /// Off-spine subtrees are exact because the right-spine optimization only preserves stale
+    /// anchors along the global best path. This lets the function aggregate-consume mixed-price
+    /// branches when the worst leaf still crosses and the whole quantity fits.
     function _matchAskSubtree(bytes32 bookId, Book storage book, bytes32 node, uint24 limitPrice, uint192 remaining)
         private
         returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
@@ -661,6 +739,7 @@ abstract contract RadixMatchingEngine {
     /// @return newNode Replacement node for this subtree after matching.
     /// @return fillQuantity Base quantity consumed from this subtree.
     /// @return quoteAmount Quote value consumed from this subtree.
+    /// @return matchChange Packed metadata for whether optimized right-spine anchors were retained.
     /// @dev
     /// The bid tree's rightmost path is best because higher prices sort later. Right-spine branch
     /// words may be stale after previous optimized updates, so this function only aggregate-consumes
@@ -739,6 +818,10 @@ abstract contract RadixMatchingEngine {
     /// @return newNode Replacement node for this subtree after matching.
     /// @return fillQuantity Base quantity consumed from this subtree.
     /// @return quoteAmount Quote value consumed from this subtree.
+    /// @dev
+    /// Off-spine bid subtrees are exact for the same reason as ask subtrees. If the subtree's
+    /// lowest bid price still crosses the ask limit and quantity fits, the whole branch can be
+    /// consumed without walking every leaf.
     function _matchBidSubtree(bytes32 bookId, Book storage book, bytes32 node, uint24 limitPrice, uint192 remaining)
         private
         returns (bytes32 newNode, uint192 fillQuantity, uint256 quoteAmount)
@@ -785,6 +868,7 @@ abstract contract RadixMatchingEngine {
     /// @param root Current subtree root.
     /// @param node Node to insert.
     /// @param nodeKey Bid sort key for `node`.
+    /// @param hookEnabled True while this recursive frame can still affect the bid-side best order.
     /// @return newRoot Updated subtree root.
     /// @dev
     /// Insertion follows Patricia/radix-tree rules. If the new key diverges before the current
@@ -830,6 +914,7 @@ abstract contract RadixMatchingEngine {
     /// @param root Current subtree root.
     /// @param node Node to insert.
     /// @param nodeKey Ask sort key for `node`.
+    /// @param hookEnabled True while this recursive frame can still affect the ask-side best order.
     /// @return newRoot Updated subtree root.
     /// @dev Same insertion algorithm as bids, but callers provide inverted-price ask keys.
     function _insertAsk(Book storage book, bytes32 root, bytes32 node, uint64 nodeKey, bool hookEnabled)
@@ -871,8 +956,11 @@ abstract contract RadixMatchingEngine {
     /// @notice Remove one bid leaf by exact bid sort key.
     /// @param root Current subtree root.
     /// @param targetKey Bid sort key for the original order.
+    /// @param rightmost True if this frame is still on the bid-side best path.
     /// @return newRoot Updated subtree root.
     /// @return removed Live leaf that was removed, or zero if absent.
+    /// @return dirtyChanged True if a right-spine anchor was retained with a changed right child.
+    /// @return removedTop True if the removed leaf was the top bid.
     /// @dev
     /// Cancel searches by price/nonce, not by full order word, because a partially filled live leaf
     /// has the same price/nonce as the original order but a smaller quantity.
@@ -910,8 +998,11 @@ abstract contract RadixMatchingEngine {
     /// @notice Remove one ask leaf by exact ask sort key.
     /// @param root Current subtree root.
     /// @param targetKey Ask sort key for the original order.
+    /// @param rightmost True if this frame is still on the ask-side best path.
     /// @return newRoot Updated subtree root.
     /// @return removed Live leaf that was removed, or zero if absent.
+    /// @return dirtyChanged True if a right-spine anchor was retained with a changed right child.
+    /// @return removedTop True if the removed leaf was the top ask.
     /// @dev Mirrors `_removeBidByKey` using inverted-price ask keys.
     function _removeAskByKey(Book storage book, bytes32 root, uint64 targetKey, bool rightmost)
         private
@@ -1209,6 +1300,8 @@ abstract contract RadixMatchingEngine {
     }
 
     /// @notice Consume and clear the latest recorded top-order change.
+    /// @return outgoingAmount Previous top order's live amount in the rewarded token.
+    /// @return incomingNonce New top order nonce, or zero if the side is empty/unknown.
     function _takeTopOrderChange() internal returns (uint192 outgoingAmount, uint40 incomingNonce) {
         /// @solidity memory-safe-assembly
         assembly {
@@ -1339,18 +1432,25 @@ abstract contract RadixMatchingEngine {
     }
 
     /// @notice Return the low 40-bit nonce for a book.
+    /// @param book Book storage to inspect.
+    /// @return Next decrementing nonce, or zero if the book is uninitialized.
     function _nextNonce(Book storage book) internal view returns (uint40) {
         // forge-lint: disable-next-line(unsafe-typecast)
         return uint40(book.nonceAndFlags & _NONCE_MASK);
     }
 
     /// @notice Initialize an empty book.
+    /// @param book Book storage to initialize.
+    /// @dev No-op if the book already has a nonce. New books start at `type(uint40).max`.
     function _initializeBook(Book storage book) internal {
         if (_nextNonce(book) != 0) return;
         book.nonceAndFlags = uint256(type(uint40).max);
     }
 
     /// @notice Build the globally unique owner key for an order in a book.
+    /// @param bookId Book id that scopes the order.
+    /// @param order Original packed order node.
+    /// @return id `keccak256(bookId, order)`.
     function _orderId(bytes32 bookId, bytes32 order) internal pure returns (bytes32 id) {
         /// @solidity memory-safe-assembly
         assembly {
@@ -1385,6 +1485,10 @@ abstract contract RadixMatchingEngine {
     }
 
     /// @notice Decode and validate an incoming order before nonce assignment.
+    /// @param order Packed incoming order.
+    /// @return price Nonzero 24-bit limit price.
+    /// @return quantity Nonzero 192-bit base quantity.
+    /// @dev Incoming orders must have zero nonce bits; the engine assigns nonce only if they rest.
     function _validateIncomingOrder(bytes32 order) internal pure returns (uint24 price, uint192 quantity) {
         /// @solidity memory-safe-assembly
         assembly {
@@ -1444,11 +1548,15 @@ abstract contract RadixMatchingEngine {
     }
 
     /// @notice Mark packed match metadata as having retained a dirty right-spine anchor.
+    /// @param change Existing packed match-change metadata.
+    /// @return Updated metadata with the dirty bit set.
     function _markMatchDirty(bytes32 change) private pure returns (bytes32) {
         return bytes32(uint256(change) | _MATCH_CHANGE_DIRTY);
     }
 
     /// @notice Return whether packed match metadata indicates a dirty right-spine anchor changed.
+    /// @param change Packed match-change metadata.
+    /// @return True if the dirty bit is set.
     function _matchChangeDirty(bytes32 change) private pure returns (bool) {
         return uint256(change) & _MATCH_CHANGE_DIRTY != 0;
     }
