@@ -249,7 +249,8 @@ abstract contract RadixMatchingEngine {
         uint192 remaining,
         bool hookEnabled
     ) private returns (uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount) {
-        bytes32 root = book.tree[_ROOT_NODE].leftNode;
+        Branch storage rootBranch = book.tree[_ROOT_NODE];
+        bytes32 root = rootBranch.leftNode;
         if (root == bytes32(0)) return (remaining, 0, 0);
 
         bytes32 newRoot;
@@ -261,7 +262,7 @@ abstract contract RadixMatchingEngine {
         unchecked {
             newRemaining = remaining - baseFilled;
         }
-        if (newRoot != root) book.tree[_ROOT_NODE].leftNode = newRoot;
+        if (newRoot != root) rootBranch.leftNode = newRoot;
         if (_matchChangeDirty(matchChange) && newRoot != bytes32(0)) _setRightSpineDirty(book, false);
     }
 
@@ -282,7 +283,8 @@ abstract contract RadixMatchingEngine {
         uint192 remaining,
         bool hookEnabled
     ) private returns (uint192 newRemaining, uint192 baseFilled, uint256 quoteAmount) {
-        bytes32 root = book.tree[_ROOT_NODE].rightNode;
+        Branch storage rootBranch = book.tree[_ROOT_NODE];
+        bytes32 root = rootBranch.rightNode;
         if (root == bytes32(0)) return (remaining, 0, 0);
 
         bytes32 newRoot;
@@ -294,7 +296,7 @@ abstract contract RadixMatchingEngine {
         unchecked {
             newRemaining = remaining - baseFilled;
         }
-        if (newRoot != root) book.tree[_ROOT_NODE].rightNode = newRoot;
+        if (newRoot != root) rootBranch.rightNode = newRoot;
         if (_matchChangeDirty(matchChange) && newRoot != bytes32(0)) _setRightSpineDirty(book, true);
     }
 
@@ -391,15 +393,16 @@ abstract contract RadixMatchingEngine {
         private
         returns (bytes32 removed)
     {
+        Branch storage rootBranch = book.tree[_ROOT_NODE];
         if (isBid) {
-            bytes32 root = book.tree[_ROOT_NODE].rightNode;
+            bytes32 root = rootBranch.rightNode;
             bytes32 newRoot;
             if (root != bytes32(0)) {
                 bool dirtyChanged;
                 bool removedTop;
                 (newRoot, removed, dirtyChanged, removedTop) = _removeBidByKey(book, root, _bidSortKey(order), true);
                 if (removed != bytes32(0) && newRoot != root) {
-                    book.tree[_ROOT_NODE].rightNode = newRoot;
+                    rootBranch.rightNode = newRoot;
                 }
                 if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, true);
                 if (hookEnabled && removedTop) {
@@ -407,14 +410,14 @@ abstract contract RadixMatchingEngine {
                 }
             }
         } else {
-            bytes32 root = book.tree[_ROOT_NODE].leftNode;
+            bytes32 root = rootBranch.leftNode;
             bytes32 newRoot;
             if (root != bytes32(0)) {
                 bool dirtyChanged;
                 bool removedTop;
                 (newRoot, removed, dirtyChanged, removedTop) = _removeAskByKey(book, root, _askSortKey(order), true);
                 if (removed != bytes32(0) && newRoot != root) {
-                    book.tree[_ROOT_NODE].leftNode = newRoot;
+                    rootBranch.leftNode = newRoot;
                 }
                 if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, false);
                 if (hookEnabled && removedTop) {
@@ -451,10 +454,11 @@ abstract contract RadixMatchingEngine {
     ) internal returns (bytes32 restingOrder, uint40 nextNonceAfter) {
         uint256 dirtyFlag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
         if (nonceAndFlags & dirtyFlag != 0) {
+            Branch storage rootBranch = book.tree[_ROOT_NODE];
             if (isBid) {
-                book.tree[_ROOT_NODE].rightNode = _materializeRightSpine(book, book.tree[_ROOT_NODE].rightNode);
+                rootBranch.rightNode = _materializeRightSpine(book, rootBranch.rightNode);
             } else {
-                book.tree[_ROOT_NODE].leftNode = _materializeRightSpine(book, book.tree[_ROOT_NODE].leftNode);
+                rootBranch.leftNode = _materializeRightSpine(book, rootBranch.leftNode);
             }
             nonceAndFlags &= ~dirtyFlag;
         }
@@ -492,14 +496,15 @@ abstract contract RadixMatchingEngine {
         bool isBid,
         bool hookEnabled
     ) private {
+        Branch storage rootBranch = book.tree[_ROOT_NODE];
         if (isBid) {
-            bytes32 root = book.tree[_ROOT_NODE].rightNode;
-            book.tree[_ROOT_NODE].rightNode =
+            bytes32 root = rootBranch.rightNode;
+            rootBranch.rightNode =
                 _insertBid(book, root, restingOrder, (uint64(price) << 40) | uint64(nonce), hookEnabled);
         } else {
-            bytes32 root = book.tree[_ROOT_NODE].leftNode;
+            bytes32 root = rootBranch.leftNode;
             unchecked {
-                book.tree[_ROOT_NODE].leftNode = _insertAsk(
+                rootBranch.leftNode = _insertAsk(
                     book, root, restingOrder, (uint64(_MAX_PRICE - price) << 40) | uint64(nonce), hookEnabled
                 );
             }
