@@ -282,10 +282,9 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     function poolId(address token0, address token1) public pure returns (bytes32 id) {
         /// @solidity memory-safe-assembly
         assembly {
-            let ptr := mload(0x40)
-            mstore(ptr, token0)
-            mstore(add(ptr, 0x20), token1)
-            id := keccak256(ptr, 0x40)
+            mstore(0x00, token0)
+            mstore(0x20, token1)
+            id := keccak256(0x00, 0x40)
         }
     }
 

@@ -1454,10 +1454,9 @@ abstract contract RadixMatchingEngine {
     function _orderId(bytes32 bookId, bytes32 order) internal pure returns (bytes32 id) {
         /// @solidity memory-safe-assembly
         assembly {
-            let ptr := mload(0x40)
-            mstore(ptr, bookId)
-            mstore(add(ptr, 0x20), order)
-            id := keccak256(ptr, 0x40)
+            mstore(0x00, bookId)
+            mstore(0x20, order)
+            id := keccak256(0x00, 0x40)
         }
     }
 
