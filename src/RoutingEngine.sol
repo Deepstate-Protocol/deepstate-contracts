@@ -107,10 +107,9 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     uint256 private _feeConfig;
 
     /// @notice Emitted when a book is initialized.
-    /// @param poolId Canonical sorted-token pool id.
     /// @param bookId Book id derived from sorted tokens and epoch.
     /// @param epoch Epoch initialized for the pool.
-    event BookInitialized(bytes32 poolId, bytes32 bookId, uint256 epoch);
+    event BookInitialized(bytes32 bookId, uint256 epoch);
 
     /// @notice Emitted when top-of-book hooks are configured for a pool.
     /// @param poolId Canonical sorted-token pool id.
@@ -282,10 +281,9 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     function poolId(address token0, address token1) public pure returns (bytes32 id) {
         /// @solidity memory-safe-assembly
         assembly {
-            let ptr := mload(0x40)
-            mstore(ptr, token0)
-            mstore(add(ptr, 0x20), token1)
-            id := keccak256(ptr, 0x40)
+            mstore(0x00, token0)
+            mstore(0x20, token1)
+            id := keccak256(0x00, 0x40)
         }
     }
 
@@ -394,8 +392,9 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         uint192 remaining;
         uint192 baseFilled;
         uint256 quoteAmount;
+        uint256 matchedNonceAndFlags;
 
-        (limitPrice, remaining, baseFilled, quoteAmount) =
+        (limitPrice, remaining, baseFilled, quoteAmount, matchedNonceAndFlags) =
             _matchOrValidate(params, routedBookId, routedBook, routedNonceAndFlags);
 
         if (remaining != 0 && params.fillOrKill) revert FillOrKill();
@@ -412,7 +411,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
                     params.epoch,
                     routedBookId,
                     routedBook,
-                    routedNonceAndFlags,
+                    matchedNonceAndFlags,
                     routedNonce == 0,
                     limitPrice,
                     remaining,
@@ -435,7 +434,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
                     params.epoch,
                     routedBookId,
                     routedBook,
-                    routedNonceAndFlags,
+                    matchedNonceAndFlags,
                     routedNonce == 0,
                     limitPrice,
                     remaining,
@@ -488,7 +487,17 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         bytes32 routedBookId,
         Book storage routedBook,
         uint256 routedNonceAndFlags
-    ) private returns (uint24 limitPrice, uint192 remaining, uint192 baseFilled, uint256 quoteAmount) {
+    )
+        private
+        returns (
+            uint24 limitPrice,
+            uint192 remaining,
+            uint192 baseFilled,
+            uint256 quoteAmount,
+            uint256 nextNonceAndFlags
+        )
+    {
+        nextNonceAndFlags = routedNonceAndFlags;
         // forge-lint: disable-next-line(unsafe-typecast)
         uint40 routedNonce = uint40(routedNonceAndFlags);
         if (routedNonce == 0) {
@@ -496,8 +505,8 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
             (limitPrice, remaining) = _validateIncomingOrder(params.order);
         } else {
             bool hookEnabled = _bookHookEnabled(routedNonceAndFlags, !params.isBid);
-            (limitPrice, remaining, baseFilled, quoteAmount) =
-                _matchBook(routedBookId, routedBook, params.order, params.isBid, hookEnabled);
+            (limitPrice, remaining, baseFilled, quoteAmount, nextNonceAndFlags) =
+                _matchBook(routedBookId, routedBook, routedNonceAndFlags, params.order, params.isBid, hookEnabled);
             if (hookEnabled) _executeTopOrderHook(params.token0, params.token1, routedBookId, !params.isBid);
         }
     }
@@ -530,7 +539,6 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         uint192 remaining,
         bool isBid
     ) private returns (bytes32 restingOrder) {
-        if (!routedBookWasEmpty) routedNonceAndFlags = routedBook.nonceAndFlags;
         bytes32 restBookId;
         Book storage restBook;
         uint256 restNonceAndFlags;
@@ -615,7 +623,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         if (poolState & _POOL_HOOK_ACTIVE_MASK != 0) bookHookFlags = _bookHookFlags(poolState);
         if (nonce == 0) {
             nonceAndFlags = uint256(type(uint40).max) | bookHookFlags;
-            emit BookInitialized(pid, id, epoch);
+            emit BookInitialized(id, epoch);
             return (id, book, nonceAndFlags);
         }
 
@@ -629,7 +637,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
             id = bookId(token0, token1, epoch);
             book = books[id];
             nonceAndFlags = uint256(type(uint40).max) | bookHookFlags;
-            emit BookInitialized(pid, id, epoch);
+            emit BookInitialized(id, epoch);
         }
     }
 
@@ -656,7 +664,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         bytes32 id = bookId(token0, token1, epoch);
         Book storage nextBook = books[id];
         _initializeBookWithHookFlags(nextBook, bookHookFlags);
-        emit BookInitialized(pid, id, epoch);
+        emit BookInitialized(id, epoch);
     }
 
     /// @notice Consume transient top-change data and call the configured pool hook if needed.

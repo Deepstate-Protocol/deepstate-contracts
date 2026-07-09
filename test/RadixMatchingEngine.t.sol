@@ -129,10 +129,10 @@ contract RadixMatchingEngineTest is Test {
     uint256 internal constant BID_RIGHT_SPINE_DIRTY = uint256(1) << 40;
     uint256 internal constant ASK_RIGHT_SPINE_DIRTY = uint256(1) << 41;
 
-    event OrderRested(bytes32 bookId, bytes32 order, address owner, bool isBid);
-    event AskMatched(bytes32 bookId, bytes32 restingOrder, uint192 quantity, uint256 quoteAmount);
-    event BidMatched(bytes32 bookId, bytes32 restingOrder, uint192 quantity, uint256 quoteAmount);
-    event OrderCancelled(bytes32 bookId, bytes32 order, address owner, uint256 baseAmount, uint256 quoteAmount);
+    event OrderRested(bytes32 bookId, bytes32 order, bool isBid);
+    event AskMatched(bytes32 bookId, bytes32 restingOrder, uint192 quantity);
+    event BidMatched(bytes32 bookId, bytes32 restingOrder, uint192 quantity);
+    event OrderCancelled(bytes32 bookId, bytes32 order, uint256 baseAmount, uint256 quoteAmount);
 
     TestERC20 internal base;
     TestERC20 internal quote;
@@ -263,7 +263,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 expectedAsk = _order(90, 2, MAX_ORDER_NONCE);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit OrderRested(_bookId(), expectedAsk, bob, false);
+        emit OrderRested(_bookId(), expectedAsk, false);
 
         vm.prank(bob);
         bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
@@ -273,9 +273,9 @@ contract RadixMatchingEngineTest is Test {
         bytes32 expectedBid = _order(100, 1, MAX_ORDER_NONCE - 1);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), restingAsk, 2, 180);
+        emit AskMatched(_bookId(), restingAsk, 2);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit OrderRested(_bookId(), expectedBid, alice, true);
+        emit OrderRested(_bookId(), expectedBid, true);
 
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 3, 0), true);
@@ -283,7 +283,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(restingBid, expectedBid);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit OrderCancelled(_bookId(), restingAsk, bob, 0, 180);
+        emit OrderCancelled(_bookId(), restingAsk, 0, 180);
 
         vm.prank(bob);
         (uint256 bobBaseAmount, uint256 bobQuoteAmount) = engine.cancel(restingAsk);
@@ -292,7 +292,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(bobQuoteAmount, 180);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit OrderCancelled(_bookId(), restingBid, alice, 0, 100);
+        emit OrderCancelled(_bookId(), restingBid, 0, 100);
 
         vm.prank(alice);
         (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = engine.cancel(restingBid);
@@ -305,7 +305,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 expectedBid = _order(100, 2, MAX_ORDER_NONCE);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit OrderRested(_bookId(), expectedBid, alice, true);
+        emit OrderRested(_bookId(), expectedBid, true);
 
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
@@ -315,9 +315,9 @@ contract RadixMatchingEngineTest is Test {
         bytes32 expectedAsk = _order(90, 1, MAX_ORDER_NONCE - 1);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), restingBid, 2, 200);
+        emit BidMatched(_bookId(), restingBid, 2);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit OrderRested(_bookId(), expectedAsk, bob, false);
+        emit OrderRested(_bookId(), expectedAsk, false);
 
         vm.prank(bob);
         bytes32 restingAsk = engine.fill(_order(90, 3, 0), false);
@@ -326,7 +326,7 @@ contract RadixMatchingEngineTest is Test {
         assertTrue(engine.isBidOrder(restingBid));
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit OrderCancelled(_bookId(), restingBid, alice, 2, 0);
+        emit OrderCancelled(_bookId(), restingBid, 2, 0);
 
         vm.prank(alice);
         (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = engine.cancel(restingBid);
@@ -336,7 +336,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.ownerOfOrder(_order(100, 0, MAX_ORDER_NONCE)), address(0));
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit OrderCancelled(_bookId(), restingAsk, bob, 1, 0);
+        emit OrderCancelled(_bookId(), restingAsk, 1, 0);
 
         vm.prank(bob);
         (uint256 bobBaseAmount, uint256 bobQuoteAmount) = engine.cancel(restingAsk);
@@ -353,9 +353,9 @@ contract RadixMatchingEngineTest is Test {
         bytes32 highAsk = engine.fill(_order(90, 1, 0), false);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), lowAsk, 1, 80);
+        emit AskMatched(_bookId(), lowAsk, 1);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), highAsk, 1, 90);
+        emit AskMatched(_bookId(), highAsk, 1);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
@@ -372,9 +372,9 @@ contract RadixMatchingEngineTest is Test {
         bytes32 lowBid = engine.fill(_order(90, 1, 0), true);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), highBid, 1, 100);
+        emit BidMatched(_bookId(), highBid, 1);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), lowBid, 1, 90);
+        emit BidMatched(_bookId(), lowBid, 1);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(80, 2, 0), false);
@@ -2028,9 +2028,9 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_subtreeQuantity(aggregate), 5);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), bestAsk, 1, 10);
+        emit AskMatched(_bookId(), bestAsk, 1);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), aggregate, 5, 100);
+        emit AskMatched(_bookId(), aggregate, 5);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(20, 6, 0), true);
@@ -2066,11 +2066,11 @@ contract RadixMatchingEngineTest is Test {
         bytes32 bestAsk = engine.fill(_order(10, 1, 0), false);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), bestAsk, 1, 10);
+        emit AskMatched(_bookId(), bestAsk, 1);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), lowerAsk, 2, 40);
+        emit AskMatched(_bookId(), lowerAsk, 2);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), higherAsk, 3, 63);
+        emit AskMatched(_bookId(), higherAsk, 3);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(21, 6, 0), true);
@@ -2109,9 +2109,9 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_subtreeQuantity(aggregate), 5);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), bestBid, 1, 80);
+        emit BidMatched(_bookId(), bestBid, 1);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), aggregate, 5, 350);
+        emit BidMatched(_bookId(), aggregate, 5);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(70, 6, 0), false);
@@ -2148,11 +2148,11 @@ contract RadixMatchingEngineTest is Test {
         bytes32 bestBid = engine.fill(_order(80, 1, 0), true);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), bestBid, 1, 80);
+        emit BidMatched(_bookId(), bestBid, 1);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), higherBid, 2, 140);
+        emit BidMatched(_bookId(), higherBid, 2);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), lowerBid, 3, 207);
+        emit BidMatched(_bookId(), lowerBid, 3);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(69, 6, 0), false);
@@ -2189,11 +2189,11 @@ contract RadixMatchingEngineTest is Test {
         bytes32 bestAsk = engine.fill(_order(10, 1, 0), false);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), bestAsk, 1, 10);
+        emit AskMatched(_bookId(), bestAsk, 1);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), lowerAsk, 2, 40);
+        emit AskMatched(_bookId(), lowerAsk, 2);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), higherAsk, 1, 21);
+        emit AskMatched(_bookId(), higherAsk, 1);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(21, 4, 0), true);
@@ -2234,7 +2234,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 offSpineAggregate = _branchFor(lowerAsk, higherAsk);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), bestAsk, 1, 10);
+        emit AskMatched(_bookId(), bestAsk, 1);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(20, 4, 0), true);
@@ -2274,11 +2274,11 @@ contract RadixMatchingEngineTest is Test {
         bytes32 bestBid = engine.fill(_order(80, 1, 0), true);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), bestBid, 1, 80);
+        emit BidMatched(_bookId(), bestBid, 1);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), higherBid, 2, 140);
+        emit BidMatched(_bookId(), higherBid, 2);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), lowerBid, 1, 69);
+        emit BidMatched(_bookId(), lowerBid, 1);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(69, 4, 0), false);
@@ -2318,7 +2318,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 offSpineAggregate = _branchFor(higherBid, lowerBid);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), bestBid, 1, 80);
+        emit BidMatched(_bookId(), bestBid, 1);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(70, 4, 0), false);
@@ -2384,7 +2384,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.askRoot(), aggregate);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), aggregate, 5, 250);
+        emit AskMatched(_bookId(), aggregate, 5);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(price, 5, 0), true);
@@ -2429,7 +2429,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.bidRoot(), aggregate);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), aggregate, 5, 350);
+        emit BidMatched(_bookId(), aggregate, 5);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(price, 5, 0), false);
@@ -2482,7 +2482,7 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 dirtyAggregate = _order(price, 4, _nonce(firstAsk));
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), dirtyAggregate, 4, 240);
+        emit AskMatched(_bookId(), dirtyAggregate, 4);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(price, 4, 0), true);
@@ -2522,7 +2522,7 @@ contract RadixMatchingEngineTest is Test {
 
         bytes32 dirtyAggregate = _order(price, 4, _nonce(firstBid));
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), dirtyAggregate, 4, 320);
+        emit BidMatched(_bookId(), dirtyAggregate, 4);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(price, 4, 0), false);
@@ -2564,9 +2564,9 @@ contract RadixMatchingEngineTest is Test {
         );
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), reducedFirstAsk, 1, 60);
+        emit AskMatched(_bookId(), reducedFirstAsk, 1);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), secondAsk, 3, 183);
+        emit AskMatched(_bookId(), secondAsk, 3);
 
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(61, 4, 0), true);
@@ -2610,9 +2610,9 @@ contract RadixMatchingEngineTest is Test {
         );
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), reducedFirstBid, 1, 80);
+        emit BidMatched(_bookId(), reducedFirstBid, 1);
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), secondBid, 3, 237);
+        emit BidMatched(_bookId(), secondBid, 3);
 
         vm.prank(carol);
         bytes32 restingAsk = engine.fill(_order(79, 4, 0), false);
