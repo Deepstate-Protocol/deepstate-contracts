@@ -496,7 +496,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         } else {
             bool hookEnabled = _bookHookEnabled(routedNonceAndFlags, !params.isBid);
             (limitPrice, remaining, baseFilled, quoteAmount) =
-                _matchBook(routedBookId, routedBook, params.order, params.isBid, hookEnabled);
+                _matchBook(routedBookId, routedBook, routedNonceAndFlags, params.order, params.isBid, hookEnabled);
             if (hookEnabled) _executeTopOrderHook(params.token0, params.token1, routedBookId, !params.isBid);
         }
     }
