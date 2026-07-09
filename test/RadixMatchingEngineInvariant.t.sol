@@ -34,12 +34,11 @@ contract RadixMatchingEngineHandler is Test {
     uint192 internal constant MAX_ORDER_QUANTITY = type(uint192).max / 96;
     uint256 internal constant INITIAL_BALANCE = type(uint216).max;
     uint24 internal constant SAME_PRICE = 777_777;
-    bytes32 internal constant ORDER_RESTED_TOPIC = keccak256("OrderRested(bytes32,bytes32,address,bool)");
-    bytes32 internal constant ASK_MATCHED_TOPIC = keccak256("AskMatched(bytes32,bytes32,uint192,uint256)");
-    bytes32 internal constant BID_MATCHED_TOPIC = keccak256("BidMatched(bytes32,bytes32,uint192,uint256)");
-    bytes32 internal constant ORDER_CANCELLED_TOPIC =
-        keccak256("OrderCancelled(bytes32,bytes32,address,uint256,uint256)");
-    bytes32 internal constant BOOK_INITIALIZED_TOPIC = keccak256("BookInitialized(bytes32,bytes32,uint256)");
+    bytes32 internal constant ORDER_RESTED_TOPIC = keccak256("OrderRested(bytes32,bytes32,bool)");
+    bytes32 internal constant ASK_MATCHED_TOPIC = keccak256("AskMatched(bytes32,bytes32,uint192)");
+    bytes32 internal constant BID_MATCHED_TOPIC = keccak256("BidMatched(bytes32,bytes32,uint192)");
+    bytes32 internal constant ORDER_CANCELLED_TOPIC = keccak256("OrderCancelled(bytes32,bytes32,uint256,uint256)");
+    bytes32 internal constant BOOK_INITIALIZED_TOPIC = keccak256("BookInitialized(bytes32,uint256)");
 
     address[] internal actors;
     TrackedOrder[] internal trackedOrders;
@@ -125,7 +124,7 @@ contract RadixMatchingEngineHandler is Test {
             (uint256 expectedBaseAmount, uint256 expectedQuoteAmount) = _cancelAmounts(index);
             assertEq(baseAmount, expectedBaseAmount, "cancel base amount");
             assertEq(quoteAmount, expectedQuoteAmount, "cancel quote amount");
-            _assertCancelLogs(entries, order, owner, baseAmount, quoteAmount);
+            _assertCancelLogs(entries, order, baseAmount, quoteAmount);
             _applyCancel(index);
         } catch (bytes memory reason) {
             vm.getRecordedLogs();
@@ -282,7 +281,7 @@ contract RadixMatchingEngineHandler is Test {
             Vm.Log[] memory entries = vm.getRecordedLogs();
             (uint192 remaining, uint192 baseFilled, uint256 quoteAmount) =
                 _applyFill(actorIndex, price, quantity, isBid, restingOrder);
-            _assertFillLogs(entries, actor, isBid, restingOrder, remaining, baseFilled, quoteAmount);
+            _assertFillLogs(entries, isBid, restingOrder, remaining, baseFilled, quoteAmount);
         } catch (bytes memory reason) {
             vm.getRecordedLogs();
             // Empty returndata here is a harness-level low-level call failure, usually from the
@@ -351,7 +350,6 @@ contract RadixMatchingEngineHandler is Test {
 
     function _assertFillLogs(
         Vm.Log[] memory entries,
-        address actor,
         bool isBid,
         bytes32 restingOrder,
         uint192 remaining,
@@ -368,7 +366,7 @@ contract RadixMatchingEngineHandler is Test {
             bytes32 topic = entry.topics[0];
             if (topic == ORDER_RESTED_TOPIC) {
                 ++state.restedEventCount;
-                _assertRestedLog(entry, actor, isBid, restingOrder);
+                _assertRestedLog(entry, isBid, restingOrder);
             } else if (topic == ASK_MATCHED_TOPIC || topic == BID_MATCHED_TOPIC) {
                 ++state.matchedEventCount;
                 (uint24 eventPrice, uint192 eventQuantity, uint256 eventQuoteAmount) =
@@ -394,13 +392,9 @@ contract RadixMatchingEngineHandler is Test {
         assertTrue(state.restedEventCount != 0 || state.matchedEventCount != 0, "fill event count");
     }
 
-    function _assertCancelLogs(
-        Vm.Log[] memory entries,
-        bytes32 order,
-        address owner,
-        uint256 baseAmount,
-        uint256 quoteAmount
-    ) private {
+    function _assertCancelLogs(Vm.Log[] memory entries, bytes32 order, uint256 baseAmount, uint256 quoteAmount)
+        private
+    {
         uint256 cancelledEventCount;
 
         for (uint256 i; i < entries.length; ++i) {
@@ -411,7 +405,7 @@ contract RadixMatchingEngineHandler is Test {
             bytes32 topic = entry.topics[0];
             if (topic == ORDER_CANCELLED_TOPIC) {
                 ++cancelledEventCount;
-                _assertCancelledLog(entry, order, owner, baseAmount, quoteAmount);
+                _assertCancelledLog(entry, order, baseAmount, quoteAmount);
             } else if (topic == ORDER_RESTED_TOPIC || topic == ASK_MATCHED_TOPIC || topic == BID_MATCHED_TOPIC) {
                 fail("fill event during cancel");
             } else if (topic == BOOK_INITIALIZED_TOPIC) {
@@ -424,13 +418,11 @@ contract RadixMatchingEngineHandler is Test {
         assertEq(cancelledEventCount, 1, "cancel event count");
     }
 
-    function _assertRestedLog(Vm.Log memory entry, address actor, bool isBid, bytes32 restingOrder) private pure {
+    function _assertRestedLog(Vm.Log memory entry, bool isBid, bytes32 restingOrder) private pure {
         assertEq(entry.topics.length, 1, "rested topic count");
-        (bytes32 eventBookId, bytes32 eventOrder, address eventOwner, bool eventIsBid) =
-            abi.decode(entry.data, (bytes32, bytes32, address, bool));
+        (bytes32 eventBookId, bytes32 eventOrder, bool eventIsBid) = abi.decode(entry.data, (bytes32, bytes32, bool));
         eventBookId;
         assertEq(eventOrder, restingOrder, "rested order log");
-        assertEq(eventOwner, actor, "rested owner log");
         assertEq(eventIsBid, isBid, "rested side log");
     }
 
@@ -445,15 +437,14 @@ contract RadixMatchingEngineHandler is Test {
         bool restingIsBid = topic == BID_MATCHED_TOPIC;
         assertEq(restingIsBid, !incomingIsBid, "matched side log");
 
-        (bytes32 eventBookId, bytes32 restingNode, uint192 quantity, uint256 quoteAmount) =
-            abi.decode(entry.data, (bytes32, bytes32, uint192, uint256));
+        (bytes32 eventBookId, bytes32 restingNode, uint192 quantity) =
+            abi.decode(entry.data, (bytes32, bytes32, uint192));
         eventBookId;
         assertTrue(restingNode != bytes32(0), "matched node log");
 
         eventPrice = _price(restingNode);
         assertGt(quantity, 0, "matched quantity log");
         assertLe(quantity, _quantity(restingNode), "matched node quantity log");
-        assertEq(quoteAmount, _quoteValue(eventPrice, quantity), "matched quote price log");
         if (sawMatchedPrice) {
             if (incomingIsBid) {
                 assertGe(eventPrice, previousMatchedPrice, "matched ask price order");
@@ -462,27 +453,18 @@ contract RadixMatchingEngineHandler is Test {
             }
         }
         eventQuantity = quantity;
-        eventQuoteAmount = quoteAmount;
+        eventQuoteAmount = _quoteValue(eventPrice, quantity);
     }
 
-    function _assertCancelledLog(
-        Vm.Log memory entry,
-        bytes32 order,
-        address owner,
-        uint256 baseAmount,
-        uint256 quoteAmount
-    ) private pure {
+    function _assertCancelledLog(Vm.Log memory entry, bytes32 order, uint256 baseAmount, uint256 quoteAmount)
+        private
+        pure
+    {
         assertEq(entry.topics.length, 1, "cancel topic count");
-        (
-            bytes32 eventBookId,
-            bytes32 eventOrder,
-            address eventOwner,
-            uint256 eventBaseAmount,
-            uint256 eventQuoteAmount
-        ) = abi.decode(entry.data, (bytes32, bytes32, address, uint256, uint256));
+        (bytes32 eventBookId, bytes32 eventOrder, uint256 eventBaseAmount, uint256 eventQuoteAmount) =
+            abi.decode(entry.data, (bytes32, bytes32, uint256, uint256));
         eventBookId;
         assertEq(eventOrder, order, "cancel order log");
-        assertEq(eventOwner, owner, "cancel owner log");
         assertEq(eventBaseAmount, baseAmount, "cancel base log");
         assertEq(eventQuoteAmount, quoteAmount, "cancel quote log");
         assertTrue(eventBaseAmount != 0 || eventQuoteAmount != 0, "cancel empty log");
