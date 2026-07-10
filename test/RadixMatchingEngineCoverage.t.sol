@@ -73,6 +73,8 @@ contract RadixMatchingEngineCoverageTest is Test {
 
     event AskMatched(bytes32 bookId, bytes32 restingNode);
     event BidMatched(bytes32 bookId, bytes32 restingNode);
+    event AskSubtreeMatched(bytes32 bookId, bytes32 subtreeRoot, uint160 quantity, uint256 quoteAmount);
+    event BidSubtreeMatched(bytes32 bookId, bytes32 subtreeRoot, uint160 quantity, uint256 quoteAmount);
 
     CoverageERC20 internal base;
     CoverageERC20 internal quote;
@@ -439,12 +441,12 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(dave);
         bytes32 bestAsk = engine.fill(_order(10, 1, 0), false);
 
+        bytes32 askSubtreeRoot = _branchFor(lowerAsk, higherAsk, false);
+
         vm.expectEmit(false, false, false, true, address(engine));
         emit AskMatched(_bookId(), _matchEventNode(bestAsk, 1, _quoteValue(10, 1, false), false));
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), _matchEventNode(lowerAsk, 2, _quoteValue(20, 2, false), false));
-        vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), _matchEventNode(higherAsk, 3, _quoteValue(21, 3, false), false));
+        emit AskSubtreeMatched(_bookId(), askSubtreeRoot, 5, _quoteValue(20, 2, false) + _quoteValue(21, 3, false));
 
         vm.prank(carol);
         engine.fill(_order(21, 6, 0), true);
@@ -456,12 +458,12 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(dave);
         bytes32 bestBid = engine.fill(_order(80, 1, 0), true);
 
+        bytes32 bidSubtreeRoot = _branchFor(higherBid, lowerBid, true);
+
         vm.expectEmit(false, false, false, true, address(engine));
         emit BidMatched(_bookId(), _matchEventNode(bestBid, 1, _quoteValue(80, 1, true), true));
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), _matchEventNode(higherBid, 2, _quoteValue(70, 2, true), true));
-        vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), _matchEventNode(lowerBid, 3, _quoteValue(69, 3, true), true));
+        emit BidSubtreeMatched(_bookId(), bidSubtreeRoot, 5, _quoteValue(70, 2, true) + _quoteValue(69, 3, true));
 
         vm.prank(carol);
         engine.fill(_order(69, 6, 0), false);

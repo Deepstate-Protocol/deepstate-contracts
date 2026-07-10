@@ -139,6 +139,9 @@ abstract contract RadixMatchingEngine {
     bytes32 private constant _TOP_CHANGE_INCOMING_NONCE_SLOT =
         0xf95dfdfe2cf36f265e91ff578507ac6f6f9bffb77b95dcb89aef8ed16e5b1f45;
 
+    /// @dev Transient pointer to the current fill leg's dynamically growing in-memory match buffer.
+    bytes32 private constant _MATCH_BUFFER_SLOT = 0x7f8fe082ccb9a281fa5fa179f118219e229bb906df4e4aa8aee95977b867f45d;
+
     /// @dev Transient storage slot used by the custom reentrancy guard.
     bytes32 private constant _REENTRANCY_GUARD_SLOT =
         0xc55a21be1c6e869c49c7a5860f6c3a83187eb30a12bcd0421f3cf4f5871dccff;
@@ -160,6 +163,11 @@ abstract contract RadixMatchingEngine {
     /// and the consumed leaf or aggregate path identity.
     event AskMatched(bytes32 bookId, bytes32 restingNode);
 
+    /// @notice Multiple resting ask aggregates matched by one incoming order.
+    /// @dev Nodes use the exact `AskMatched` encoding and remain in execution-priority order.
+    /// This event is emitted only when one fill leg discovers at least two match nodes.
+    event AsksMatched(bytes32 bookId, bytes32[] restingNodes);
+
     /// @notice Matched resting bid liquidity.
     /// @dev `restingNode` uses the normal packed-node layout, except its quantity is the quantity
     /// filled by this event and its correction field makes the quote amount exactly recoverable.
@@ -169,6 +177,28 @@ abstract contract RadixMatchingEngine {
     /// @param restingNode Self-contained bid fill node carrying tick, fill quantity, correction,
     /// and the consumed leaf or aggregate path identity.
     event BidMatched(bytes32 bookId, bytes32 restingNode);
+
+    /// @notice Multiple resting bid aggregates matched by one incoming order.
+    /// @dev Nodes use the exact `BidMatched` encoding and remain in execution-priority order.
+    /// This event is emitted only when one fill leg discovers at least two match nodes.
+    event BidsMatched(bytes32 bookId, bytes32[] restingNodes);
+
+    /// @notice Matched a fully consumed exact mixed-price ask subtree.
+    /// @dev The event signature identifies the ask side without an additional boolean data word.
+    /// `subtreeRoot` identifies the historical child graph; individual maker fills are omitted.
+    /// @param bookId Book that supplied the resting asks.
+    /// @param subtreeRoot Root of the fully consumed mixed-price ask subtree.
+    /// @param quantity Total base quantity consumed from the subtree.
+    /// @param quoteAmount Exact total quote paid across the subtree.
+    event AskSubtreeMatched(bytes32 bookId, bytes32 subtreeRoot, uint160 quantity, uint256 quoteAmount);
+
+    /// @notice Matched a fully consumed exact mixed-price bid subtree.
+    /// @dev Mirrors `AskSubtreeMatched`; the event signature identifies the bid side.
+    /// @param bookId Book that supplied the resting bids.
+    /// @param subtreeRoot Root of the fully consumed mixed-price bid subtree.
+    /// @param quantity Total base quantity consumed from the subtree.
+    /// @param quoteAmount Exact total quote paid across the subtree.
+    event BidSubtreeMatched(bytes32 bookId, bytes32 subtreeRoot, uint160 quantity, uint256 quoteAmount);
 
     /// @notice Emitted when a maker cancels open quantity or claims filled proceeds.
     /// @param bookId Book that owned the order.
@@ -243,11 +273,15 @@ abstract contract RadixMatchingEngine {
     {
         (limitPrice, remaining) = _validateIncomingOrder(order);
 
+        _beginMatchBuffer();
+
         if (isBid) {
             (remaining, baseFilled, quoteAmount) = _matchIncomingBid(bookId, book, limitPrice, remaining, hookEnabled);
         } else {
             (remaining, baseFilled, quoteAmount) = _matchIncomingAsk(bookId, book, limitPrice, remaining, hookEnabled);
         }
+
+        _emitBufferedMatches(bookId, !isBid);
     }
 
     /// @notice Match an incoming bid against the ask root.
@@ -530,7 +564,7 @@ abstract contract RadixMatchingEngine {
                 _quoteDifferenceAndEventCode(restingPrice, restingQuantity, restingQuantity - fillQuantity, false);
         }
 
-        emit AskMatched(bookId, _withQuantityAndCorrection(root, fillQuantity, eventCorrectionCode));
+        _recordMatch(_withQuantityAndCorrection(root, fillQuantity, eventCorrectionCode));
 
         unchecked {
             newRemaining = remaining - fillQuantity;
@@ -568,7 +602,7 @@ abstract contract RadixMatchingEngine {
                 _quoteDifferenceAndEventCode(restingPrice, restingQuantity, restingQuantity - fillQuantity, true);
         }
 
-        emit BidMatched(bookId, _withQuantityAndCorrection(root, fillQuantity, eventCorrectionCode));
+        _recordMatch(_withQuantityAndCorrection(root, fillQuantity, eventCorrectionCode));
 
         unchecked {
             newRemaining = remaining - fillQuantity;
@@ -594,8 +628,7 @@ abstract contract RadixMatchingEngine {
         uint256 quoteAmount,
         uint256 matchFlags
     ) private {
-        emit AskMatched(
-            bookId,
+        _recordMatch(
             matchFlags & _MATCH_DIRTY != 0 ? _aggregateMatchEventNode(node, fillQuantity, quoteAmount, false) : node
         );
     }
@@ -609,8 +642,7 @@ abstract contract RadixMatchingEngine {
         uint256 quoteAmount,
         uint256 matchFlags
     ) private {
-        emit BidMatched(
-            bookId,
+        _recordMatch(
             matchFlags & _MATCH_DIRTY != 0 ? _aggregateMatchEventNode(node, fillQuantity, quoteAmount, true) : node
         );
     }
@@ -1146,11 +1178,7 @@ abstract contract RadixMatchingEngine {
                 ? _quoteAtFactor(factor, shift, nodeQuantity, restingIsBid)
                 : _uniformNodeQuoteAtFactor(book, node, restingIsBid, factor, shift);
             bytes32 eventNode = leftNode == bytes32(0) ? _withQuantityAndCorrection(node, nodeQuantity, 1) : node;
-            if (restingIsBid) {
-                emit BidMatched(bookId, eventNode);
-            } else {
-                emit AskMatched(bookId, eventNode);
-            }
+            _recordMatch(eventNode);
             return (bytes32(0), nodeQuantity, quoteAmount);
         }
 
@@ -1163,11 +1191,7 @@ abstract contract RadixMatchingEngine {
                 - _quoteAtFactor(factor, shift, newQuantity, restingIsBid);
             uint256 standaloneQuote = _quoteAtFactor(factor, shift, remaining, restingIsBid);
             uint32 eventCorrectionCode = quoteAmount == standaloneQuote ? 1 : 0;
-            if (restingIsBid) {
-                emit BidMatched(bookId, _withQuantityAndCorrection(node, remaining, eventCorrectionCode));
-            } else {
-                emit AskMatched(bookId, _withQuantityAndCorrection(node, remaining, eventCorrectionCode));
-            }
+            _recordMatch(_withQuantityAndCorrection(node, remaining, eventCorrectionCode));
             return (_withQuantity(node, newQuantity), remaining, quoteAmount);
         }
 
@@ -1476,6 +1500,84 @@ abstract contract RadixMatchingEngine {
         return _nonce(_rightmostLeaf(book, newNode));
     }
 
+    /// @notice Start an empty, dynamically growing match buffer for one fill leg.
+    /// @dev Memory layout is `capacity || length || nodes...`. Capacity starts at one so ordinary
+    /// single-maker fills reserve only three words. `_recordMatch` doubles it only when required.
+    function _beginMatchBuffer() private {
+        /// @solidity memory-safe-assembly
+        assembly {
+            let pointer := mload(0x40)
+            mstore(pointer, 1)
+            mstore(add(pointer, 0x20), 0)
+            mstore(0x40, add(pointer, 0x60))
+            tstore(_MATCH_BUFFER_SLOT, pointer)
+        }
+    }
+
+    /// @notice Append an exact packed match node to the current fill leg's memory buffer.
+    /// @dev Geometric growth keeps appends amortized constant time and imposes no fixed event cap.
+    /// Old allocations remain reserved until the call returns, as required by Solidity's monotonic
+    /// free-memory convention.
+    function _recordMatch(bytes32 node) private {
+        /// @solidity memory-safe-assembly
+        assembly {
+            let pointer := tload(_MATCH_BUFFER_SLOT)
+            let capacity := mload(pointer)
+            let length := mload(add(pointer, 0x20))
+
+            if eq(length, capacity) {
+                let newCapacity := shl(1, capacity)
+                let newPointer := mload(0x40)
+                mstore(newPointer, newCapacity)
+                mstore(add(newPointer, 0x20), length)
+
+                let source := add(pointer, 0x40)
+                let destination := add(newPointer, 0x40)
+                let end := add(source, shl(5, length))
+                for {} lt(source, end) {
+                    source := add(source, 0x20)
+                    destination := add(destination, 0x20)
+                } { mstore(destination, mload(source)) }
+
+                mstore(0x40, add(add(newPointer, 0x40), shl(5, newCapacity)))
+                pointer := newPointer
+                tstore(_MATCH_BUFFER_SLOT, pointer)
+            }
+
+            mstore(add(add(pointer, 0x40), shl(5, length)), node)
+            mstore(add(pointer, 0x20), add(length, 1))
+        }
+    }
+
+    /// @notice Emit the current leg as one compact event or one ABI-decodable batch event.
+    /// @param bookId Book that supplied the resting liquidity.
+    /// @param restingIsBid True when the buffered nodes came from the bid tree.
+    function _emitBufferedMatches(bytes32 bookId, bool restingIsBid) private {
+        uint256 length;
+        bytes32 singleNode;
+        bytes32[] memory nodes;
+
+        /// @solidity memory-safe-assembly
+        assembly {
+            let pointer := tload(_MATCH_BUFFER_SLOT)
+            length := mload(add(pointer, 0x20))
+            switch length
+            case 1 { singleNode := mload(add(pointer, 0x40)) }
+            default { nodes := add(pointer, 0x20) }
+            tstore(_MATCH_BUFFER_SLOT, 0)
+        }
+
+        if (length == 0) return;
+        if (length == 1) {
+            if (restingIsBid) emit BidMatched(bookId, singleNode);
+            else emit AskMatched(bookId, singleNode);
+            return;
+        }
+
+        if (restingIsBid) emit BidsMatched(bookId, nodes);
+        else emit AsksMatched(bookId, nodes);
+    }
+
     /// @notice Record one top-order change in transient storage for the router to consume.
     /// @dev Either slot being nonzero is the signal that a hook should be considered. First rest
     /// writes only `incomingNonce`; an emptied side writes only `outgoingAmount`.
@@ -1505,39 +1607,49 @@ abstract contract RadixMatchingEngine {
     /// @param restingIsBid True if the consumed subtree is from the bid tree.
     /// @return quoteAmount Total quote value of the consumed subtree.
     /// @dev
-    /// Same-price subtrees can be emitted as one aggregate match event because every maker
-    /// fills at the same price. Mixed-price subtrees recurse right first to preserve execution
-    /// priority in emitted match events.
+    /// This helper is reached only for an exact mixed-price subtree that fully crosses and fits
+    /// inside the incoming remainder. Quote calculation still visits every mixed child, but the
+    /// traversal emits one summary rather than one event per consumed leaf or uniform child.
     function _consumeSubtree(bytes32 bookId, Book storage book, bytes32 node, bool restingIsBid)
         private
         returns (uint256 quoteAmount)
     {
         uint160 quantity = _quantity(node);
+        quoteAmount = _subtreeQuote(book, node, restingIsBid);
+
+        // Keep logs in execution-priority order across buffered leaf matches and subtree summaries.
+        _emitBufferedMatches(bookId, restingIsBid);
+
+        if (restingIsBid) {
+            emit BidSubtreeMatched(bookId, node, quantity, quoteAmount);
+        } else {
+            emit AskSubtreeMatched(bookId, node, quantity, quoteAmount);
+        }
+
+        _beginMatchBuffer();
+    }
+
+    /// @notice Compute the exact quote sum for a fully consumed subtree without emitting child logs.
+    /// @dev Uniform branches remain O(1) through their correction code. Mixed branches recurse in
+    /// the matcher's established right-first order and preserve every leaf-level rounding result.
+    function _subtreeQuote(Book storage book, bytes32 node, bool restingIsBid)
+        private
+        view
+        returns (uint256 quoteAmount)
+    {
+        uint160 quantity = _quantity(node);
         bytes32 leftNode = book.tree[node].leftNode;
         if (leftNode == bytes32(0)) {
-            quoteAmount = _quoteValue(_price(node), quantity, restingIsBid);
-            bytes32 eventNode = _withQuantityAndCorrection(node, quantity, 1);
-            if (restingIsBid) {
-                emit BidMatched(bookId, eventNode);
-            } else {
-                emit AskMatched(bookId, eventNode);
-            }
-            return quoteAmount;
+            return _quoteValue(_price(node), quantity, restingIsBid);
         }
 
         if (_correctionCode(node) != 0) {
-            quoteAmount = _uniformNodeQuote(book, node, restingIsBid);
-            if (restingIsBid) {
-                emit BidMatched(bookId, node);
-            } else {
-                emit AskMatched(bookId, node);
-            }
-            return quoteAmount;
+            return _uniformNodeQuote(book, node, restingIsBid);
         }
 
-        quoteAmount = _consumeSubtree(bookId, book, book.tree[node].rightNode, restingIsBid);
+        quoteAmount = _subtreeQuote(book, book.tree[node].rightNode, restingIsBid);
         unchecked {
-            quoteAmount += _consumeSubtree(bookId, book, leftNode, restingIsBid);
+            quoteAmount += _subtreeQuote(book, leftNode, restingIsBid);
         }
     }
 

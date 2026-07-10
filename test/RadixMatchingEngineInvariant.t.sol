@@ -39,7 +39,13 @@ contract RadixMatchingEngineHandler is Test {
     int32 internal constant SAME_PRICE = 777_777;
     bytes32 internal constant ORDER_RESTED_TOPIC = keccak256("OrderRested(bytes32,bytes32,address,bool)");
     bytes32 internal constant ASK_MATCHED_TOPIC = keccak256("AskMatched(bytes32,bytes32)");
+    bytes32 internal constant ASKS_MATCHED_TOPIC = keccak256("AsksMatched(bytes32,bytes32[])");
     bytes32 internal constant BID_MATCHED_TOPIC = keccak256("BidMatched(bytes32,bytes32)");
+    bytes32 internal constant BIDS_MATCHED_TOPIC = keccak256("BidsMatched(bytes32,bytes32[])");
+    bytes32 internal constant ASK_SUBTREE_MATCHED_TOPIC =
+        keccak256("AskSubtreeMatched(bytes32,bytes32,uint160,uint256)");
+    bytes32 internal constant BID_SUBTREE_MATCHED_TOPIC =
+        keccak256("BidSubtreeMatched(bytes32,bytes32,uint160,uint256)");
     bytes32 internal constant ORDER_CANCELLED_TOPIC =
         keccak256("OrderCancelled(bytes32,bytes32,address,uint256,uint256)");
     bytes32 internal constant BOOK_INITIALIZED_TOPIC = keccak256("BookInitialized(bytes32,bytes32,uint256)");
@@ -385,6 +391,14 @@ contract RadixMatchingEngineHandler is Test {
                 state.previousMatchedPrice = eventPrice;
                 state.matchedQuantity += eventQuantity;
                 state.matchedQuoteAmount += eventQuoteAmount;
+            } else if (topic == ASKS_MATCHED_TOPIC || topic == BIDS_MATCHED_TOPIC) {
+                ++state.matchedEventCount;
+                _assertMatchedBatchLog(entry, topic, isBid, state);
+            } else if (topic == ASK_SUBTREE_MATCHED_TOPIC || topic == BID_SUBTREE_MATCHED_TOPIC) {
+                ++state.matchedEventCount;
+                (uint160 eventQuantity, uint256 eventQuoteAmount) = _assertSubtreeMatchedLog(entry, topic, isBid);
+                state.matchedQuantity += eventQuantity;
+                state.matchedQuoteAmount += eventQuoteAmount;
             } else if (topic == ORDER_CANCELLED_TOPIC) {
                 fail("cancel event during fill");
             } else if (topic == BOOK_INITIALIZED_TOPIC) {
@@ -420,7 +434,11 @@ contract RadixMatchingEngineHandler is Test {
             if (topic == ORDER_CANCELLED_TOPIC) {
                 ++cancelledEventCount;
                 _assertCancelledLog(entry, order, owner, baseAmount, quoteAmount);
-            } else if (topic == ORDER_RESTED_TOPIC || topic == ASK_MATCHED_TOPIC || topic == BID_MATCHED_TOPIC) {
+            } else if (
+                topic == ORDER_RESTED_TOPIC || topic == ASK_MATCHED_TOPIC || topic == BID_MATCHED_TOPIC
+                    || topic == ASKS_MATCHED_TOPIC || topic == BIDS_MATCHED_TOPIC || topic == ASK_SUBTREE_MATCHED_TOPIC
+                    || topic == BID_SUBTREE_MATCHED_TOPIC
+            ) {
                 fail("fill event during cancel");
             } else if (topic == BOOK_INITIALIZED_TOPIC) {
                 continue;
@@ -455,6 +473,39 @@ contract RadixMatchingEngineHandler is Test {
 
         (bytes32 eventBookId, bytes32 restingNode) = abi.decode(entry.data, (bytes32, bytes32));
         eventBookId;
+        return _assertMatchedNode(restingNode, restingIsBid, incomingIsBid, sawMatchedPrice, previousMatchedPrice);
+    }
+
+    function _assertMatchedBatchLog(Vm.Log memory entry, bytes32 topic, bool incomingIsBid, FillLogState memory state)
+        private
+        pure
+    {
+        assertEq(entry.topics.length, 1, "matched batch topic count");
+        bool restingIsBid = topic == BIDS_MATCHED_TOPIC;
+        assertEq(restingIsBid, !incomingIsBid, "matched batch side log");
+
+        (bytes32 eventBookId, bytes32[] memory restingNodes) = abi.decode(entry.data, (bytes32, bytes32[]));
+        eventBookId;
+        assertGt(restingNodes.length, 1, "matched batch length");
+
+        for (uint256 i; i < restingNodes.length; ++i) {
+            (int32 eventPrice, uint160 eventQuantity, uint256 eventQuoteAmount) = _assertMatchedNode(
+                restingNodes[i], restingIsBid, incomingIsBid, state.sawMatchedPrice, state.previousMatchedPrice
+            );
+            state.sawMatchedPrice = true;
+            state.previousMatchedPrice = eventPrice;
+            state.matchedQuantity += eventQuantity;
+            state.matchedQuoteAmount += eventQuoteAmount;
+        }
+    }
+
+    function _assertMatchedNode(
+        bytes32 restingNode,
+        bool restingIsBid,
+        bool incomingIsBid,
+        bool sawMatchedPrice,
+        int32 previousMatchedPrice
+    ) private pure returns (int32 eventPrice, uint160 eventQuantity, uint256 eventQuoteAmount) {
         assertTrue(restingNode != bytes32(0), "matched node log");
 
         eventPrice = _price(restingNode);
@@ -475,6 +526,26 @@ contract RadixMatchingEngineHandler is Test {
         } else {
             eventQuoteAmount = correctionCode == 0 ? baseline + 1 : baseline - (correctionCode - 1);
         }
+    }
+
+    function _assertSubtreeMatchedLog(Vm.Log memory entry, bytes32 topic, bool incomingIsBid)
+        private
+        pure
+        returns (uint160 eventQuantity, uint256 eventQuoteAmount)
+    {
+        assertEq(entry.topics.length, 1, "subtree matched topic count");
+        bool restingIsBid = topic == BID_SUBTREE_MATCHED_TOPIC;
+        assertEq(restingIsBid, !incomingIsBid, "subtree matched side log");
+
+        bytes32 eventBookId;
+        bytes32 subtreeRoot;
+        (eventBookId, subtreeRoot, eventQuantity, eventQuoteAmount) =
+            abi.decode(entry.data, (bytes32, bytes32, uint160, uint256));
+        eventBookId;
+        assertTrue(subtreeRoot != bytes32(0), "subtree matched root log");
+        assertGt(eventQuantity, 0, "subtree matched quantity log");
+        assertEq(eventQuantity, _quantity(subtreeRoot), "subtree matched root quantity");
+        assertEq(uint32(uint256(subtreeRoot) >> 32), 0, "subtree matched mixed root");
     }
 
     function _assertCancelledLog(
