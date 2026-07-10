@@ -4,9 +4,8 @@ pragma solidity ^0.8.24;
 import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
-import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
-import {TickMath32} from "../src/libraries/TickMath32.sol";
 import {SinglePairEngineHarness as RadixMatchingEngine} from "./SinglePairEngineHarness.sol";
+import {QuoteMath} from "./QuoteMath.sol";
 import {TestERC20} from "./RadixMatchingEngine.t.sol";
 
 contract RadixMatchingEngineHandler is Test {
@@ -39,8 +38,8 @@ contract RadixMatchingEngineHandler is Test {
     int32 internal constant MAX_FUZZ_TICK = 100_000_000;
     int32 internal constant SAME_PRICE = 777_777;
     bytes32 internal constant ORDER_RESTED_TOPIC = keccak256("OrderRested(bytes32,bytes32,address,bool)");
-    bytes32 internal constant ASK_MATCHED_TOPIC = keccak256("AskMatched(bytes32,bytes32,uint160,uint256)");
-    bytes32 internal constant BID_MATCHED_TOPIC = keccak256("BidMatched(bytes32,bytes32,uint160,uint256)");
+    bytes32 internal constant ASK_MATCHED_TOPIC = keccak256("AskMatched(bytes32,bytes32)");
+    bytes32 internal constant BID_MATCHED_TOPIC = keccak256("BidMatched(bytes32,bytes32)");
     bytes32 internal constant ORDER_CANCELLED_TOPIC =
         keccak256("OrderCancelled(bytes32,bytes32,address,uint256,uint256)");
     bytes32 internal constant BOOK_INITIALIZED_TOPIC = keccak256("BookInitialized(bytes32,bytes32,uint256)");
@@ -454,14 +453,13 @@ contract RadixMatchingEngineHandler is Test {
         bool restingIsBid = topic == BID_MATCHED_TOPIC;
         assertEq(restingIsBid, !incomingIsBid, "matched side log");
 
-        (bytes32 eventBookId, bytes32 restingNode, uint160 quantity, uint256 quoteAmount) =
-            abi.decode(entry.data, (bytes32, bytes32, uint160, uint256));
+        (bytes32 eventBookId, bytes32 restingNode) = abi.decode(entry.data, (bytes32, bytes32));
         eventBookId;
         assertTrue(restingNode != bytes32(0), "matched node log");
 
         eventPrice = _price(restingNode);
+        uint160 quantity = _quantity(restingNode);
         assertGt(quantity, 0, "matched quantity log");
-        assertLe(quantity, _quantity(restingNode), "matched node quantity log");
         if (sawMatchedPrice) {
             if (incomingIsBid) {
                 assertGe(eventPrice, previousMatchedPrice, "matched ask price order");
@@ -470,7 +468,13 @@ contract RadixMatchingEngineHandler is Test {
             }
         }
         eventQuantity = quantity;
-        eventQuoteAmount = quoteAmount;
+        uint256 baseline = _quoteValue(eventPrice, quantity, restingIsBid);
+        uint256 correctionCode = uint256(uint32(uint256(restingNode) >> 32));
+        if (restingIsBid) {
+            eventQuoteAmount = correctionCode == 0 ? baseline - 1 : baseline + (correctionCode - 1);
+        } else {
+            eventQuoteAmount = correctionCode == 0 ? baseline + 1 : baseline - (correctionCode - 1);
+        }
     }
 
     function _assertCancelledLog(
@@ -607,13 +611,7 @@ contract RadixMatchingEngineHandler is Test {
     }
 
     function _quoteValue(int32 tick, uint160 quantity, bool roundUp) private pure returns (uint256 quoteAmount) {
-        if (quantity == 0) return 0;
-        uint256 sqrtPriceX96 = TickMath32.getSqrtRatioAtTick(tick);
-        uint256 priceX128 = FixedPointMathLib.fullMulDivN(sqrtPriceX96, sqrtPriceX96, 64);
-        uint256 q128 = uint256(1) << 128;
-        quoteAmount = roundUp
-            ? FixedPointMathLib.fullMulDivUp(uint256(quantity), priceX128, q128)
-            : FixedPointMathLib.fullMulDiv(uint256(quantity), priceX128, q128);
+        quoteAmount = QuoteMath.quoteValue(tick, quantity, roundUp);
     }
 
     function _nonce(bytes32 order) private pure returns (uint32) {
@@ -1762,13 +1760,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     }
 
     function _quoteValue(int32 tick, uint160 quantity, bool roundUp) private pure returns (uint256 quoteAmount) {
-        if (quantity == 0) return 0;
-        uint256 sqrtPriceX96 = TickMath32.getSqrtRatioAtTick(tick);
-        uint256 priceX128 = FixedPointMathLib.fullMulDivN(sqrtPriceX96, sqrtPriceX96, 64);
-        uint256 q128 = uint256(1) << 128;
-        quoteAmount = roundUp
-            ? FixedPointMathLib.fullMulDivUp(uint256(quantity), priceX128, q128)
-            : FixedPointMathLib.fullMulDiv(uint256(quantity), priceX128, q128);
+        quoteAmount = QuoteMath.quoteValue(tick, quantity, roundUp);
     }
 
     function _sideKey(bytes32 order) private pure returns (bytes32) {

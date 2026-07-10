@@ -151,18 +151,24 @@ abstract contract RadixMatchingEngine {
     event OrderRested(bytes32 bookId, bytes32 order, address owner, bool isBid);
 
     /// @notice Matched resting ask liquidity.
+    /// @dev `restingNode` uses the normal packed-node layout, except its quantity is the quantity
+    /// filled by this event and its correction field makes the quote amount exactly recoverable.
+    /// Let `delta = int256(uint256(correctionCode)) - 1`; the quote amount is the tick notional
+    /// rounded down, minus `delta`. Code zero therefore represents a one-unit positive correction.
     /// @param bookId Book that supplied the resting ask.
-    /// @param restingNode Ask leaf or same-price ask aggregate branch consumed by the incoming bid.
-    /// @param quantity Base quantity matched from the resting ask liquidity.
-    /// @param quoteAmount Quote value paid at the resting ask price.
-    event AskMatched(bytes32 bookId, bytes32 restingNode, uint160 quantity, uint256 quoteAmount);
+    /// @param restingNode Self-contained ask fill node carrying tick, fill quantity, correction,
+    /// and the consumed leaf or aggregate path identity.
+    event AskMatched(bytes32 bookId, bytes32 restingNode);
 
     /// @notice Matched resting bid liquidity.
+    /// @dev `restingNode` uses the normal packed-node layout, except its quantity is the quantity
+    /// filled by this event and its correction field makes the quote amount exactly recoverable.
+    /// Let `delta = int256(uint256(correctionCode)) - 1`; the quote amount is the tick notional
+    /// rounded up, plus `delta`. Code zero therefore represents a one-unit negative correction.
     /// @param bookId Book that supplied the resting bid.
-    /// @param restingNode Bid leaf or same-price bid aggregate branch consumed by the incoming ask.
-    /// @param quantity Base quantity matched from the resting bid liquidity.
-    /// @param quoteAmount Quote value paid at the resting bid price.
-    event BidMatched(bytes32 bookId, bytes32 restingNode, uint160 quantity, uint256 quoteAmount);
+    /// @param restingNode Self-contained bid fill node carrying tick, fill quantity, correction,
+    /// and the consumed leaf or aggregate path identity.
+    event BidMatched(bytes32 bookId, bytes32 restingNode);
 
     /// @notice Emitted when a maker cancels open quantity or claims filled proceeds.
     /// @param bookId Book that owned the order.
@@ -516,9 +522,15 @@ abstract contract RadixMatchingEngine {
         if (restingPrice > limitPrice) return (root, remaining, 0, 0);
 
         uint160 fillQuantity = remaining < restingQuantity ? remaining : restingQuantity;
-        quoteAmount = _quoteDifference(restingPrice, restingQuantity, restingQuantity - fillQuantity, false);
+        uint32 eventCorrectionCode = 1;
+        if (fillQuantity == restingQuantity) {
+            quoteAmount = _quoteValue(restingPrice, restingQuantity, false);
+        } else {
+            (quoteAmount, eventCorrectionCode) =
+                _quoteDifferenceAndEventCode(restingPrice, restingQuantity, restingQuantity - fillQuantity, false);
+        }
 
-        emit AskMatched(bookId, root, fillQuantity, quoteAmount);
+        emit AskMatched(bookId, _withQuantityAndCorrection(root, fillQuantity, eventCorrectionCode));
 
         unchecked {
             newRemaining = remaining - fillQuantity;
@@ -548,9 +560,15 @@ abstract contract RadixMatchingEngine {
         if (restingPrice < limitPrice) return (root, remaining, 0, 0);
 
         uint160 fillQuantity = remaining < restingQuantity ? remaining : restingQuantity;
-        quoteAmount = _quoteDifference(restingPrice, restingQuantity, restingQuantity - fillQuantity, true);
+        uint32 eventCorrectionCode = 1;
+        if (fillQuantity == restingQuantity) {
+            quoteAmount = _quoteValue(restingPrice, restingQuantity, true);
+        } else {
+            (quoteAmount, eventCorrectionCode) =
+                _quoteDifferenceAndEventCode(restingPrice, restingQuantity, restingQuantity - fillQuantity, true);
+        }
 
-        emit BidMatched(bookId, root, fillQuantity, quoteAmount);
+        emit BidMatched(bookId, _withQuantityAndCorrection(root, fillQuantity, eventCorrectionCode));
 
         unchecked {
             newRemaining = remaining - fillQuantity;
@@ -577,7 +595,8 @@ abstract contract RadixMatchingEngine {
         uint256 matchFlags
     ) private {
         emit AskMatched(
-            bookId, matchFlags & _MATCH_DIRTY != 0 ? _withQuantity(node, fillQuantity) : node, fillQuantity, quoteAmount
+            bookId,
+            matchFlags & _MATCH_DIRTY != 0 ? _aggregateMatchEventNode(node, fillQuantity, quoteAmount, false) : node
         );
     }
 
@@ -591,7 +610,8 @@ abstract contract RadixMatchingEngine {
         uint256 matchFlags
     ) private {
         emit BidMatched(
-            bookId, matchFlags & _MATCH_DIRTY != 0 ? _withQuantity(node, fillQuantity) : node, fillQuantity, quoteAmount
+            bookId,
+            matchFlags & _MATCH_DIRTY != 0 ? _aggregateMatchEventNode(node, fillQuantity, quoteAmount, true) : node
         );
     }
 
@@ -1125,10 +1145,11 @@ abstract contract RadixMatchingEngine {
             quoteAmount = leftNode == bytes32(0)
                 ? _quoteAtFactor(factor, shift, nodeQuantity, restingIsBid)
                 : _uniformNodeQuoteAtFactor(book, node, restingIsBid, factor, shift);
+            bytes32 eventNode = leftNode == bytes32(0) ? _withQuantityAndCorrection(node, nodeQuantity, 1) : node;
             if (restingIsBid) {
-                emit BidMatched(bookId, node, nodeQuantity, quoteAmount);
+                emit BidMatched(bookId, eventNode);
             } else {
-                emit AskMatched(bookId, node, nodeQuantity, quoteAmount);
+                emit AskMatched(bookId, eventNode);
             }
             return (bytes32(0), nodeQuantity, quoteAmount);
         }
@@ -1140,10 +1161,12 @@ abstract contract RadixMatchingEngine {
             }
             quoteAmount = _quoteAtFactor(factor, shift, nodeQuantity, restingIsBid)
                 - _quoteAtFactor(factor, shift, newQuantity, restingIsBid);
+            uint256 standaloneQuote = _quoteAtFactor(factor, shift, remaining, restingIsBid);
+            uint32 eventCorrectionCode = quoteAmount == standaloneQuote ? 1 : 0;
             if (restingIsBid) {
-                emit BidMatched(bookId, node, remaining, quoteAmount);
+                emit BidMatched(bookId, _withQuantityAndCorrection(node, remaining, eventCorrectionCode));
             } else {
-                emit AskMatched(bookId, node, remaining, quoteAmount);
+                emit AskMatched(bookId, _withQuantityAndCorrection(node, remaining, eventCorrectionCode));
             }
             return (_withQuantity(node, newQuantity), remaining, quoteAmount);
         }
@@ -1334,7 +1357,7 @@ abstract contract RadixMatchingEngine {
         uint64 bAddressKey = _pathKey(b);
         uint64 boundaryKey = aAddressKey > bAddressKey ? aAddressKey : bAddressKey;
         uint160 quantity = _quantity(a) + _quantity(b);
-        uint32 correctionCode;
+        uint32 correctionCode = 0;
 
         if (_price(a) == _price(b) && _uniformNode(book, a) && _uniformNode(book, b)) {
             int32 tick = _price(a);
@@ -1493,10 +1516,11 @@ abstract contract RadixMatchingEngine {
         bytes32 leftNode = book.tree[node].leftNode;
         if (leftNode == bytes32(0)) {
             quoteAmount = _quoteValue(_price(node), quantity, restingIsBid);
+            bytes32 eventNode = _withQuantityAndCorrection(node, quantity, 1);
             if (restingIsBid) {
-                emit BidMatched(bookId, node, quantity, quoteAmount);
+                emit BidMatched(bookId, eventNode);
             } else {
-                emit AskMatched(bookId, node, quantity, quoteAmount);
+                emit AskMatched(bookId, eventNode);
             }
             return quoteAmount;
         }
@@ -1504,9 +1528,9 @@ abstract contract RadixMatchingEngine {
         if (_correctionCode(node) != 0) {
             quoteAmount = _uniformNodeQuote(book, node, restingIsBid);
             if (restingIsBid) {
-                emit BidMatched(bookId, node, quantity, quoteAmount);
+                emit BidMatched(bookId, node);
             } else {
-                emit AskMatched(bookId, node, quantity, quoteAmount);
+                emit AskMatched(bookId, node);
             }
             return quoteAmount;
         }
@@ -1656,6 +1680,26 @@ abstract contract RadixMatchingEngine {
         }
     }
 
+    /// @dev Quote a partial leaf fill and encode its event rounding delta without decoding the tick twice.
+    function _quoteDifferenceAndEventCode(int32 price, uint160 largerQuantity, uint160 smallerQuantity, bool roundUp)
+        private
+        pure
+        returns (uint256 quoteAmount, uint32 correctionCode)
+    {
+        uint160 fillQuantity;
+        unchecked {
+            fillQuantity = largerQuantity - smallerQuantity;
+        }
+        if (price == 0) return (fillQuantity, 1);
+
+        (uint256 factor, uint16 shift) = TickMath32.getPriceFactorAtTick(price);
+        unchecked {
+            quoteAmount = _quoteAtFactor(factor, shift, largerQuantity, roundUp)
+                - _quoteAtFactor(factor, shift, smallerQuantity, roundUp);
+        }
+        correctionCode = quoteAmount == _quoteAtFactor(factor, shift, fillQuantity, roundUp) ? 1 : 0;
+    }
+
     /// @dev Multiply quantity by a Q128 fractional price factor and fold in its binary exponent.
     function _quoteAtFactor(uint256 factor, uint16 shift, uint160 quantity, bool roundUp)
         private
@@ -1663,13 +1707,15 @@ abstract contract RadixMatchingEngine {
         returns (uint256 quoteAmount)
     {
         if (quantity == 0) return 0;
+        // Slither's assembly shift detector does not recognize the parenthesized mask arithmetic.
+        // slither-disable-start incorrect-shift
         /// @solidity memory-safe-assembly
         assembly {
             let productLow := mul(quantity, factor)
             let productHigh := 0
-            // Direct factors are at most 2**128, so a uint128 quantity cannot
-            // overflow this word. Reconstruct the high word only for larger inputs.
-            if shr(128, quantity) {
+            // The product fits one word only when both operands fit 128 bits. Nearest-boundary
+            // factors may exceed Q128, so quantity alone cannot prove that the high word is zero.
+            if or(shr(128, quantity), shr(128, factor)) {
                 let mm := mulmod(quantity, factor, not(0))
                 productHigh := sub(mm, add(productLow, lt(mm, productLow)))
             }
@@ -1704,6 +1750,7 @@ abstract contract RadixMatchingEngine {
                 }
             }
         }
+        // slither-disable-end incorrect-shift
     }
 
     /// @notice Decode price and quantity from a packed node.
@@ -1743,6 +1790,8 @@ abstract contract RadixMatchingEngine {
     /// @dev Used for partial fills. The returned reduced leaf intentionally has no owner mapping;
     /// ownership remains on the original full-quantity order key.
     function _withQuantity(bytes32 order, uint160 quantity) private pure returns (bytes32 updated) {
+        // Slither's assembly shift detector does not recognize this parenthesized field mask.
+        // slither-disable-start incorrect-shift
         /// @solidity memory-safe-assembly
         assembly {
             updated := or(
@@ -1750,6 +1799,54 @@ abstract contract RadixMatchingEngine {
                 shl(_QUANTITY_SHIFT, quantity)
             )
         }
+        // slither-disable-end incorrect-shift
+    }
+
+    /// @notice Build a self-contained event node for a dirty same-tick aggregate fill.
+    /// @dev Right-spine anchors may have stale quantity and correction fields. The event node keeps
+    /// the anchor's tick/path identity, replaces quantity with the amount filled, and derives the
+    /// exact leaf-rounding correction from the already-computed quote amount. Offchain consumers
+    /// can therefore reconstruct quote value without two additional event words.
+    function _aggregateMatchEventNode(bytes32 node, uint160 quantity, uint256 quoteAmount, bool isBid)
+        private
+        pure
+        returns (bytes32 updated)
+    {
+        uint256 aggregateQuote = _quoteValue(_price(node), quantity, isBid);
+        uint256 correction = isBid ? quoteAmount - aggregateQuote : aggregateQuote - quoteAmount;
+        if (correction >= type(uint32).max) revert CorrectionOverflow();
+
+        updated = _withQuantityAndCorrection(node, quantity, uint32(correction + 1));
+    }
+
+    /// @notice Replace the quantity and event-correction fields of a packed node.
+    /// @dev Match events interpret `correctionCode - 1` as a signed one-sided rounding delta:
+    /// bids add it to the rounded-up notional and asks subtract it from the rounded-down notional.
+    /// Code zero therefore represents the only negative case, a one-unit inverse correction from
+    /// a partial leaf fill; code one means no correction.
+    function _withQuantityAndCorrection(bytes32 node, uint160 quantity, uint32 correctionCode)
+        private
+        pure
+        returns (bytes32 updated)
+    {
+        // Slither's assembly shift detector does not recognize these parenthesized field masks.
+        // slither-disable-start incorrect-shift
+        /// @solidity memory-safe-assembly
+        assembly {
+            updated := or(
+                and(
+                    node,
+                    not(
+                        or(
+                            shl(_QUANTITY_SHIFT, 0xffffffffffffffffffffffffffffffffffffffff),
+                            shl(_CORRECTION_SHIFT, 0xffffffff)
+                        )
+                    )
+                ),
+                or(shl(_QUANTITY_SHIFT, quantity), shl(_CORRECTION_SHIFT, correctionCode))
+            )
+        }
+        // slither-disable-end incorrect-shift
     }
 
     /// @notice Pack price, quantity, and nonce into a node.

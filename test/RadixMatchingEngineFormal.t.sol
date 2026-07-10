@@ -3,9 +3,8 @@ pragma solidity 0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
-import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
-import {TickMath32} from "../src/libraries/TickMath32.sol";
 import {SinglePairEngineHarness as RadixMatchingEngine} from "./SinglePairEngineHarness.sol";
+import {QuoteMath} from "./QuoteMath.sol";
 
 contract FormalERC20 is ERC20 {
     function name() public pure override returns (string memory) {
@@ -474,13 +473,7 @@ contract RadixMatchingEngineFormalTest is Test {
     }
 
     function _quoteValue(int32 tick, uint160 quantity, bool roundUp) private pure returns (uint256 quoteAmount) {
-        if (quantity == 0) return 0;
-        uint256 sqrtPriceX96 = TickMath32.getSqrtRatioAtTick(tick);
-        uint256 priceX128 = FixedPointMathLib.fullMulDivN(sqrtPriceX96, sqrtPriceX96, 64);
-        uint256 q128 = uint256(1) << 128;
-        quoteAmount = roundUp
-            ? FixedPointMathLib.fullMulDivUp(uint256(quantity), priceX128, q128)
-            : FixedPointMathLib.fullMulDiv(uint256(quantity), priceX128, q128);
+        quoteAmount = QuoteMath.quoteValue(tick, quantity, roundUp);
     }
 
     function _order(int32 price, uint160 quantity, uint32 nonce) private pure returns (bytes32) {
