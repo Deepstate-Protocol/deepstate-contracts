@@ -61,13 +61,30 @@ library TickMath32 {
     }
 
     /// @notice Return the fractional Q128 price factor and binary divisor shift for a tick.
-    /// @dev `price = factor / 2**shift`. Six nibble tables replace the per-bit ladder.
+    /// @dev `price = factor / 2**shift`. The nearest integer exponent is used so ticks
+    /// close to a lower boundary do not become dense six-nibble complements.
     function getPriceFactorAtTick(int32 tick) internal pure returns (uint256 factor, uint16 shift) {
         unchecked {
             int256 signedTick = int256(tick);
-            int256 integerExponent = (signedTick + 0xffffff) >> 24;
-            uint256 fraction = uint256((integerExponent << 24) - signedTick);
+            int256 integerExponent = signedTick >> 24;
+            uint256 fraction = uint256(signedTick - (integerExponent << 24));
 
+            if (fraction <= 0x800000) {
+                // Tables encode 2**(-fraction / 2**24). Invert the sparse factor
+                // around Q128 to obtain the positive fractional multiplier.
+                uint256 inverseFactor = _fractionFactor(fraction);
+                factor = type(uint256).max / inverseFactor + 1;
+            } else {
+                ++integerExponent;
+                factor = _fractionFactor(0x1000000 - fraction);
+            }
+
+            shift = uint16(uint256(128 - integerExponent));
+        }
+    }
+
+    function _fractionFactor(uint256 fraction) private pure returns (uint256 factor) {
+        unchecked {
             factor = _factor0(fraction & 0x0f);
             uint256 nibble = (fraction >> 4) & 0x0f;
             if (nibble != 0) factor = (factor * _factor1(nibble)) >> 128;
@@ -79,8 +96,6 @@ library TickMath32 {
             if (nibble != 0) factor = (factor * _factor4(nibble)) >> 128;
             nibble = fraction >> 20;
             if (nibble != 0) factor = (factor * _factor5(nibble)) >> 128;
-
-            shift = uint16(uint256(128 - integerExponent));
         }
     }
 
