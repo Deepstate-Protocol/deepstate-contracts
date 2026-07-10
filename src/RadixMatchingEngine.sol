@@ -693,6 +693,12 @@ abstract contract RadixMatchingEngine {
             return (newNode, fillQuantity, quoteAmount);
         }
 
+        if (_correctionCode(node) != 0) {
+            int32 tick = _price(node);
+            if (tick > limitPrice) return (node, 0, 0);
+            return _matchUniformSubtree(bookId, book, node, remaining, false, tick);
+        }
+
         uint160 nodeQuantity = _quantity(node);
         if (nodeQuantity <= remaining && _leftmostLeafPrice(book, node) <= limitPrice) {
             quoteAmount = _consumeSubtree(bookId, book, node, false);
@@ -822,6 +828,12 @@ abstract contract RadixMatchingEngine {
         if (leftNode == bytes32(0)) {
             (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(bookId, node, limitPrice, remaining);
             return (newNode, fillQuantity, quoteAmount);
+        }
+
+        if (_correctionCode(node) != 0) {
+            int32 tick = _price(node);
+            if (tick < limitPrice) return (node, 0, 0);
+            return _matchUniformSubtree(bookId, book, node, remaining, true, tick);
         }
 
         uint160 nodeQuantity = _quantity(node);
@@ -1078,6 +1090,123 @@ abstract contract RadixMatchingEngine {
         }
 
         return newBranch;
+    }
+
+    /// @notice Partially consume a clean same-tick subtree while decoding its tick only once.
+    /// @dev The nonzero correction code proves that every descendant has `tick`. Exact quote
+    /// deltas returned by child frames let each surviving ancestor update its correction without
+    /// independently repricing both children.
+    function _matchUniformSubtree(
+        bytes32 bookId,
+        Book storage book,
+        bytes32 node,
+        uint160 remaining,
+        bool restingIsBid,
+        int32 tick
+    ) private returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount) {
+        (uint256 factor, uint16 shift) = TickMath32.getPriceFactorAtTick(tick);
+        return _matchUniformSubtreeAtFactor(bookId, book, node, remaining, restingIsBid, factor, shift);
+    }
+
+    /// @dev Uniform-subtree recursion with the decoded price factor carried through every frame.
+    function _matchUniformSubtreeAtFactor(
+        bytes32 bookId,
+        Book storage book,
+        bytes32 node,
+        uint160 remaining,
+        bool restingIsBid,
+        uint256 factor,
+        uint16 shift
+    ) private returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount) {
+        uint160 nodeQuantity = _quantity(node);
+        bytes32 leftNode = book.tree[node].leftNode;
+
+        if (nodeQuantity <= remaining) {
+            quoteAmount = leftNode == bytes32(0)
+                ? _quoteAtFactor(factor, shift, nodeQuantity, restingIsBid)
+                : _uniformNodeQuoteAtFactor(book, node, restingIsBid, factor, shift);
+            if (restingIsBid) {
+                emit BidMatched(bookId, node, nodeQuantity, quoteAmount);
+            } else {
+                emit AskMatched(bookId, node, nodeQuantity, quoteAmount);
+            }
+            return (bytes32(0), nodeQuantity, quoteAmount);
+        }
+
+        if (leftNode == bytes32(0)) {
+            uint160 newQuantity;
+            unchecked {
+                newQuantity = nodeQuantity - remaining;
+            }
+            quoteAmount = _quoteAtFactor(factor, shift, nodeQuantity, restingIsBid)
+                - _quoteAtFactor(factor, shift, newQuantity, restingIsBid);
+            if (restingIsBid) {
+                emit BidMatched(bookId, node, remaining, quoteAmount);
+            } else {
+                emit AskMatched(bookId, node, remaining, quoteAmount);
+            }
+            return (_withQuantity(node, newQuantity), remaining, quoteAmount);
+        }
+
+        bytes32 rightNode = book.tree[node].rightNode;
+        uint160 rightFillQuantity;
+        uint256 rightQuoteAmount;
+        (rightNode, rightFillQuantity, rightQuoteAmount) =
+            _matchUniformSubtreeAtFactor(bookId, book, rightNode, remaining, restingIsBid, factor, shift);
+
+        unchecked {
+            remaining -= rightFillQuantity;
+        }
+        if (remaining != 0) {
+            (leftNode, fillQuantity, quoteAmount) =
+                _matchUniformSubtreeAtFactor(bookId, book, leftNode, remaining, restingIsBid, factor, shift);
+        }
+
+        unchecked {
+            fillQuantity += rightFillQuantity;
+            quoteAmount += rightQuoteAmount;
+        }
+        newNode = _replaceUniformBranchAfterFill(
+            book, node, leftNode, rightNode, restingIsBid, fillQuantity, quoteAmount, factor, shift
+        );
+    }
+
+    /// @dev Derive a surviving uniform branch's correction from its exact removed quote delta.
+    function _replaceUniformBranchAfterFill(
+        Book storage book,
+        bytes32 oldNode,
+        bytes32 leftNode,
+        bytes32 rightNode,
+        bool isBid,
+        uint160 fillQuantity,
+        uint256 quoteAmount,
+        uint256 factor,
+        uint16 shift
+    ) private returns (bytes32 newNode) {
+        if (leftNode == bytes32(0)) return rightNode;
+        if (rightNode == bytes32(0)) return leftNode;
+
+        uint160 oldQuantity = _quantity(oldNode);
+        uint160 newQuantity;
+        unchecked {
+            newQuantity = oldQuantity - fillQuantity;
+        }
+
+        uint256 oldAggregateQuote = _quoteAtFactor(factor, shift, oldQuantity, isBid);
+        uint256 newAggregateQuote = _quoteAtFactor(factor, shift, newQuantity, isBid);
+        uint256 oldCorrection = uint256(_correctionCode(oldNode)) - 1;
+        uint256 correction;
+        if (isBid) {
+            correction = oldAggregateQuote + oldCorrection - quoteAmount - newAggregateQuote;
+        } else {
+            correction = newAggregateQuote + oldCorrection + quoteAmount - oldAggregateQuote;
+        }
+        if (correction >= type(uint32).max) revert CorrectionOverflow();
+
+        uint64 leftKey = _pathKey(leftNode);
+        uint64 rightKey = _pathKey(rightNode);
+        newNode = _branchNode(leftKey > rightKey ? leftKey : rightKey, newQuantity, uint32(correction + 1));
+        book.tree[newNode] = Branch({leftNode: leftNode, rightNode: rightNode});
     }
 
     /// @notice Rebuild a previously optimized right spine back into exact aggregate branches.
