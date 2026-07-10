@@ -2,7 +2,6 @@
 pragma solidity 0.8.28;
 
 import {LibBit} from "solady/utils/LibBit.sol";
-import {FixedPointMathLib} from "solady/utils/FixedPointMathLib.sol";
 import {TickMath32} from "./libraries/TickMath32.sol";
 
 /// @title Radix Matching Engine
@@ -114,8 +113,6 @@ abstract contract RadixMatchingEngine {
     uint256 private constant _PATH_MASK = (type(uint256).max << _PRICE_SHIFT) | _NONCE_MASK;
     /// @dev Sign-bit bias that maps signed ticks into monotonically increasing unsigned keys.
     uint256 private constant _TICK_BIAS = uint256(1) << 31;
-    /// @dev Q128 denominator used by quote-value conversion.
-    uint256 private constant _Q128 = uint256(1) << 128;
     /// @dev Root anchor in every book's tree. `leftNode` is ask root; `rightNode` is bid root.
     bytes32 private constant _ROOT_NODE = bytes32(0);
     /// @dev Dirty bit stored above the 32-bit `nextNonce` field when bid right-spine anchors are stale.
@@ -386,10 +383,7 @@ abstract contract RadixMatchingEngine {
             quoteAmount = _quoteValue(limitPrice, remainingQuantity, true);
         } else {
             baseAmount = remainingQuantity;
-            unchecked {
-                quoteAmount = _quoteValue(limitPrice, originalQuantity, false)
-                    - _quoteValue(limitPrice, remainingQuantity, false);
-            }
+            quoteAmount = _quoteDifference(limitPrice, originalQuantity, remainingQuantity, false);
         }
     }
 
@@ -522,10 +516,7 @@ abstract contract RadixMatchingEngine {
         if (restingPrice > limitPrice) return (root, remaining, 0, 0);
 
         uint160 fillQuantity = remaining < restingQuantity ? remaining : restingQuantity;
-        unchecked {
-            quoteAmount = _quoteValue(restingPrice, restingQuantity, false)
-                - _quoteValue(restingPrice, restingQuantity - fillQuantity, false);
-        }
+        quoteAmount = _quoteDifference(restingPrice, restingQuantity, restingQuantity - fillQuantity, false);
 
         emit AskMatched(bookId, root, fillQuantity, quoteAmount);
 
@@ -557,10 +548,7 @@ abstract contract RadixMatchingEngine {
         if (restingPrice < limitPrice) return (root, remaining, 0, 0);
 
         uint160 fillQuantity = remaining < restingQuantity ? remaining : restingQuantity;
-        unchecked {
-            quoteAmount = _quoteValue(restingPrice, restingQuantity, true)
-                - _quoteValue(restingPrice, restingQuantity - fillQuantity, true);
-        }
+        quoteAmount = _quoteDifference(restingPrice, restingQuantity, restingQuantity - fillQuantity, true);
 
         emit BidMatched(bookId, root, fillQuantity, quoteAmount);
 
@@ -1220,8 +1208,11 @@ abstract contract RadixMatchingEngine {
         uint32 correctionCode;
 
         if (_price(a) == _price(b) && _uniformNode(book, a) && _uniformNode(book, b)) {
-            uint256 childQuote = _uniformNodeQuote(book, a, isBid) + _uniformNodeQuote(book, b, isBid);
-            uint256 aggregateQuote = _quoteValue(_price(a), quantity, isBid);
+            int32 tick = _price(a);
+            (uint256 factor, uint16 shift) = TickMath32.getPriceFactorAtTick(tick);
+            uint256 childQuote = _uniformNodeQuoteAtFactor(book, a, isBid, factor, shift)
+                + _uniformNodeQuoteAtFactor(book, b, isBid, factor, shift);
+            uint256 aggregateQuote = _quoteAtFactor(factor, shift, quantity, isBid);
             uint256 correction = isBid ? childQuote - aggregateQuote : aggregateQuote - childQuote;
             if (correction >= type(uint32).max) revert CorrectionOverflow();
             correctionCode = uint32(correction + 1);
@@ -1254,6 +1245,19 @@ abstract contract RadixMatchingEngine {
     function _uniformNodeQuote(Book storage book, bytes32 node, bool isBid) private view returns (uint256 quoteAmount) {
         uint160 quantity = _quantity(node);
         quoteAmount = _quoteValue(_price(node), quantity, isBid);
+        if (book.tree[node].leftNode == bytes32(0)) return quoteAmount;
+
+        uint256 correction = uint256(_correctionCode(node)) - 1;
+        quoteAmount = isBid ? quoteAmount + correction : quoteAmount - correction;
+    }
+
+    /// @dev Uniform-node quote using a price factor already decoded for the node's tick.
+    function _uniformNodeQuoteAtFactor(Book storage book, bytes32 node, bool isBid, uint256 factor, uint16 shift)
+        private
+        view
+        returns (uint256 quoteAmount)
+    {
+        quoteAmount = _quoteAtFactor(factor, shift, _quantity(node), isBid);
         if (book.tree[node].leftNode == bytes32(0)) return quoteAmount;
 
         uint256 correction = uint256(_correctionCode(node)) - 1;
@@ -1504,11 +1508,68 @@ abstract contract RadixMatchingEngine {
     /// uses differences between old and new notionals, so repeated fills telescope exactly.
     function _quoteValue(int32 price, uint160 quantity, bool roundUp) internal pure returns (uint256 quoteAmount) {
         if (quantity == 0) return 0;
-        uint256 sqrtPriceX96 = TickMath32.getSqrtRatioAtTick(price);
-        uint256 priceX128 = FixedPointMathLib.fullMulDivN(sqrtPriceX96, sqrtPriceX96, 64);
-        quoteAmount = roundUp
-            ? FixedPointMathLib.fullMulDivUp(uint256(quantity), priceX128, _Q128)
-            : FixedPointMathLib.fullMulDiv(uint256(quantity), priceX128, _Q128);
+        if (price == 0) return quantity;
+        (uint256 factor, uint16 shift) = TickMath32.getPriceFactorAtTick(price);
+        return _quoteAtFactor(factor, shift, quantity, roundUp);
+    }
+
+    /// @dev Difference between two same-tick notionals while decoding the tick only once.
+    function _quoteDifference(int32 price, uint160 largerQuantity, uint160 smallerQuantity, bool roundUp)
+        private
+        pure
+        returns (uint256 quoteAmount)
+    {
+        if (price == 0) return largerQuantity - smallerQuantity;
+        (uint256 factor, uint16 shift) = TickMath32.getPriceFactorAtTick(price);
+        unchecked {
+            quoteAmount = _quoteAtFactor(factor, shift, largerQuantity, roundUp)
+                - _quoteAtFactor(factor, shift, smallerQuantity, roundUp);
+        }
+    }
+
+    /// @dev Multiply quantity by a Q128 fractional price factor and fold in its binary exponent.
+    function _quoteAtFactor(uint256 factor, uint16 shift, uint160 quantity, bool roundUp)
+        private
+        pure
+        returns (uint256 quoteAmount)
+    {
+        if (quantity == 0) return 0;
+        /// @solidity memory-safe-assembly
+        assembly {
+            let productLow := mul(quantity, factor)
+            let mm := mulmod(quantity, factor, not(0))
+            let productHigh := sub(mm, add(productLow, lt(mm, productLow)))
+            let remainder := 0
+
+            switch shift
+            case 0 {
+                if productHigh {
+                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
+                    revert(0x1c, 0x04)
+                }
+                quoteAmount := productLow
+            }
+            case 256 {
+                quoteAmount := productHigh
+                remainder := productLow
+            }
+            default {
+                if shr(shift, productHigh) {
+                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
+                    revert(0x1c, 0x04)
+                }
+                quoteAmount := or(shl(sub(256, shift), productHigh), shr(shift, productLow))
+                remainder := and(productLow, sub(shl(shift, 1), 1))
+            }
+
+            if and(roundUp, iszero(iszero(remainder))) {
+                quoteAmount := add(quoteAmount, 1)
+                if iszero(quoteAmount) {
+                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
+                    revert(0x1c, 0x04)
+                }
+            }
+        }
     }
 
     /// @notice Decode price and quantity from a packed node.
