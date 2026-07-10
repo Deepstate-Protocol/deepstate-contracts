@@ -675,8 +675,11 @@ contract RadixMatchingEngineGasTest is Test {
         uint256 quoteAmount;
         assembly ("memory-safe") {
             let productLow := mul(quantity, factor)
-            let mm := mulmod(quantity, factor, not(0))
-            let productHigh := sub(mm, add(productLow, lt(mm, productLow)))
+            let productHigh := 0
+            if shr(128, quantity) {
+                let mm := mulmod(quantity, factor, not(0))
+                productHigh := sub(mm, add(productLow, lt(mm, productLow)))
+            }
             let remainder := 0
             switch shift
             case 0 {

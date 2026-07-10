@@ -1537,8 +1537,13 @@ abstract contract RadixMatchingEngine {
         /// @solidity memory-safe-assembly
         assembly {
             let productLow := mul(quantity, factor)
-            let mm := mulmod(quantity, factor, not(0))
-            let productHigh := sub(mm, add(productLow, lt(mm, productLow)))
+            let productHigh := 0
+            // Direct factors are at most 2**128, so a uint128 quantity cannot
+            // overflow this word. Reconstruct the high word only for larger inputs.
+            if shr(128, quantity) {
+                let mm := mulmod(quantity, factor, not(0))
+                productHigh := sub(mm, add(productLow, lt(mm, productLow)))
+            }
             let remainder := 0
 
             switch shift
