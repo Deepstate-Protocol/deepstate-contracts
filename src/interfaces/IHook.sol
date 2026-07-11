@@ -14,6 +14,6 @@ interface IHook {
     /// @param token Token whose top buyer changed; this is not necessarily a reward payout token.
     /// @param outgoingAmount Previous top order's live amount in `token` terms, or zero on first top.
     /// @param incomingOrderNonce New top order nonce, or zero if the side is empty.
-    function execute(bytes32 poolId, bytes32 bookId, address token, uint192 outgoingAmount, uint40 incomingOrderNonce)
+    function execute(bytes32 poolId, bytes32 bookId, address token, uint160 outgoingAmount, uint32 incomingOrderNonce)
         external;
 }

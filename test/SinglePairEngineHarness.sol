@@ -68,7 +68,7 @@ contract SinglePairEngineHarness is RoutingEngine {
         return ask;
     }
 
-    function nextNonce() external view returns (uint40) {
+    function nextNonce() external view returns (uint32) {
         return this.nextNonce(BASE_TOKEN, QUOTE_TOKEN, 0);
     }
 

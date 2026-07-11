@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {RoutingEngine} from "../src/RoutingEngine.sol";
+import {QuoteMath} from "./QuoteMath.sol";
 
 contract RoutingTestERC20 is ERC20 {
     string private _name;
@@ -35,17 +36,17 @@ contract RoutingEngineHarness is RoutingEngine {
     function restBookForTest(
         bytes32 id,
         uint256 nonceAndFlags,
-        uint24 price,
-        uint192 quantity,
+        int32 price,
+        uint160 quantity,
         bool isBid,
         address owner
-    ) external returns (bytes32 restingOrder, uint40 nextNonceAfter) {
+    ) external returns (bytes32 restingOrder, uint32 nextNonceAfter) {
         return _restBook(id, books[id], nonceAndFlags, price, quantity, isBid, owner, false);
     }
 }
 
 contract RoutingEngineTest is Test {
-    uint40 internal constant MAX_ORDER_NONCE = type(uint40).max;
+    uint32 internal constant MAX_ORDER_NONCE = type(uint32).max;
 
     RoutingEngineHarness internal engine;
     RoutingTestERC20 internal token0;
@@ -86,7 +87,7 @@ contract RoutingEngineTest is Test {
         bytes32 orderId = engine.orderId(id, resting);
         assertEq(engine.ownerOfOrder(orderId), alice);
         assertTrue(engine.isBidOrder(orderId));
-        assertEq(token1.balanceOf(address(engine)), 50);
+        assertEq(token1.balanceOf(address(engine)), _quoteValue(10, 5, true));
     }
 
     function test_InvalidTokenAndHookConfigBranches() public {
@@ -136,14 +137,15 @@ contract RoutingEngineTest is Test {
         vm.prank(bob);
         engine.fill(_fill(0, _order(10, 10_000, 0), true, true, false));
 
+        uint256 matchedQuote = _quoteValue(10, 10_000, false);
         assertEq(token0.balanceOf(bob), bobToken0Before + 9_900);
-        assertEq(token1.balanceOf(bob), bobToken1Before - 100_000);
+        assertEq(token1.balanceOf(bob), bobToken1Before - matchedQuote);
         assertEq(token0.balanceOf(feeRecipient), 100);
         assertEq(token1.balanceOf(feeRecipient), 0);
 
         vm.prank(alice);
         (, uint256 quoteAmount) = engine.cancel(address(token0), address(token1), 0, ask);
-        assertEq(quoteAmount, 100_000);
+        assertEq(quoteAmount, matchedQuote);
         assertEq(token0.balanceOf(feeRecipient), 100);
         assertEq(token1.balanceOf(feeRecipient), 0);
     }
@@ -161,7 +163,7 @@ contract RoutingEngineTest is Test {
         engine.fill(_fill(0, _order(10, 10_000, 0), true, true, false));
 
         assertEq(token0.balanceOf(bob), bobToken0Before + 10_000);
-        assertEq(token1.balanceOf(bob), bobToken1Before - 100_000);
+        assertEq(token1.balanceOf(bob), bobToken1Before - _quoteValue(10, 10_000, false));
         assertEq(token0.balanceOf(feeRecipient), 0);
     }
 
@@ -177,16 +179,18 @@ contract RoutingEngineTest is Test {
         vm.prank(bob);
         engine.fill(_fill(0, _order(10, 10_000, 0), false, true, false));
 
+        uint256 matchedQuote = _quoteValue(10, 10_000, true);
+        uint256 fee = matchedQuote * 100 / 10_000;
         assertEq(token0.balanceOf(bob), bobToken0Before - 10_000);
-        assertEq(token1.balanceOf(bob), bobToken1Before + 99_000);
+        assertEq(token1.balanceOf(bob), bobToken1Before + matchedQuote - fee);
         assertEq(token0.balanceOf(feeRecipient), 0);
-        assertEq(token1.balanceOf(feeRecipient), 1_000);
+        assertEq(token1.balanceOf(feeRecipient), fee);
 
         vm.prank(alice);
         (uint256 baseAmount,) = engine.cancel(address(token0), address(token1), 0, bid);
         assertEq(baseAmount, 10_000);
         assertEq(token0.balanceOf(feeRecipient), 0);
-        assertEq(token1.balanceOf(feeRecipient), 1_000);
+        assertEq(token1.balanceOf(feeRecipient), fee);
     }
 
     function test_FillRouteFeeIsCarvedBeforeRemainderCanRestAndCancel() public {
@@ -207,7 +211,7 @@ contract RoutingEngineTest is Test {
 
         bytes32 restingAsk = _order(20, 5_000, MAX_ORDER_NONCE - 1);
         assertEq(token0.balanceOf(bob), bobToken0Before + 4_900);
-        assertEq(token1.balanceOf(bob), bobToken1Before - 100_000);
+        assertEq(token1.balanceOf(bob), bobToken1Before - _quoteValue(10, 10_000, false));
         assertEq(token0.balanceOf(feeRecipient), 100);
         assertEq(
             engine.ownerOfOrder(engine.orderId(engine.bookId(address(token0), address(token1), 0), restingAsk)), bob
@@ -254,12 +258,12 @@ contract RoutingEngineTest is Test {
         engine.fillRoute(route);
 
         assertEq(token0.balanceOf(bob), bobToken0Before + 3);
-        assertEq(token1.balanceOf(bob), bobToken1Before - 30);
+        assertEq(token1.balanceOf(bob), bobToken1Before - _quoteValue(10, 5, false) + _quoteValue(10, 2, false));
 
         vm.prank(alice);
         (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(address(token0), address(token1), 0, ask);
         assertEq(baseAmount, 2);
-        assertEq(quoteAmount, 30);
+        assertEq(quoteAmount, _quoteValue(10, 5, false) - _quoteValue(10, 2, false));
     }
 
     function test_FillRouteNetsRepeatedTouchedTokens() public {
@@ -277,7 +281,7 @@ contract RoutingEngineTest is Test {
         engine.fillRoute(route);
 
         assertEq(token0.balanceOf(bob), bobToken0Before + 5);
-        assertEq(token1.balanceOf(bob), bobToken1Before - 50);
+        assertEq(token1.balanceOf(bob), bobToken1Before - _quoteValue(10, 5, false));
     }
 
     function test_FillRouteZeroDeltaLegDoesNotTouchTokens() public {
@@ -303,7 +307,7 @@ contract RoutingEngineTest is Test {
 
         bytes32 id = engine.bookId(address(token0), address(token1), 0);
         uint256 nonce = engine.nextNonce(address(token0), address(token1), 0);
-        engine.setNonceAndFlags(id, nonce | (uint256(1) << 43));
+        engine.setNonceAndFlags(id, nonce | (uint256(1) << 35));
 
         vm.prank(bob);
         engine.fill(_fill(0, _order(10, 1, 0), true, true, false));
@@ -368,7 +372,7 @@ contract RoutingEngineTest is Test {
         engine.setPoolHookConfig(address(token0), address(token1), address(this), true, true);
 
         bytes32 oldBook = engine.bookId(address(token0), address(token1), 0);
-        engine.setNonceAndFlags(oldBook, 1 | (uint256(1) << 42) | (uint256(1) << 43));
+        engine.setNonceAndFlags(oldBook, 1 | (uint256(1) << 34) | (uint256(1) << 35));
 
         vm.prank(alice);
         bytes32 resting = engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
@@ -394,7 +398,7 @@ contract RoutingEngineTest is Test {
         engine.setPoolHookConfig(address(token0), address(token1), address(this), true, true);
 
         bytes32 oldBook = engine.bookId(address(token0), address(token1), 0);
-        engine.setNonceAndFlags(oldBook, 2 | (uint256(1) << 42) | (uint256(1) << 43));
+        engine.setNonceAndFlags(oldBook, 2 | (uint256(1) << 34) | (uint256(1) << 35));
 
         vm.prank(alice);
         engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
@@ -453,7 +457,11 @@ contract RoutingEngineTest is Test {
         vm.stopPrank();
     }
 
-    function _order(uint24 price, uint192 quantity, uint40 nonce) internal pure returns (bytes32) {
-        return bytes32((uint256(price) << 232) | (uint256(quantity) << 40) | uint256(nonce));
+    function _order(int32 price, uint160 quantity, uint32 nonce) internal pure returns (bytes32) {
+        return bytes32((uint256(uint32(price)) << 224) | (uint256(quantity) << 64) | uint256(nonce));
+    }
+
+    function _quoteValue(int32 tick, uint160 quantity, bool roundUp) internal pure returns (uint256 quoteAmount) {
+        quoteAmount = QuoteMath.quoteValue(tick, quantity, roundUp);
     }
 }

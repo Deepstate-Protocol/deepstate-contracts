@@ -6,9 +6,14 @@ Foundry prototype for a two-sided ERC20 matching engine backed by a single `mapp
 
 Resting orders are packed into one `bytes32`:
 
-- bits 232-255: 24-bit price
-- bits 40-231: 192-bit quantity
-- bits 0-39: 40-bit decrementing nonce
+- bits 224-255: signed 32-bit logarithmic tick
+- bits 64-223: 160-bit quantity
+- bits 32-63: 32-bit same-tick rounding correction code (zero in order leaves)
+- bits 0-31: 32-bit decrementing nonce
+
+Tick `t` represents `price = 2 ** (128 * t / 2**31)` quote units per base unit. Tick zero is
+exactly 1:1, adjacent ticks differ by about 0.000413148 basis points, and the full signed domain
+spans approximately `[2**-128, 2**128)`.
 
 The contract exposes the two order actions:
 
@@ -28,9 +33,14 @@ path = price || nonce
 branch_path = max(child_a_path, child_b_path)
 ```
 
-The branch path is packed back into the same price and nonce fields, while the quantity field stores the exact sum of the child quantities. Because the boundary key is an actual order path, uniqueness comes from the globally decrementing order nonce rather than from a synthetic branch nonce namespace.
+The branch path is packed back into the same tick and nonce fields, while the quantity field stores
+the exact sum of the child quantities. A uniform-tick branch stores `roundingCorrection + 1` in its
+correction field, allowing aggregate matching to reproduce the exact sum of per-order rounded
+notionals. Mixed-tick branches use correction code zero and recurse when their quote value is needed.
+Because the boundary key is an actual order path, uniqueness comes from the decrementing order nonce
+rather than from a synthetic branch nonce namespace.
 
-Resting orders start at `type(uint40).max` and decrement from there.
+Resting orders start at `type(uint32).max` and decrement from there.
 
 Higher order nonce still means earlier time priority at the same price.
 

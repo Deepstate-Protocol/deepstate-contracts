@@ -4,6 +4,7 @@ INVARIANT_RUNS ?= 2048
 INVARIANT_DEPTH ?= 64
 INVARIANT_SHARDS ?= 8
 INVARIANT_SHARD ?= 1
+GAS_CONTRACTS ?= RadixMatchingEngine(Gas|HookGas|FeeGas)Test
 COVERAGE_FILE ?= src/RadixMatchingEngine.sol
 COVERAGE_FILES ?= src/RadixMatchingEngine.sol,src/RoutingEngine.sol
 COVERAGE_EXCLUSIONS ?= coverage.exclusions.json
@@ -46,13 +47,13 @@ invariant-deep-shards:
 	python3 script/run_invariant_shards.py --runs "$(INVARIANT_RUNS)" --depth "$(INVARIANT_DEPTH)" --shards "$(INVARIANT_SHARDS)" --all
 
 gas-runtime:
-	forge test --force --match-contract RadixMatchingEngineGasTest --gas-report
+	forge test --isolate --force --match-contract '$(GAS_CONTRACTS)' --gas-report
 
 snapshot-runtime:
-	forge snapshot --force --match-contract RadixMatchingEngineGasTest --snap .gas-snapshot.runtime
+	forge snapshot --isolate --force --match-contract '$(GAS_CONTRACTS)' --snap .gas-snapshot.runtime
 
 snapshot-runtime-check:
-	forge snapshot --force --match-contract RadixMatchingEngineGasTest --check .gas-snapshot.runtime
+	forge snapshot --isolate --force --match-contract '$(GAS_CONTRACTS)' --check .gas-snapshot.runtime
 
 build-size:
 	forge build --sizes

@@ -4,6 +4,7 @@ pragma solidity 0.8.28;
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {SinglePairEngineHarness as RadixMatchingEngine} from "./SinglePairEngineHarness.sol";
+import {QuoteMath} from "./QuoteMath.sol";
 
 contract FormalERC20 is ERC20 {
     function name() public pure override returns (string memory) {
@@ -21,7 +22,7 @@ contract FormalERC20 is ERC20 {
 
 contract RadixMatchingEngineFormalTest is Test {
     uint256 internal constant INITIAL_BALANCE = 1_000_000_000;
-    uint40 internal constant MAX_ORDER_NONCE = type(uint40).max;
+    uint32 internal constant MAX_ORDER_NONCE = type(uint32).max;
     address internal constant ALICE = address(0xA11CE);
     address internal constant BOB = address(0xB0B);
     address internal constant CAROL = address(0xCA701);
@@ -43,10 +44,13 @@ contract RadixMatchingEngineFormalTest is Test {
     function testFuzz_FormalBidAgainstAskConservesAndClaims(uint8 priceSeed, uint8 askQtySeed, uint8 bidQtySeed)
         public
     {
-        uint24 price = _price(priceSeed);
-        uint192 askQty = _qty(askQtySeed);
-        uint192 bidQty = _qty(bidQtySeed);
-        uint192 matched = _min(askQty, bidQty);
+        int32 price = _price(priceSeed);
+        uint160 askQty = _qty(askQtySeed);
+        uint160 bidQty = _qty(bidQtySeed);
+        uint160 matched = _min(askQty, bidQty);
+        uint160 askRemaining = askQty - matched;
+        uint160 bidRemaining = bidQty - matched;
+        uint256 matchedQuote = _quoteValue(price, askQty, false) - _quoteValue(price, askRemaining, false);
 
         vm.prank(ALICE);
         bytes32 ask = engine.fill(_order(price, askQty, 0), false);
@@ -55,37 +59,40 @@ contract RadixMatchingEngineFormalTest is Test {
         bytes32 bid = engine.fill(_order(price, bidQty, 0), true);
 
         assert(base.balanceOf(BOB) == INITIAL_BALANCE + matched);
-        assert(quote.balanceOf(BOB) == INITIAL_BALANCE - _quoteValue(price, bidQty));
+        assert(quote.balanceOf(BOB) == INITIAL_BALANCE - matchedQuote - _quoteValue(price, bidRemaining, true));
 
         vm.prank(ALICE);
         (uint256 askBase, uint256 askQuote) = engine.cancel(ask);
-        assert(askBase == askQty - matched);
-        assert(askQuote == _quoteValue(price, matched));
+        assert(askBase == askRemaining);
+        assert(askQuote == matchedQuote);
 
         if (bidQty > askQty) {
-            assert(bid == _order(price, bidQty - matched, MAX_ORDER_NONCE - 1));
+            assert(bid == _order(price, bidRemaining, MAX_ORDER_NONCE - 1));
             vm.prank(BOB);
             (uint256 bidBase, uint256 bidQuote) = engine.cancel(bid);
             assert(bidBase == 0);
-            assert(bidQuote == _quoteValue(price, bidQty - matched));
+            assert(bidQuote == _quoteValue(price, bidRemaining, true));
         } else {
             assert(bid == bytes32(0));
         }
 
         _assertEmptyBook();
         assert(base.balanceOf(ALICE) == INITIAL_BALANCE - matched);
-        assert(quote.balanceOf(ALICE) == INITIAL_BALANCE + _quoteValue(price, matched));
+        assert(quote.balanceOf(ALICE) == INITIAL_BALANCE + matchedQuote);
         assert(base.balanceOf(BOB) == INITIAL_BALANCE + matched);
-        assert(quote.balanceOf(BOB) == INITIAL_BALANCE - _quoteValue(price, matched));
+        assert(quote.balanceOf(BOB) == INITIAL_BALANCE - matchedQuote);
     }
 
     function testFuzz_FormalAskAgainstBidConservesAndClaims(uint8 priceSeed, uint8 bidQtySeed, uint8 askQtySeed)
         public
     {
-        uint24 price = _price(priceSeed);
-        uint192 bidQty = _qty(bidQtySeed);
-        uint192 askQty = _qty(askQtySeed);
-        uint192 matched = _min(bidQty, askQty);
+        int32 price = _price(priceSeed);
+        uint160 bidQty = _qty(bidQtySeed);
+        uint160 askQty = _qty(askQtySeed);
+        uint160 matched = _min(bidQty, askQty);
+        uint160 bidRemaining = bidQty - matched;
+        uint160 askRemaining = askQty - matched;
+        uint256 matchedQuote = _quoteValue(price, bidQty, true) - _quoteValue(price, bidRemaining, true);
 
         vm.prank(ALICE);
         bytes32 bid = engine.fill(_order(price, bidQty, 0), true);
@@ -94,18 +101,18 @@ contract RadixMatchingEngineFormalTest is Test {
         bytes32 ask = engine.fill(_order(price, askQty, 0), false);
 
         assert(base.balanceOf(BOB) == INITIAL_BALANCE - askQty);
-        assert(quote.balanceOf(BOB) == INITIAL_BALANCE + _quoteValue(price, matched));
+        assert(quote.balanceOf(BOB) == INITIAL_BALANCE + matchedQuote);
 
         vm.prank(ALICE);
         (uint256 bidBase, uint256 bidQuote) = engine.cancel(bid);
         assert(bidBase == matched);
-        assert(bidQuote == _quoteValue(price, bidQty - matched));
+        assert(bidQuote == _quoteValue(price, bidRemaining, true));
 
         if (askQty > bidQty) {
-            assert(ask == _order(price, askQty - matched, MAX_ORDER_NONCE - 1));
+            assert(ask == _order(price, askRemaining, MAX_ORDER_NONCE - 1));
             vm.prank(BOB);
             (uint256 askBase, uint256 askQuote) = engine.cancel(ask);
-            assert(askBase == askQty - matched);
+            assert(askBase == askRemaining);
             assert(askQuote == 0);
         } else {
             assert(ask == bytes32(0));
@@ -113,9 +120,9 @@ contract RadixMatchingEngineFormalTest is Test {
 
         _assertEmptyBook();
         assert(base.balanceOf(ALICE) == INITIAL_BALANCE + matched);
-        assert(quote.balanceOf(ALICE) == INITIAL_BALANCE - _quoteValue(price, matched));
+        assert(quote.balanceOf(ALICE) == INITIAL_BALANCE - matchedQuote);
         assert(base.balanceOf(BOB) == INITIAL_BALANCE - matched);
-        assert(quote.balanceOf(BOB) == INITIAL_BALANCE + _quoteValue(price, matched));
+        assert(quote.balanceOf(BOB) == INITIAL_BALANCE + matchedQuote);
     }
 
     function testFuzz_DirtySamePriceAskRightSpineConserves(
@@ -124,11 +131,11 @@ contract RadixMatchingEngineFormalTest is Test {
         uint8 secondQtySeed,
         uint8 firstFillSeed
     ) public {
-        uint24 price = _price(priceSeed);
-        uint192 firstQty = _qtyAtLeastTwo(firstQtySeed);
-        uint192 secondQty = _qty(secondQtySeed);
-        uint192 firstFill = _partialFill(firstFillSeed, firstQty);
-        uint192 remaining = firstQty - firstFill;
+        int32 price = _price(priceSeed);
+        uint160 firstQty = _qtyAtLeastTwo(firstQtySeed);
+        uint160 secondQty = _qty(secondQtySeed);
+        uint160 firstFill = _partialFill(firstFillSeed, firstQty);
+        uint160 remaining = firstQty - firstFill;
 
         vm.prank(ALICE);
         bytes32 firstAsk = engine.fill(_order(price, firstQty, 0), false);
@@ -147,12 +154,15 @@ contract RadixMatchingEngineFormalTest is Test {
         (uint256 secondBase, uint256 secondQuote) = engine.cancel(secondAsk);
 
         assert(firstBase == 0);
-        assert(firstQuote == _quoteValue(price, firstQty));
+        assert(firstQuote == _quoteValue(price, firstQty, false));
         assert(secondBase == 0);
-        assert(secondQuote == _quoteValue(price, secondQty));
+        assert(secondQuote == _quoteValue(price, secondQty, false));
         _assertEmptyBook();
         assert(base.balanceOf(CAROL) == INITIAL_BALANCE + firstQty + secondQty);
-        assert(quote.balanceOf(CAROL) == INITIAL_BALANCE - _quoteValue(price, firstQty + secondQty));
+        assert(
+            quote.balanceOf(CAROL)
+                == INITIAL_BALANCE - _quoteValue(price, firstQty, false) - _quoteValue(price, secondQty, false)
+        );
     }
 
     function testFuzz_DirtySamePriceBidRightSpineConserves(
@@ -161,11 +171,11 @@ contract RadixMatchingEngineFormalTest is Test {
         uint8 secondQtySeed,
         uint8 firstFillSeed
     ) public {
-        uint24 price = _price(priceSeed);
-        uint192 firstQty = _qtyAtLeastTwo(firstQtySeed);
-        uint192 secondQty = _qty(secondQtySeed);
-        uint192 firstFill = _partialFill(firstFillSeed, firstQty);
-        uint192 remaining = firstQty - firstFill;
+        int32 price = _price(priceSeed);
+        uint160 firstQty = _qtyAtLeastTwo(firstQtySeed);
+        uint160 secondQty = _qty(secondQtySeed);
+        uint160 firstFill = _partialFill(firstFillSeed, firstQty);
+        uint160 remaining = firstQty - firstFill;
 
         vm.prank(ALICE);
         bytes32 firstBid = engine.fill(_order(price, firstQty, 0), true);
@@ -189,7 +199,10 @@ contract RadixMatchingEngineFormalTest is Test {
         assert(secondQuote == 0);
         _assertEmptyBook();
         assert(base.balanceOf(CAROL) == INITIAL_BALANCE - firstQty - secondQty);
-        assert(quote.balanceOf(CAROL) == INITIAL_BALANCE + _quoteValue(price, firstQty + secondQty));
+        assert(
+            quote.balanceOf(CAROL)
+                == INITIAL_BALANCE + _quoteValue(price, firstQty, true) + _quoteValue(price, secondQty, true)
+        );
     }
 
     function testFuzz_DirtyMixedPriceAskRightSpineConserves(
@@ -199,12 +212,12 @@ contract RadixMatchingEngineFormalTest is Test {
         uint8 secondQtySeed,
         uint8 firstFillSeed
     ) public {
-        uint24 lowPrice = _price(lowPriceSeed);
-        uint24 highPrice = lowPrice + _priceOffset(highPriceOffsetSeed);
-        uint192 firstQty = _qtyAtLeastTwo(firstQtySeed);
-        uint192 secondQty = _qty(secondQtySeed);
-        uint192 firstFill = _partialFill(firstFillSeed, firstQty);
-        uint192 remaining = firstQty - firstFill;
+        int32 lowPrice = _price(lowPriceSeed);
+        int32 highPrice = lowPrice + _priceOffset(highPriceOffsetSeed);
+        uint160 firstQty = _qtyAtLeastTwo(firstQtySeed);
+        uint160 secondQty = _qty(secondQtySeed);
+        uint160 firstFill = _partialFill(firstFillSeed, firstQty);
+        uint160 remaining = firstQty - firstFill;
 
         vm.prank(ALICE);
         bytes32 lowAsk = engine.fill(_order(lowPrice, firstQty, 0), false);
@@ -223,14 +236,14 @@ contract RadixMatchingEngineFormalTest is Test {
         (uint256 highBase, uint256 highQuote) = engine.cancel(highAsk);
 
         assert(lowBase == 0);
-        assert(lowQuote == _quoteValue(lowPrice, firstQty));
+        assert(lowQuote == _quoteValue(lowPrice, firstQty, false));
         assert(highBase == 0);
-        assert(highQuote == _quoteValue(highPrice, secondQty));
+        assert(highQuote == _quoteValue(highPrice, secondQty, false));
         _assertEmptyBook();
         assert(base.balanceOf(CAROL) == INITIAL_BALANCE + firstQty + secondQty);
         assert(
             quote.balanceOf(CAROL)
-                == INITIAL_BALANCE - _quoteValue(lowPrice, firstQty) - _quoteValue(highPrice, secondQty)
+                == INITIAL_BALANCE - _quoteValue(lowPrice, firstQty, false) - _quoteValue(highPrice, secondQty, false)
         );
     }
 
@@ -241,12 +254,12 @@ contract RadixMatchingEngineFormalTest is Test {
         uint8 secondQtySeed,
         uint8 firstFillSeed
     ) public {
-        uint24 lowPrice = _price(lowPriceSeed);
-        uint24 highPrice = lowPrice + _priceOffset(highPriceOffsetSeed);
-        uint192 firstQty = _qtyAtLeastTwo(firstQtySeed);
-        uint192 secondQty = _qty(secondQtySeed);
-        uint192 firstFill = _partialFill(firstFillSeed, firstQty);
-        uint192 remaining = firstQty - firstFill;
+        int32 lowPrice = _price(lowPriceSeed);
+        int32 highPrice = lowPrice + _priceOffset(highPriceOffsetSeed);
+        uint160 firstQty = _qtyAtLeastTwo(firstQtySeed);
+        uint160 secondQty = _qty(secondQtySeed);
+        uint160 firstFill = _partialFill(firstFillSeed, firstQty);
+        uint160 remaining = firstQty - firstFill;
 
         vm.prank(ALICE);
         bytes32 highBid = engine.fill(_order(highPrice, firstQty, 0), true);
@@ -272,16 +285,16 @@ contract RadixMatchingEngineFormalTest is Test {
         assert(base.balanceOf(CAROL) == INITIAL_BALANCE - firstQty - secondQty);
         assert(
             quote.balanceOf(CAROL)
-                == INITIAL_BALANCE + _quoteValue(highPrice, firstQty) + _quoteValue(lowPrice, secondQty)
+                == INITIAL_BALANCE + _quoteValue(highPrice, firstQty, true) + _quoteValue(lowPrice, secondQty, true)
         );
     }
 
     function testFuzz_FormalDirtySamePriceAskRightSpineConserves() public {
-        uint24 price = 60;
-        uint192 firstQty = 3;
-        uint192 secondQty = 2;
-        uint192 firstFill = 1;
-        uint192 remaining = firstQty - firstFill;
+        int32 price = 60;
+        uint160 firstQty = 3;
+        uint160 secondQty = 2;
+        uint160 firstFill = 1;
+        uint160 remaining = firstQty - firstFill;
 
         vm.prank(ALICE);
         bytes32 firstAsk = engine.fill(_order(price, firstQty, 0), false);
@@ -300,20 +313,23 @@ contract RadixMatchingEngineFormalTest is Test {
         (uint256 secondBase, uint256 secondQuote) = engine.cancel(secondAsk);
 
         assert(firstBase == 0);
-        assert(firstQuote == _quoteValue(price, firstQty));
+        assert(firstQuote == _quoteValue(price, firstQty, false));
         assert(secondBase == 0);
-        assert(secondQuote == _quoteValue(price, secondQty));
+        assert(secondQuote == _quoteValue(price, secondQty, false));
         _assertEmptyBook();
         assert(base.balanceOf(CAROL) == INITIAL_BALANCE + firstQty + secondQty);
-        assert(quote.balanceOf(CAROL) == INITIAL_BALANCE - _quoteValue(price, firstQty + secondQty));
+        assert(
+            quote.balanceOf(CAROL)
+                == INITIAL_BALANCE - _quoteValue(price, firstQty, false) - _quoteValue(price, secondQty, false)
+        );
     }
 
     function testFuzz_FormalDirtySamePriceBidRightSpineConserves() public {
-        uint24 price = 70;
-        uint192 firstQty = 3;
-        uint192 secondQty = 2;
-        uint192 firstFill = 1;
-        uint192 remaining = firstQty - firstFill;
+        int32 price = 70;
+        uint160 firstQty = 3;
+        uint160 secondQty = 2;
+        uint160 firstFill = 1;
+        uint160 remaining = firstQty - firstFill;
 
         vm.prank(ALICE);
         bytes32 firstBid = engine.fill(_order(price, firstQty, 0), true);
@@ -337,16 +353,19 @@ contract RadixMatchingEngineFormalTest is Test {
         assert(secondQuote == 0);
         _assertEmptyBook();
         assert(base.balanceOf(CAROL) == INITIAL_BALANCE - firstQty - secondQty);
-        assert(quote.balanceOf(CAROL) == INITIAL_BALANCE + _quoteValue(price, firstQty + secondQty));
+        assert(
+            quote.balanceOf(CAROL)
+                == INITIAL_BALANCE + _quoteValue(price, firstQty, true) + _quoteValue(price, secondQty, true)
+        );
     }
 
     function testFuzz_FormalDirtyMixedPriceAskRightSpineConserves() public {
-        uint24 lowPrice = 60;
-        uint24 highPrice = 61;
-        uint192 firstQty = 3;
-        uint192 secondQty = 2;
-        uint192 firstFill = 1;
-        uint192 remaining = firstQty - firstFill;
+        int32 lowPrice = 60;
+        int32 highPrice = 61;
+        uint160 firstQty = 3;
+        uint160 secondQty = 2;
+        uint160 firstFill = 1;
+        uint160 remaining = firstQty - firstFill;
 
         vm.prank(ALICE);
         bytes32 lowAsk = engine.fill(_order(lowPrice, firstQty, 0), false);
@@ -365,24 +384,24 @@ contract RadixMatchingEngineFormalTest is Test {
         (uint256 highBase, uint256 highQuote) = engine.cancel(highAsk);
 
         assert(lowBase == 0);
-        assert(lowQuote == _quoteValue(lowPrice, firstQty));
+        assert(lowQuote == _quoteValue(lowPrice, firstQty, false));
         assert(highBase == 0);
-        assert(highQuote == _quoteValue(highPrice, secondQty));
+        assert(highQuote == _quoteValue(highPrice, secondQty, false));
         _assertEmptyBook();
         assert(base.balanceOf(CAROL) == INITIAL_BALANCE + firstQty + secondQty);
         assert(
             quote.balanceOf(CAROL)
-                == INITIAL_BALANCE - _quoteValue(lowPrice, firstQty) - _quoteValue(highPrice, secondQty)
+                == INITIAL_BALANCE - _quoteValue(lowPrice, firstQty, false) - _quoteValue(highPrice, secondQty, false)
         );
     }
 
     function testFuzz_FormalDirtyMixedPriceBidRightSpineConserves() public {
-        uint24 lowPrice = 69;
-        uint24 highPrice = 70;
-        uint192 firstQty = 3;
-        uint192 secondQty = 2;
-        uint192 firstFill = 1;
-        uint192 remaining = firstQty - firstFill;
+        int32 lowPrice = 69;
+        int32 highPrice = 70;
+        uint160 firstQty = 3;
+        uint160 secondQty = 2;
+        uint160 firstFill = 1;
+        uint160 remaining = firstQty - firstFill;
 
         vm.prank(ALICE);
         bytes32 highBid = engine.fill(_order(highPrice, firstQty, 0), true);
@@ -408,7 +427,7 @@ contract RadixMatchingEngineFormalTest is Test {
         assert(base.balanceOf(CAROL) == INITIAL_BALANCE - firstQty - secondQty);
         assert(
             quote.balanceOf(CAROL)
-                == INITIAL_BALANCE + _quoteValue(highPrice, firstQty) + _quoteValue(lowPrice, secondQty)
+                == INITIAL_BALANCE + _quoteValue(highPrice, firstQty, true) + _quoteValue(lowPrice, secondQty, true)
         );
     }
 
@@ -429,35 +448,35 @@ contract RadixMatchingEngineFormalTest is Test {
         assert(quote.balanceOf(address(engine)) == 0);
     }
 
-    function _price(uint8 seed) private pure returns (uint24) {
-        return uint24(uint256(seed) + 1);
+    function _price(uint8 seed) private pure returns (int32) {
+        return int32(uint32(uint256(seed) + 1));
     }
 
-    function _qty(uint8 seed) private pure returns (uint192) {
-        return (uint192(seed) % 8) + 1;
+    function _qty(uint8 seed) private pure returns (uint160) {
+        return (uint160(seed) % 8) + 1;
     }
 
-    function _qtyAtLeastTwo(uint8 seed) private pure returns (uint192) {
-        return (uint192(seed) % 7) + 2;
+    function _qtyAtLeastTwo(uint8 seed) private pure returns (uint160) {
+        return (uint160(seed) % 7) + 2;
     }
 
-    function _partialFill(uint8 seed, uint192 quantity) private pure returns (uint192) {
-        return (uint192(seed) % (quantity - 1)) + 1;
+    function _partialFill(uint8 seed, uint160 quantity) private pure returns (uint160) {
+        return (uint160(seed) % (quantity - 1)) + 1;
     }
 
-    function _priceOffset(uint8 seed) private pure returns (uint24) {
-        return (uint24(seed) % 8) + 1;
+    function _priceOffset(uint8 seed) private pure returns (int32) {
+        return (int32(uint32(seed)) % 8) + 1;
     }
 
-    function _min(uint192 a, uint192 b) private pure returns (uint192) {
+    function _min(uint160 a, uint160 b) private pure returns (uint160) {
         return a < b ? a : b;
     }
 
-    function _quoteValue(uint24 price, uint192 quantity) private pure returns (uint256) {
-        return uint256(price) * uint256(quantity);
+    function _quoteValue(int32 tick, uint160 quantity, bool roundUp) private pure returns (uint256 quoteAmount) {
+        quoteAmount = QuoteMath.quoteValue(tick, quantity, roundUp);
     }
 
-    function _order(uint24 price, uint192 quantity, uint40 nonce) private pure returns (bytes32) {
-        return bytes32((uint256(price) << 232) | (uint256(quantity) << 40) | uint256(nonce));
+    function _order(int32 price, uint160 quantity, uint32 nonce) private pure returns (bytes32) {
+        return bytes32((uint256(uint32(price)) << 224) | (uint256(quantity) << 64) | uint256(nonce));
     }
 }

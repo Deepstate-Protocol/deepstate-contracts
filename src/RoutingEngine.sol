@@ -81,9 +81,9 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     /// @dev Mask for all pool-level hook activation bits.
     uint256 private constant _POOL_HOOK_ACTIVE_MASK = _POOL_HOOK_TOKEN0_ACTIVE | _POOL_HOOK_TOKEN1_ACTIVE;
     /// @dev Book-local copy of token0 hook activation, stored above nonce/right-spine flags.
-    uint256 private constant _BOOK_HOOK_TOKEN0_ACTIVE = uint256(1) << 42;
+    uint256 private constant _BOOK_HOOK_TOKEN0_ACTIVE = uint256(1) << 34;
     /// @dev Book-local copy of token1 hook activation, stored above nonce/right-spine flags.
-    uint256 private constant _BOOK_HOOK_TOKEN1_ACTIVE = uint256(1) << 43;
+    uint256 private constant _BOOK_HOOK_TOKEN1_ACTIVE = uint256(1) << 35;
     /// @dev Mask for all book-local hook activation bits.
     uint256 private constant _BOOK_HOOK_ACTIVE_MASK = _BOOK_HOOK_TOKEN0_ACTIVE | _BOOK_HOOK_TOKEN1_ACTIVE;
     /// @dev Basis-point denominator used by protocol fee math.
@@ -92,8 +92,8 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     uint16 private constant _MAX_FEE_BPS = 100;
     /// @dev High-bit domain separator for transient protocol fee slots.
     uint256 private constant _FEE_DELTA_DOMAIN = uint256(1) << 255;
-    /// @dev Low 40-bit nonce mask duplicated here to avoid exposing the engine's private constant.
-    uint256 private constant _BOOK_NONCE_MASK = (uint256(1) << 40) - 1;
+    /// @dev Low 32-bit nonce mask duplicated here to avoid exposing the engine's private constant.
+    uint256 private constant _BOOK_NONCE_MASK = type(uint32).max;
 
     /// @notice Latest restable epoch for each sorted token pair.
     mapping(bytes32 poolId => uint256 epochAndHookFlags) private _poolEpochAndHookFlags;
@@ -331,12 +331,12 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         return _poolEpoch(_poolEpochAndHookFlags[pid]);
     }
 
-    /// @notice Return the low 40-bit next nonce for a book.
+    /// @notice Return the low 32-bit next nonce for a book.
     /// @param token0 Lower token address.
     /// @param token1 Higher token address.
     /// @param epoch Book epoch.
     /// @return Next decrementing nonce, or zero if the book has not been initialized.
-    function nextNonce(address token0, address token1, uint256 epoch) external view returns (uint40) {
+    function nextNonce(address token0, address token1, uint256 epoch) external view returns (uint32) {
         _requireSortedTokens(token0, token1);
         return _nextNonce(books[bookId(token0, token1, epoch)]);
     }
@@ -388,11 +388,11 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         Book storage routedBook = books[routedBookId];
         uint256 routedNonceAndFlags = routedBook.nonceAndFlags;
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint40 routedNonce = uint40(routedNonceAndFlags);
+        uint32 routedNonce = uint32(routedNonceAndFlags);
 
-        uint24 limitPrice;
-        uint192 remaining;
-        uint192 baseFilled;
+        int32 limitPrice;
+        uint160 remaining;
+        uint160 baseFilled;
         uint256 quoteAmount;
 
         (limitPrice, remaining, baseFilled, quoteAmount) =
@@ -418,7 +418,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
                     remaining,
                     true
                 );
-                uint256 collateral = _quoteValue(limitPrice, remaining);
+                uint256 collateral = _quoteValue(limitPrice, remaining, true);
                 // forge-lint: disable-next-line(unsafe-typecast)
                 token1Delta -= int256(collateral);
             }
@@ -488,9 +488,9 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         bytes32 routedBookId,
         Book storage routedBook,
         uint256 routedNonceAndFlags
-    ) private returns (uint24 limitPrice, uint192 remaining, uint192 baseFilled, uint256 quoteAmount) {
+    ) private returns (int32 limitPrice, uint160 remaining, uint160 baseFilled, uint256 quoteAmount) {
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint40 routedNonce = uint40(routedNonceAndFlags);
+        uint32 routedNonce = uint32(routedNonceAndFlags);
         if (routedNonce == 0) {
             if (params.noRest || params.fillOrKill) revert InvalidBook();
             (limitPrice, remaining) = _validateIncomingOrder(params.order);
@@ -526,8 +526,8 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         Book storage routedBook,
         uint256 routedNonceAndFlags,
         bool routedBookWasEmpty,
-        uint24 limitPrice,
-        uint192 remaining,
+        int32 limitPrice,
+        uint160 remaining,
         bool isBid
     ) private returns (bytes32 restingOrder) {
         if (!routedBookWasEmpty) routedNonceAndFlags = routedBook.nonceAndFlags;
@@ -543,7 +543,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
                 token0, token1, routedEpoch, routedBookId, routedBook, routedNonceAndFlags, routedBookWasEmpty
             );
         }
-        uint40 nextNonceAfter;
+        uint32 nextNonceAfter;
         bool hookEnabled = _bookHookEnabled(restNonceAndFlags, isBid);
         (restingOrder, nextNonceAfter) = _restSelectedBook(
             token0, token1, restBookId, restBook, restNonceAndFlags, limitPrice, remaining, isBid, hookEnabled
@@ -560,11 +560,11 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         bytes32 id,
         Book storage book,
         uint256 nonceAndFlags,
-        uint24 limitPrice,
-        uint192 remaining,
+        int32 limitPrice,
+        uint160 remaining,
         bool isBid,
         bool hookEnabled
-    ) private returns (bytes32 restingOrder, uint40 nextNonceAfter) {
+    ) private returns (bytes32 restingOrder, uint32 nextNonceAfter) {
         (restingOrder, nextNonceAfter) =
             _restBook(id, book, nonceAndFlags, limitPrice, remaining, isBid, msg.sender, hookEnabled);
         if (hookEnabled) _executeTopOrderHook(token0, token1, id, isBid);
@@ -610,11 +610,11 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         }
 
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint40 nonce = uint40(nonceAndFlags);
+        uint32 nonce = uint32(nonceAndFlags);
         uint256 bookHookFlags;
         if (poolState & _POOL_HOOK_ACTIVE_MASK != 0) bookHookFlags = _bookHookFlags(poolState);
         if (nonce == 0) {
-            nonceAndFlags = uint256(type(uint40).max) | bookHookFlags;
+            nonceAndFlags = uint256(type(uint32).max) | bookHookFlags;
             emit BookInitialized(pid, id, epoch);
             return (id, book, nonceAndFlags);
         }
@@ -628,7 +628,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
             _poolEpochAndHookFlags[pid] = poolState;
             id = bookId(token0, token1, epoch);
             book = books[id];
-            nonceAndFlags = uint256(type(uint40).max) | bookHookFlags;
+            nonceAndFlags = uint256(type(uint32).max) | bookHookFlags;
             emit BookInitialized(pid, id, epoch);
         }
     }
@@ -669,7 +669,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     /// This function adds pool/book/token context at the top layer. Hook failures are intentionally
     /// swallowed so a bad hook implementation cannot block the matching engine.
     function _executeTopOrderHook(address token0, address token1, bytes32 id, bool isBid) private {
-        (uint192 outgoingAmount, uint40 incomingNonce) = _takeTopOrderChange();
+        (uint160 outgoingAmount, uint32 incomingNonce) = _takeTopOrderChange();
         if (outgoingAmount == 0 && incomingNonce == 0) return;
 
         bytes32 pid = poolId(token0, token1);
@@ -726,7 +726,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     /// @notice Initialize a new book with nonce max and inherited hook flags.
     function _initializeBookWithHookFlags(Book storage book, uint256 flags) private {
         if (_nextNonce(book) != 0) return;
-        book.nonceAndFlags = uint256(type(uint40).max) | flags;
+        book.nonceAndFlags = uint256(type(uint32).max) | flags;
     }
 
     /// @notice Require canonical sorted nonzero token addresses.
