@@ -301,6 +301,17 @@ abstract contract RadixMatchingEngine {
         bytes32 root = book.tree[_ROOT_NODE].leftNode;
         if (root == bytes32(0)) return (remaining, 0, 0);
 
+        if (!_rightSpineDirty(book, false) && limitPrice == type(int32).max && _quantity(root) <= remaining) {
+            baseFilled = _quantity(root);
+            if (hookEnabled) _recordTopOrderChange(_quantity(_rightmostLeaf(book, root)), 0);
+            quoteAmount = _consumeSubtree(bookId, book, root, false);
+            book.tree[_ROOT_NODE].leftNode = bytes32(0);
+            unchecked {
+                newRemaining = remaining - baseFilled;
+            }
+            return (newRemaining, baseFilled, quoteAmount);
+        }
+
         bytes32 newRoot;
         bytes32 matchChange;
         uint256 matchFlags = _rightSpineDirty(book, false) ? _MATCH_DIRTY : 0;
@@ -330,6 +341,17 @@ abstract contract RadixMatchingEngine {
     {
         bytes32 root = book.tree[_ROOT_NODE].rightNode;
         if (root == bytes32(0)) return (remaining, 0, 0);
+
+        if (!_rightSpineDirty(book, true) && limitPrice == type(int32).min && _quantity(root) <= remaining) {
+            baseFilled = _quantity(root);
+            if (hookEnabled) _recordTopOrderChange(_quantity(_rightmostLeaf(book, root)), 0);
+            quoteAmount = _consumeSubtree(bookId, book, root, true);
+            book.tree[_ROOT_NODE].rightNode = bytes32(0);
+            unchecked {
+                newRemaining = remaining - baseFilled;
+            }
+            return (newRemaining, baseFilled, quoteAmount);
+        }
 
         bytes32 newRoot;
         bytes32 matchChange;
@@ -669,8 +691,8 @@ abstract contract RadixMatchingEngine {
         uint160 remaining,
         uint256 matchFlags
     ) private returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount, bytes32 matchChange) {
-        bytes32 leftNode = book.tree[node].leftNode;
-        if (leftNode == bytes32(0)) {
+        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, node);
+        if (rightNode == bytes32(0)) {
             (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(bookId, node, limitPrice, remaining);
             if (matchFlags & _MATCH_HOOK != 0 && fillQuantity != 0) {
                 _recordTopOrderChange(_quantity(node), newNode == bytes32(0) ? 0 : _nonce(newNode));
@@ -681,9 +703,14 @@ abstract contract RadixMatchingEngine {
         bytes32 newRightNode;
         uint160 rightFillQuantity;
         uint256 rightQuoteAmount;
+        bytes32 leftNode;
         {
-            bytes32 rightNode = book.tree[node].rightNode;
-            if (_price(leftNode) == _price(rightNode)) {
+            bool samePrice = _correctionCode(node) != 0;
+            if (matchFlags & _MATCH_DIRTY != 0) {
+                leftNode = _leftNodeAt(branchSlot);
+                samePrice = _price(leftNode) == _price(rightNode);
+            }
+            if (samePrice) {
                 uint160 outgoingTopQuantity;
                 (fillQuantity, quoteAmount, outgoingTopQuantity) =
                     _samePriceRightSpineFillQuantity(book, node, limitPrice, remaining, matchFlags);
@@ -701,6 +728,7 @@ abstract contract RadixMatchingEngine {
         }
         if (rightFillQuantity == 0) return (node, 0, 0, bytes32(0));
 
+        if (leftNode == bytes32(0)) leftNode = _leftNodeAt(branchSlot);
         bytes32 newLeftNode = leftNode;
         unchecked {
             remaining -= rightFillQuantity;
@@ -805,8 +833,8 @@ abstract contract RadixMatchingEngine {
         uint160 remaining,
         uint256 matchFlags
     ) private returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount, bytes32 matchChange) {
-        bytes32 leftNode = book.tree[node].leftNode;
-        if (leftNode == bytes32(0)) {
+        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, node);
+        if (rightNode == bytes32(0)) {
             (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(bookId, node, limitPrice, remaining);
             if (matchFlags & _MATCH_HOOK != 0 && fillQuantity != 0) {
                 _recordTopOrderChange(_quantity(node), newNode == bytes32(0) ? 0 : _nonce(newNode));
@@ -817,9 +845,14 @@ abstract contract RadixMatchingEngine {
         bytes32 newRightNode;
         uint160 rightFillQuantity;
         uint256 rightQuoteAmount;
+        bytes32 leftNode;
         {
-            bytes32 rightNode = book.tree[node].rightNode;
-            if (_price(leftNode) == _price(rightNode)) {
+            bool samePrice = _correctionCode(node) != 0;
+            if (matchFlags & _MATCH_DIRTY != 0) {
+                leftNode = _leftNodeAt(branchSlot);
+                samePrice = _price(leftNode) == _price(rightNode);
+            }
+            if (samePrice) {
                 uint160 outgoingTopQuantity;
                 (fillQuantity, quoteAmount, outgoingTopQuantity) = _samePriceRightSpineFillQuantity(
                     book, node, limitPrice, remaining, matchFlags | _MATCH_RESTING_BID
@@ -838,6 +871,7 @@ abstract contract RadixMatchingEngine {
         }
         if (rightFillQuantity == 0) return (node, 0, 0, bytes32(0));
 
+        if (leftNode == bytes32(0)) leftNode = _leftNodeAt(branchSlot);
         bytes32 newLeftNode = leftNode;
         unchecked {
             remaining -= rightFillQuantity;
@@ -1297,8 +1331,10 @@ abstract contract RadixMatchingEngine {
             uniform = _correctionCode(node) != 0;
             price = _price(node);
             fillQuantity = _quantity(node);
-            quoteAmount = uniform ? _uniformNodeQuote(book, node, isBid) : 0;
-            outgoingTopQuantity = _quantity(_rightmostLeaf(book, node));
+            quoteAmount = uniform ? _uniformBranchQuote(node, isBid) : 0;
+            if (matchFlags & _MATCH_HOOK != 0) {
+                outgoingTopQuantity = _quantity(_rightmostLeaf(book, node));
+            }
         }
         if (!uniform) return (0, 0, 0);
         if (matchFlags & _MATCH_RESTING_BID != 0 ? price < limitPrice : price > limitPrice) return (0, 0, 0);
@@ -1423,8 +1459,19 @@ abstract contract RadixMatchingEngine {
         quoteAmount = _quoteValue(_price(node), quantity, isBid);
         if (book.tree[node].leftNode == bytes32(0)) return quoteAmount;
 
+        return _applyUniformCorrection(node, quoteAmount, isBid);
+    }
+
+    /// @dev Return a uniform branch's exact rounded quote when branch status is already known.
+    function _uniformBranchQuote(bytes32 node, bool isBid) private pure returns (uint256 quoteAmount) {
+        quoteAmount = _quoteValue(_price(node), _quantity(node), isBid);
+        return _applyUniformCorrection(node, quoteAmount, isBid);
+    }
+
+    /// @dev Apply the correction encoded as `correction + 1` on a uniform branch.
+    function _applyUniformCorrection(bytes32 node, uint256 quoteAmount, bool isBid) private pure returns (uint256) {
         uint256 correction = uint256(_correctionCode(node)) - 1;
-        quoteAmount = isBid ? quoteAmount + correction : quoteAmount - correction;
+        return isBid ? quoteAmount + correction : quoteAmount - correction;
     }
 
     /// @dev Uniform-node quote using a price factor already decoded for the node's tick.
@@ -1438,6 +1485,30 @@ abstract contract RadixMatchingEngine {
 
         uint256 correction = uint256(_correctionCode(node)) - 1;
         quoteAmount = isBid ? quoteAmount + correction : quoteAmount - correction;
+    }
+
+    /// @dev Load a branch's right child and retain its mapping slot so the left child can be read
+    /// later without hashing `tree[node]` a second time.
+    function _rightNodeAndBranchSlot(Book storage book, bytes32 node)
+        private
+        view
+        returns (bytes32 rightNode, uint256 branchSlot)
+    {
+        /// @solidity memory-safe-assembly
+        assembly {
+            mstore(0, node)
+            mstore(0x20, add(book.slot, 1))
+            branchSlot := keccak256(0, 0x40)
+            rightNode := sload(add(branchSlot, 1))
+        }
+    }
+
+    /// @dev Load the left child paired with a slot returned by `_rightNodeAndBranchSlot`.
+    function _leftNodeAt(uint256 branchSlot) private view returns (bytes32 leftNode) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            leftNode := sload(branchSlot)
+        }
     }
 
     /// @notice Return the price of the leftmost leaf in a subtree.
@@ -1531,13 +1602,7 @@ abstract contract RadixMatchingEngine {
                 mstore(newPointer, newCapacity)
                 mstore(add(newPointer, 0x20), length)
 
-                let source := add(pointer, 0x40)
-                let destination := add(newPointer, 0x40)
-                let end := add(source, shl(5, length))
-                for {} lt(source, end) {
-                    source := add(source, 0x20)
-                    destination := add(destination, 0x20)
-                } { mstore(destination, mload(source)) }
+                mcopy(add(newPointer, 0x40), add(pointer, 0x40), shl(5, length))
 
                 mstore(0x40, add(add(newPointer, 0x40), shl(5, newCapacity)))
                 pointer := newPointer
