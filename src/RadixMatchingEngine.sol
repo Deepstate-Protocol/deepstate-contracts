@@ -517,6 +517,8 @@ abstract contract RadixMatchingEngine {
         address owner,
         bool hookEnabled
     ) internal returns (bytes32 restingOrder, uint32 nextNonceAfter) {
+        _validateRestingQuoteDomain(price, quantity, isBid);
+
         uint256 dirtyFlag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
         if (nonceAndFlags & dirtyFlag != 0) {
             if (isBid) {
@@ -747,8 +749,8 @@ abstract contract RadixMatchingEngine {
         }
         unchecked {
             fillQuantity += rightFillQuantity;
-            quoteAmount += rightQuoteAmount;
         }
+        quoteAmount += rightQuoteAmount;
         if (matchFlags & _MATCH_HOOK != 0) _refreshRecordedTopNonce(book, newNode);
     }
 
@@ -807,8 +809,8 @@ abstract contract RadixMatchingEngine {
         newNode = _replaceBranch(book, newLeftNode, newRightNode, false);
         unchecked {
             fillQuantity += rightFillQuantity;
-            quoteAmount += rightQuoteAmount;
         }
+        quoteAmount += rightQuoteAmount;
     }
 
     /// @notice Recursively match an incoming ask against a bid subtree.
@@ -890,8 +892,8 @@ abstract contract RadixMatchingEngine {
         }
         unchecked {
             fillQuantity += rightFillQuantity;
-            quoteAmount += rightQuoteAmount;
         }
+        quoteAmount += rightQuoteAmount;
         if (matchFlags & _MATCH_HOOK != 0) _refreshRecordedTopNonce(book, newNode);
     }
 
@@ -950,8 +952,8 @@ abstract contract RadixMatchingEngine {
         newNode = _replaceBranch(book, newLeftNode, newRightNode, true);
         unchecked {
             fillQuantity += rightFillQuantity;
-            quoteAmount += rightQuoteAmount;
         }
+        quoteAmount += rightQuoteAmount;
     }
 
     /// @notice Insert a leaf or branch into the bid tree.
@@ -1713,9 +1715,7 @@ abstract contract RadixMatchingEngine {
         }
 
         quoteAmount = _subtreeQuote(book, book.tree[node].rightNode, restingIsBid);
-        unchecked {
-            quoteAmount += _subtreeQuote(book, leftNode, restingIsBid);
-        }
+        quoteAmount += _subtreeQuote(book, leftNode, restingIsBid);
     }
 
     /// @notice Build the bid sort key from an order or branch node.
@@ -1841,6 +1841,11 @@ abstract contract RadixMatchingEngine {
         if (price == 0) return quantity;
         (uint256 factor, uint16 shift) = TickMath32.getPriceFactorAtTick(price);
         return _quoteAtFactor(factor, shift, quantity, roundUp);
+    }
+
+    /// @dev Reject maker liquidity that cannot be represented by the signed settlement deltas.
+    function _validateRestingQuoteDomain(int32 price, uint160 quantity, bool isBid) private pure {
+        if (_quoteValue(price, quantity, isBid) > uint256(type(int256).max)) revert InvalidOrder();
     }
 
     /// @dev Difference between two same-tick notionals while decoding the tick only once.

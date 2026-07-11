@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {stdError} from "forge-std/StdError.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {RoutingEngine} from "../src/RoutingEngine.sol";
 import {QuoteMath} from "./QuoteMath.sol";
@@ -44,6 +45,7 @@ contract ProductionReadinessRoutingHarness is RoutingEngine {
 contract ProductionReadinessReproTest is Test {
     uint32 internal constant MAX_ORDER_NONCE = type(uint32).max;
     bytes4 internal constant DELTA_OVERFLOW = bytes4(keccak256("DeltaOverflow()"));
+    bytes4 internal constant INVALID_ORDER = bytes4(keccak256("InvalidOrder()"));
 
     ProductionReadinessRoutingHarness internal engine;
     ProductionReadinessERC20 internal token0;
@@ -74,14 +76,12 @@ contract ProductionReadinessReproTest is Test {
         uint256 collateral = _quoteValue(type(int32).max, quantity, true);
         assertGt(collateral, uint256(type(int256).max));
 
-        token1.mint(address(engine), _wrappedPayout(collateral));
-
         uint256 bobQuoteBefore = token1.balanceOf(bob);
         uint256 engineQuoteBefore = token1.balanceOf(address(engine));
         bytes32 expectedBid = _order(type(int32).max, quantity, MAX_ORDER_NONCE);
 
         vm.prank(bob);
-        vm.expectRevert(DELTA_OVERFLOW);
+        vm.expectRevert(INVALID_ORDER);
         engine.fill(_fill(0, _order(type(int32).max, quantity, 0), true, false, false));
 
         bytes32 book = engine.bookId(address(token0), address(token1), 0);
@@ -92,63 +92,71 @@ contract ProductionReadinessReproTest is Test {
         assertEq(token1.balanceOf(address(engine)), engineQuoteBefore);
     }
 
-    function test_HighTickBidMatchAboveSignedDebitRangeReverts() public {
-        uint160 quantity = uint160(type(uint128).max);
-        uint256 quoteAmount = _quoteValue(type(int32).max, quantity, false);
+    function test_MixedAskAggregateAboveSignedDebitRangeReverts() public {
+        uint160 totalQuantity = _restPowerAskOrders(3);
+        uint256 quoteAmount = (uint256(1) << 254) * 3;
         assertGt(quoteAmount, uint256(type(int256).max));
-        token1.mint(address(engine), _wrappedPayout(quoteAmount));
-        token0.mint(alice, uint256(quantity) - token0.balanceOf(alice));
+        token1.mint(bob, quoteAmount);
 
-        vm.prank(alice);
-        bytes32 restingAsk = engine.fill(_fill(0, _order(type(int32).max, quantity, 0), false, false, false));
+        uint256 bobQuoteBefore = token1.balanceOf(bob);
+        uint256 engineQuoteBefore = token1.balanceOf(address(engine));
 
         vm.prank(bob);
         vm.expectRevert(DELTA_OVERFLOW);
-        engine.fill(_fill(0, _order(type(int32).max, quantity, 0), true, true, false));
+        engine.fill(_fill(0, _order(type(int32).max, totalQuantity, 0), true, true, false));
 
-        bytes32 book = engine.bookId(address(token0), address(token1), 0);
-        assertEq(engine.ownerOfOrder(engine.orderId(book, restingAsk)), alice);
         (bytes32 askRoot,) = engine.roots(address(token0), address(token1), 0);
-        assertEq(askRoot, restingAsk);
+        assertNotEq(askRoot, bytes32(0));
+        assertEq(token1.balanceOf(bob), bobQuoteBefore);
+        assertEq(token1.balanceOf(address(engine)), engineQuoteBefore);
     }
 
-    function test_HighTickAskMatchAboveSignedCreditRangeReverts() public {
-        uint160 quantity = uint160(type(uint128).max);
-        uint256 quoteAmount = _quoteValue(type(int32).max, quantity, true);
+    function test_MixedBidAggregateAboveSignedCreditRangeReverts() public {
+        uint160 totalQuantity = _restPowerBidOrders(3);
+        uint256 quoteAmount = (uint256(1) << 254) * 3;
         assertGt(quoteAmount, uint256(type(int256).max));
-        token0.mint(alice, uint256(quantity) - token0.balanceOf(alice));
-
-        bytes32 book = engine.bookId(address(token0), address(token1), 0);
-        bytes32 restingBid;
-        (restingBid,) = engine.restBookForTest(book, MAX_ORDER_NONCE, type(int32).max, quantity, true, bob);
+        token0.mint(alice, uint256(totalQuantity));
 
         vm.prank(alice);
         vm.expectRevert(DELTA_OVERFLOW);
-        engine.fill(_fill(0, _order(type(int32).max, quantity, 0), false, true, false));
+        engine.fill(_fill(0, _order(type(int32).min, totalQuantity, 0), false, true, false));
 
-        assertEq(engine.ownerOfOrder(engine.orderId(book, restingBid)), bob);
         (, bytes32 bidRoot) = engine.roots(address(token0), address(token1), 0);
-        assertEq(bidRoot, restingBid);
+        assertNotEq(bidRoot, bytes32(0));
     }
 
-    function test_UnfilledHighTickAskCancelsWithoutRepricingOverflow() public {
-        uint160 quantity = type(uint160).max;
-        token0.mint(alice, uint256(quantity) - token0.balanceOf(alice));
+    function test_UnmatchedHighTickAskAboveSignedRangeRevertsBeforeResting() public {
+        uint160 quantity = uint160(type(uint128).max);
+        uint256 proceeds = _quoteValue(type(int32).max, quantity, false);
+        assertGt(proceeds, uint256(type(int256).max));
+        token0.mint(alice, uint256(quantity));
 
         vm.prank(alice);
-        bytes32 restingAsk = engine.fill(_fill(0, _order(type(int32).max, quantity, 0), false, false, false));
+        vm.expectRevert(INVALID_ORDER);
+        engine.fill(_fill(0, _order(type(int32).max, quantity, 0), false, false, false));
 
         bytes32 book = engine.bookId(address(token0), address(token1), 0);
-        assertEq(engine.ownerOfOrder(engine.orderId(book, restingAsk)), alice);
-        assertEq(token0.balanceOf(address(engine)), quantity);
+        bytes32 expectedAsk = _order(type(int32).max, quantity, MAX_ORDER_NONCE);
+        assertEq(engine.ownerOfOrder(engine.orderId(book, expectedAsk)), address(0));
+        (bytes32 askRoot,) = engine.roots(address(token0), address(token1), 0);
+        assertEq(askRoot, bytes32(0));
+    }
+
+    function test_MixedAskSubtreeQuoteOverflowRevertsInsteadOfWrapping() public {
+        uint160 totalQuantity = _restPowerAskOrders(5);
+
+        vm.prank(bob);
+        vm.expectRevert(stdError.arithmeticError);
+        engine.fill(_fill(0, _order(type(int32).max, totalQuantity, 0), true, true, false));
+    }
+
+    function test_MixedBidSubtreeQuoteOverflowRevertsInsteadOfWrapping() public {
+        uint160 totalQuantity = _seedPowerBidOrdersForTest(5);
+        token0.mint(alice, uint256(totalQuantity));
 
         vm.prank(alice);
-        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(address(token0), address(token1), 0, restingAsk);
-
-        assertEq(baseAmount, quantity);
-        assertEq(quoteAmount, 0);
-        assertEq(engine.ownerOfOrder(engine.orderId(book, restingAsk)), address(0));
-        assertEq(token0.balanceOf(address(engine)), 0);
+        vm.expectRevert(stdError.arithmeticError);
+        engine.fill(_fill(0, _order(type(int32).min, totalQuantity, 0), false, true, false));
     }
 
     function _fill(uint256 epoch, bytes32 order, bool isBid, bool noRest, bool fillOrKill)
@@ -177,6 +185,56 @@ contract ProductionReadinessReproTest is Test {
         vm.stopPrank();
     }
 
+    function _restPowerAskOrders(uint256 count) internal returns (uint160 totalQuantity) {
+        for (uint256 i; i < count; ++i) {
+            uint256 exponent = 126 - i;
+            uint160 quantity = _powerQuantity(exponent);
+            token0.mint(alice, uint256(quantity));
+
+            vm.prank(alice);
+            engine.fill(_fill(0, _order(_powerTick(exponent), quantity, 0), false, false, false));
+            totalQuantity += quantity;
+        }
+    }
+
+    function _restPowerBidOrders(uint256 count) internal returns (uint160 totalQuantity) {
+        uint256 quotePerOrder = uint256(1) << 254;
+
+        for (uint256 i; i < count; ++i) {
+            uint256 exponent = 126 - i;
+            uint160 quantity = _powerQuantity(exponent);
+            token1.mint(bob, quotePerOrder);
+
+            vm.prank(bob);
+            engine.fill(_fill(0, _order(_powerTick(exponent), quantity, 0), true, false, false));
+            totalQuantity += quantity;
+        }
+    }
+
+    function _seedPowerBidOrdersForTest(uint256 count) internal returns (uint160 totalQuantity) {
+        bytes32 book = engine.bookId(address(token0), address(token1), 0);
+        uint256 nonceAndFlags = MAX_ORDER_NONCE;
+
+        for (uint256 i; i < count; ++i) {
+            uint256 exponent = 126 - i;
+            uint160 quantity = _powerQuantity(exponent);
+            uint32 nextNonce;
+            (, nextNonce) = engine.restBookForTest(book, nonceAndFlags, _powerTick(exponent), quantity, true, bob);
+            nonceAndFlags = nextNonce;
+            totalQuantity += quantity;
+        }
+    }
+
+    function _powerTick(uint256 exponent) internal pure returns (int32 tick) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        tick = int32(int256(exponent << 24));
+    }
+
+    function _powerQuantity(uint256 exponent) internal pure returns (uint160 quantity) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        quantity = uint160(uint256(1) << (254 - exponent));
+    }
+
     function _order(int32 price, uint160 quantity, uint32 nonce) internal pure returns (bytes32) {
         // forge-lint: disable-next-line(unsafe-typecast)
         return bytes32((uint256(uint32(price)) << 224) | (uint256(quantity) << 64) | uint256(nonce));
@@ -184,13 +242,5 @@ contract ProductionReadinessReproTest is Test {
 
     function _quoteValue(int32 tick, uint160 quantity, bool roundUp) internal pure returns (uint256 quoteAmount) {
         return QuoteMath.quoteValue(tick, quantity, roundUp);
-    }
-
-    function _wrappedPayout(uint256 amount) internal pure returns (uint256) {
-        // forge-lint: disable-next-line(unsafe-typecast)
-        int256 signedAmount = int256(amount);
-        assertLt(signedAmount, 0);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        return uint256(-signedAmount);
     }
 }

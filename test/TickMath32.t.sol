@@ -15,6 +15,16 @@ contract TickMath32Test is Test {
         assertEq(TickMath32.getSqrtRatioAtTick(-quarterDomain), uint160(1) << 95);
     }
 
+    function test_KnownPowerOfTwoPriceFactors() public pure {
+        (uint256 positiveFactor, uint16 positiveShift) = TickMath32.getPriceFactorAtTick(2_113_929_216);
+        assertEq(positiveFactor, uint256(1) << 128);
+        assertEq(positiveShift, 2);
+
+        (uint256 negativeFactor, uint16 negativeShift) = TickMath32.getPriceFactorAtTick(-2_113_929_216);
+        assertEq(negativeFactor, uint256(1) << 128);
+        assertEq(negativeShift, 254);
+    }
+
     function test_FullDomainBoundariesAreRepresentableAndOrdered() public pure {
         uint160 minimum = TickMath32.getSqrtRatioAtTick(type(int32).min);
         uint160 aboveMinimum = TickMath32.getSqrtRatioAtTick(type(int32).min + 1);
