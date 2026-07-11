@@ -128,6 +128,8 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     error InvalidHook();
     /// @notice Fee config is invalid.
     error InvalidFeeConfig();
+    /// @notice A token delta cannot be represented in the signed settlement accumulator.
+    error DeltaOverflow();
 
     /// @notice Set deployer as owner.
     constructor() {
@@ -402,8 +404,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
 
         if (params.isBid) {
             token0Delta = int256(uint256(baseFilled));
-            // forge-lint: disable-next-line(unsafe-typecast)
-            token1Delta = -int256(quoteAmount);
+            token1Delta = _debitDelta(0, quoteAmount);
 
             if (remaining != 0 && !params.noRest) {
                 restingOrder = _restRemaining(
@@ -419,14 +420,12 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
                     true
                 );
                 uint256 collateral = _quoteValue(limitPrice, remaining, true);
-                // forge-lint: disable-next-line(unsafe-typecast)
-                token1Delta -= int256(collateral);
+                token1Delta = _debitDelta(token1Delta, collateral);
             }
         } else {
             // forge-lint: disable-next-line(unsafe-typecast)
             token0Delta = -int256(uint256(baseFilled));
-            // forge-lint: disable-next-line(unsafe-typecast)
-            token1Delta = int256(quoteAmount);
+            token1Delta = _creditDelta(quoteAmount);
 
             if (remaining != 0 && !params.noRest) {
                 restingOrder = _restRemaining(
@@ -812,6 +811,22 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
             }
         }
         return false;
+    }
+
+    /// @notice Convert an unsigned outgoing amount into a positive signed settlement delta.
+    function _creditDelta(uint256 amount) private pure returns (int256) {
+        if (amount > uint256(type(int256).max)) revert DeltaOverflow();
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return int256(amount);
+    }
+
+    /// @notice Subtract an unsigned incoming amount from a signed settlement delta.
+    function _debitDelta(int256 current, uint256 amount) private pure returns (int256) {
+        if (amount > uint256(type(int256).max)) revert DeltaOverflow();
+        // forge-lint: disable-next-line(unsafe-typecast)
+        int256 signedAmount = int256(amount);
+        if (current < type(int256).min + signedAmount) revert DeltaOverflow();
+        return current - signedAmount;
     }
 
     /// @notice Settle route user deltas after all route legs have completed.

@@ -703,7 +703,7 @@ abstract contract RadixMatchingEngine {
         bytes32 newRightNode;
         uint160 rightFillQuantity;
         uint256 rightQuoteAmount;
-        bytes32 leftNode;
+        bytes32 leftNode = bytes32(0);
         {
             bool samePrice = _correctionCode(node) != 0;
             if (matchFlags & _MATCH_DIRTY != 0) {
@@ -845,7 +845,7 @@ abstract contract RadixMatchingEngine {
         bytes32 newRightNode;
         uint160 rightFillQuantity;
         uint256 rightQuoteAmount;
-        bytes32 leftNode;
+        bytes32 leftNode = bytes32(0);
         {
             bool samePrice = _correctionCode(node) != 0;
             if (matchFlags & _MATCH_DIRTY != 0) {
@@ -1851,10 +1851,7 @@ abstract contract RadixMatchingEngine {
     {
         if (price == 0) return largerQuantity - smallerQuantity;
         (uint256 factor, uint16 shift) = TickMath32.getPriceFactorAtTick(price);
-        unchecked {
-            quoteAmount = _quoteAtFactor(factor, shift, largerQuantity, roundUp)
-                - _quoteAtFactor(factor, shift, smallerQuantity, roundUp);
-        }
+        quoteAmount = _quoteDifferenceAtFactor(factor, shift, largerQuantity, smallerQuantity, roundUp);
     }
 
     /// @dev Quote a partial leaf fill and encode its event rounding delta without decoding the tick twice.
@@ -1870,11 +1867,95 @@ abstract contract RadixMatchingEngine {
         if (price == 0) return (fillQuantity, 1);
 
         (uint256 factor, uint16 shift) = TickMath32.getPriceFactorAtTick(price);
-        unchecked {
-            quoteAmount = _quoteAtFactor(factor, shift, largerQuantity, roundUp)
-                - _quoteAtFactor(factor, shift, smallerQuantity, roundUp);
-        }
+        quoteAmount = _quoteDifferenceAtFactor(factor, shift, largerQuantity, smallerQuantity, roundUp);
         correctionCode = quoteAmount == _quoteAtFactor(factor, shift, fillQuantity, roundUp) ? 1 : 0;
+    }
+
+    /// @dev Difference between same-tick rounded notionals without requiring either full notional to fit.
+    function _quoteDifferenceAtFactor(
+        uint256 factor,
+        uint16 shift,
+        uint160 largerQuantity,
+        uint160 smallerQuantity,
+        bool roundUp
+    ) private pure returns (uint256 quoteAmount) {
+        uint160 fillQuantity;
+        unchecked {
+            fillQuantity = largerQuantity - smallerQuantity;
+        }
+        if (fillQuantity == 0) return 0;
+
+        // Slither's assembly shift detector does not recognize the parenthesized mask arithmetic.
+        // slither-disable-start incorrect-shift
+        /// @solidity memory-safe-assembly
+        assembly {
+            let productLow := mul(fillQuantity, factor)
+            let productHigh := 0
+            if or(shr(128, fillQuantity), shr(128, factor)) {
+                let mm := mulmod(fillQuantity, factor, not(0))
+                productHigh := sub(mm, add(productLow, lt(mm, productLow)))
+            }
+
+            let smallerLow := mul(smallerQuantity, factor)
+            let smallerRemainder := 0
+            let largerRemainder := 0
+
+            switch shift
+            case 0 {
+                if productHigh {
+                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
+                    revert(0x1c, 0x04)
+                }
+                quoteAmount := productLow
+            }
+            case 256 {
+                quoteAmount := productHigh
+                smallerRemainder := smallerLow
+                largerRemainder := add(smallerRemainder, productLow)
+                if lt(largerRemainder, smallerRemainder) {
+                    quoteAmount := add(quoteAmount, 1)
+                    if iszero(quoteAmount) {
+                        mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
+                        revert(0x1c, 0x04)
+                    }
+                }
+            }
+            default {
+                if shr(shift, productHigh) {
+                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
+                    revert(0x1c, 0x04)
+                }
+                quoteAmount := or(shl(sub(256, shift), productHigh), shr(shift, productLow))
+                let mask := sub(shl(shift, 1), 1)
+                let remainder := and(productLow, mask)
+                smallerRemainder := and(smallerLow, mask)
+                let sum := add(smallerRemainder, remainder)
+                if gt(sum, mask) {
+                    quoteAmount := add(quoteAmount, 1)
+                    if iszero(quoteAmount) {
+                        mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
+                        revert(0x1c, 0x04)
+                    }
+                }
+                largerRemainder := and(sum, mask)
+            }
+
+            if and(roundUp, iszero(iszero(largerRemainder))) {
+                quoteAmount := add(quoteAmount, 1)
+                if iszero(quoteAmount) {
+                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
+                    revert(0x1c, 0x04)
+                }
+            }
+            if and(roundUp, iszero(iszero(smallerRemainder))) {
+                if iszero(quoteAmount) {
+                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
+                    revert(0x1c, 0x04)
+                }
+                quoteAmount := sub(quoteAmount, 1)
+            }
+        }
+        // slither-disable-end incorrect-shift
     }
 
     /// @dev Multiply quantity by a Q128 fractional price factor and fold in its binary exponent.
