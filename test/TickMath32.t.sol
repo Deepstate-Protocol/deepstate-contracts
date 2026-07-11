@@ -10,19 +10,19 @@ contract TickMath32Test is Test {
     }
 
     function test_KnownPowerOfTwoTicks() public pure {
-        int32 quarterDomain = int32(1 << 25);
-        assertEq(TickMath32.getSqrtRatioAtTick(quarterDomain), uint160(1) << 97);
-        assertEq(TickMath32.getSqrtRatioAtTick(-quarterDomain), uint160(1) << 95);
+        int32 powerTick = int32(1 << 27);
+        assertEq(TickMath32.getSqrtRatioAtTick(powerTick), uint160(1) << 99);
+        assertEq(TickMath32.getSqrtRatioAtTick(-powerTick), uint160(1) << 93);
     }
 
     function test_KnownPowerOfTwoPriceFactors() public pure {
-        (uint256 positiveFactor, uint16 positiveShift) = TickMath32.getPriceFactorAtTick(2_113_929_216);
+        (uint256 positiveFactor, uint16 positiveShift) = TickMath32.getPriceFactorAtTick(67_108_864);
         assertEq(positiveFactor, uint256(1) << 128);
-        assertEq(positiveShift, 2);
+        assertEq(positiveShift, 125);
 
-        (uint256 negativeFactor, uint16 negativeShift) = TickMath32.getPriceFactorAtTick(-2_113_929_216);
+        (uint256 negativeFactor, uint16 negativeShift) = TickMath32.getPriceFactorAtTick(-67_108_864);
         assertEq(negativeFactor, uint256(1) << 128);
-        assertEq(negativeShift, 254);
+        assertEq(negativeShift, 131);
     }
 
     function test_FullDomainBoundariesAreRepresentableAndOrdered() public pure {

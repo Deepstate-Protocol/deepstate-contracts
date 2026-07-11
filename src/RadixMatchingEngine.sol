@@ -749,8 +749,8 @@ abstract contract RadixMatchingEngine {
         }
         unchecked {
             fillQuantity += rightFillQuantity;
+            quoteAmount += rightQuoteAmount;
         }
-        quoteAmount += rightQuoteAmount;
         if (matchFlags & _MATCH_HOOK != 0) _refreshRecordedTopNonce(book, newNode);
     }
 
@@ -809,8 +809,8 @@ abstract contract RadixMatchingEngine {
         newNode = _replaceBranch(book, newLeftNode, newRightNode, false);
         unchecked {
             fillQuantity += rightFillQuantity;
+            quoteAmount += rightQuoteAmount;
         }
-        quoteAmount += rightQuoteAmount;
     }
 
     /// @notice Recursively match an incoming ask against a bid subtree.
@@ -892,8 +892,8 @@ abstract contract RadixMatchingEngine {
         }
         unchecked {
             fillQuantity += rightFillQuantity;
+            quoteAmount += rightQuoteAmount;
         }
-        quoteAmount += rightQuoteAmount;
         if (matchFlags & _MATCH_HOOK != 0) _refreshRecordedTopNonce(book, newNode);
     }
 
@@ -952,8 +952,8 @@ abstract contract RadixMatchingEngine {
         newNode = _replaceBranch(book, newLeftNode, newRightNode, true);
         unchecked {
             fillQuantity += rightFillQuantity;
+            quoteAmount += rightQuoteAmount;
         }
-        quoteAmount += rightQuoteAmount;
     }
 
     /// @notice Insert a leaf or branch into the bid tree.
@@ -1715,7 +1715,9 @@ abstract contract RadixMatchingEngine {
         }
 
         quoteAmount = _subtreeQuote(book, book.tree[node].rightNode, restingIsBid);
-        quoteAmount += _subtreeQuote(book, leftNode, restingIsBid);
+        unchecked {
+            quoteAmount += _subtreeQuote(book, leftNode, restingIsBid);
+        }
     }
 
     /// @notice Build the bid sort key from an order or branch node.
@@ -1902,61 +1904,18 @@ abstract contract RadixMatchingEngine {
             }
 
             let smallerLow := mul(smallerQuantity, factor)
-            let smallerRemainder := 0
-            let largerRemainder := 0
-
-            switch shift
-            case 0 {
-                if productHigh {
-                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
-                    revert(0x1c, 0x04)
-                }
-                quoteAmount := productLow
-            }
-            case 256 {
-                quoteAmount := productHigh
-                smallerRemainder := smallerLow
-                largerRemainder := add(smallerRemainder, productLow)
-                if lt(largerRemainder, smallerRemainder) {
-                    quoteAmount := add(quoteAmount, 1)
-                    if iszero(quoteAmount) {
-                        mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
-                        revert(0x1c, 0x04)
-                    }
-                }
-            }
-            default {
-                if shr(shift, productHigh) {
-                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
-                    revert(0x1c, 0x04)
-                }
-                quoteAmount := or(shl(sub(256, shift), productHigh), shr(shift, productLow))
-                let mask := sub(shl(shift, 1), 1)
-                let remainder := and(productLow, mask)
-                smallerRemainder := and(smallerLow, mask)
-                let sum := add(smallerRemainder, remainder)
-                if gt(sum, mask) {
-                    quoteAmount := add(quoteAmount, 1)
-                    if iszero(quoteAmount) {
-                        mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
-                        revert(0x1c, 0x04)
-                    }
-                }
-                largerRemainder := and(sum, mask)
-            }
+            quoteAmount := or(shl(sub(256, shift), productHigh), shr(shift, productLow))
+            let mask := sub(shl(shift, 1), 1)
+            let remainder := and(productLow, mask)
+            let smallerRemainder := and(smallerLow, mask)
+            let sum := add(smallerRemainder, remainder)
+            if gt(sum, mask) { quoteAmount := add(quoteAmount, 1) }
+            let largerRemainder := and(sum, mask)
 
             if and(roundUp, iszero(iszero(largerRemainder))) {
                 quoteAmount := add(quoteAmount, 1)
-                if iszero(quoteAmount) {
-                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
-                    revert(0x1c, 0x04)
-                }
             }
             if and(roundUp, iszero(iszero(smallerRemainder))) {
-                if iszero(quoteAmount) {
-                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
-                    revert(0x1c, 0x04)
-                }
                 quoteAmount := sub(quoteAmount, 1)
             }
         }
@@ -1964,6 +1923,8 @@ abstract contract RadixMatchingEngine {
     }
 
     /// @dev Multiply quantity by a Q128 fractional price factor and fold in its binary exponent.
+    /// The ±96 tick exponent keeps `shift` in `[32, 224]`, so the quotient is always produced by
+    /// the general right-shift path and cannot overflow a uint256 for a live uint160 quantity.
     function _quoteAtFactor(uint256 factor, uint16 shift, uint160 quantity, bool roundUp)
         private
         pure
@@ -1984,33 +1945,11 @@ abstract contract RadixMatchingEngine {
             }
             let remainder := 0
 
-            switch shift
-            case 0 {
-                if productHigh {
-                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
-                    revert(0x1c, 0x04)
-                }
-                quoteAmount := productLow
-            }
-            case 256 {
-                quoteAmount := productHigh
-                remainder := productLow
-            }
-            default {
-                if shr(shift, productHigh) {
-                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
-                    revert(0x1c, 0x04)
-                }
-                quoteAmount := or(shl(sub(256, shift), productHigh), shr(shift, productLow))
-                remainder := and(productLow, sub(shl(shift, 1), 1))
-            }
+            quoteAmount := or(shl(sub(256, shift), productHigh), shr(shift, productLow))
+            remainder := and(productLow, sub(shl(shift, 1), 1))
 
             if and(roundUp, iszero(iszero(remainder))) {
                 quoteAmount := add(quoteAmount, 1)
-                if iszero(quoteAmount) {
-                    mstore(0x00, 0xae47f702) // `FullMulDivFailed()`.
-                    revert(0x1c, 0x04)
-                }
             }
         }
         // slither-disable-end incorrect-shift
