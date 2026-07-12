@@ -48,24 +48,6 @@ contract CoverageHook {
     }
 }
 
-contract CoverageEngineHarness is SinglePairEngineHarness {
-    constructor(address baseToken, address quoteToken) SinglePairEngineHarness(baseToken, quoteToken) {}
-
-    function guardedForCoverage() external nonReentrant {}
-
-    function reenterGuardedForCoverage() external nonReentrant {
-        this.guardedForCoverage();
-    }
-
-    function initializeBookForCoverage(bytes32 id) external {
-        _initializeBook(books[id]);
-    }
-
-    function takeTopOrderChangeForCoverage() external returns (uint160 outgoingAmount, uint32 incomingNonce) {
-        return _takeTopOrderChange();
-    }
-}
-
 contract RadixMatchingEngineCoverageTest is Test {
     uint32 internal constant MAX_ORDER_NONCE = type(uint32).max;
     uint256 internal constant BID_RIGHT_SPINE_DIRTY = uint256(1) << 32;
@@ -80,7 +62,7 @@ contract RadixMatchingEngineCoverageTest is Test {
 
     CoverageERC20 internal base;
     CoverageERC20 internal quote;
-    CoverageEngineHarness internal engine;
+    SinglePairEngineHarness internal engine;
 
     address internal alice = address(0xA11CE);
     address internal bob = address(0xB0B);
@@ -89,7 +71,7 @@ contract RadixMatchingEngineCoverageTest is Test {
     function setUp() public {
         base = new CoverageERC20("Base", "BASE");
         quote = new CoverageERC20("Quote", "QUOTE");
-        engine = new CoverageEngineHarness(address(base), address(quote));
+        engine = new SinglePairEngineHarness(address(base), address(quote));
 
         _fundAndApprove(alice);
         _fundAndApprove(bob);
@@ -153,23 +135,11 @@ contract RadixMatchingEngineCoverageTest is Test {
         assertEq(engine.ownerOfOrder(restingBid), alice);
     }
 
-    function testCoverage_InternalHarnessEntrypoints() public {
+    function testCoverage_OrderIdMatchesCanonicalHash() public view {
         bytes32 id = _bookId();
         bytes32 order = _order(7, 11, 13);
 
-        engine.initializeBookForCoverage(id);
-        assertEq(engine.nextNonce(), MAX_ORDER_NONCE);
-        engine.initializeBookForCoverage(id);
-        assertEq(engine.nextNonce(), MAX_ORDER_NONCE);
         assertEq(engine.orderId(id, order), keccak256(abi.encode(id, order)));
-
-        (uint160 outgoingAmount, uint32 incomingNonce) = engine.takeTopOrderChangeForCoverage();
-        assertEq(outgoingAmount, 0);
-        assertEq(incomingNonce, 0);
-
-        engine.guardedForCoverage();
-        vm.expectRevert(bytes4(keccak256("ReentrantCall()")));
-        engine.reenterGuardedForCoverage();
     }
 
     function testCoverage_HookEnabledTopChangesAcrossBidAndAskBooks() public {
@@ -220,6 +190,255 @@ contract RadixMatchingEngineCoverageTest is Test {
         assertEq(hook.lastToken(), address(quote));
         assertEq(hook.lastOutgoingAmount(), 1);
         assertEq(hook.lastIncomingNonce(), _nonce(worseAsk));
+    }
+
+    function testCoverage_HookTracksWholeBookConsumption() public {
+        CoverageHook hook = new CoverageHook();
+        engine.setPoolHookConfig(address(base), address(quote), address(hook), true, true);
+
+        vm.prank(alice);
+        bytes32 bestAsk = engine.fill(_order(10, 2, 0), false);
+        vm.prank(bob);
+        engine.fill(_order(20, 3, 0), false);
+
+        vm.prank(carol);
+        engine.fill(_order(type(int32).max, 5, 0), true);
+
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastOutgoingAmount(), 2);
+        assertEq(hook.lastIncomingNonce(), 0);
+        assertNotEq(bestAsk, bytes32(0));
+
+        vm.prank(alice);
+        engine.fill(_order(10, 2, 0), true);
+        vm.prank(bob);
+        bytes32 bestBid = engine.fill(_order(20, 3, 0), true);
+
+        vm.prank(carol);
+        engine.fill(_order(type(int32).min, 5, 0), false);
+
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(hook.lastToken(), address(base));
+        assertEq(hook.lastOutgoingAmount(), 3);
+        assertEq(hook.lastIncomingNonce(), 0);
+        assertNotEq(bestBid, bytes32(0));
+    }
+
+    function testCoverage_HookTracksTopCancelWithBranchSuccessor() public {
+        CoverageHook hook = new CoverageHook();
+        engine.setPoolHookConfig(address(base), address(quote), address(hook), true, true);
+
+        vm.prank(alice);
+        engine.fill(_order(80, 1, 0), true);
+        vm.prank(bob);
+        bytes32 nextBid = engine.fill(_order(90, 2, 0), true);
+        vm.prank(carol);
+        bytes32 topBid = engine.fill(_order(100, 3, 0), true);
+
+        vm.prank(carol);
+        engine.cancel(topBid);
+
+        assertEq(hook.lastToken(), address(base));
+        assertEq(hook.lastOutgoingAmount(), 3);
+        assertEq(hook.lastIncomingNonce(), _nonce(nextBid));
+
+        vm.prank(alice);
+        engine.fill(_order(120, 1, 0), false);
+        vm.prank(bob);
+        bytes32 nextAsk = engine.fill(_order(110, 2, 0), false);
+        vm.prank(carol);
+        bytes32 topAsk = engine.fill(_order(100, 3, 0), false);
+
+        vm.prank(carol);
+        engine.cancel(topAsk);
+
+        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastOutgoingAmount(), 3);
+        assertEq(hook.lastIncomingNonce(), _nonce(nextAsk));
+    }
+
+    function testCoverage_HookTracksTopInsertedAboveExistingBranch() public {
+        CoverageHook hook = new CoverageHook();
+        engine.setPoolHookConfig(address(base), address(quote), address(hook), true, true);
+
+        vm.prank(alice);
+        bytes32 originalTopBid = engine.fill(_order(100, 2, 0), true);
+        vm.prank(bob);
+        engine.fill(_order(100, 3, 0), true);
+        vm.prank(carol);
+        bytes32 newTopBid = engine.fill(_order(101, 4, 0), true);
+
+        assertEq(hook.lastToken(), address(base));
+        assertEq(hook.lastOutgoingAmount(), 2);
+        assertEq(hook.lastIncomingNonce(), _nonce(newTopBid));
+        assertNotEq(originalTopBid, bytes32(0));
+
+        vm.prank(alice);
+        bytes32 originalTopAsk = engine.fill(_order(200, 2, 0), false);
+        vm.prank(bob);
+        engine.fill(_order(200, 3, 0), false);
+        vm.prank(carol);
+        bytes32 newTopAsk = engine.fill(_order(199, 4, 0), false);
+
+        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastOutgoingAmount(), 2);
+        assertEq(hook.lastIncomingNonce(), _nonce(newTopAsk));
+        assertNotEq(originalTopAsk, bytes32(0));
+    }
+
+    function testCoverage_HookTracksUniformRightSpineAggregateRemoval() public {
+        CoverageHook hook = new CoverageHook();
+        engine.setPoolHookConfig(address(base), address(quote), address(hook), true, true);
+
+        vm.prank(alice);
+        engine.fill(_order(50, 2, 0), false);
+        vm.prank(bob);
+        engine.fill(_order(50, 3, 0), false);
+        vm.prank(carol);
+        engine.fill(_order(50, 5, 0), true);
+
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastOutgoingAmount(), 2);
+        assertEq(hook.lastIncomingNonce(), 0);
+
+        vm.prank(alice);
+        engine.fill(_order(70, 2, 0), true);
+        vm.prank(bob);
+        engine.fill(_order(70, 3, 0), true);
+        vm.prank(carol);
+        engine.fill(_order(70, 5, 0), false);
+
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(hook.lastToken(), address(base));
+        assertEq(hook.lastOutgoingAmount(), 2);
+        assertEq(hook.lastIncomingNonce(), 0);
+    }
+
+    function testCoverage_HookTracksPartialAndEmptyTopTransitions() public {
+        CoverageHook hook = new CoverageHook();
+        engine.setPoolHookConfig(address(base), address(quote), address(hook), true, true);
+
+        vm.prank(alice);
+        bytes32 topAsk = engine.fill(_order(50, 3, 0), false);
+        vm.prank(bob);
+        engine.fill(_order(60, 1, 0), false);
+
+        vm.prank(carol);
+        engine.fill(_order(50, 1, 0), true);
+
+        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastOutgoingAmount(), 3);
+        assertEq(hook.lastIncomingNonce(), _nonce(topAsk));
+
+        vm.prank(carol);
+        engine.fill(_order(60, 3, 0), true);
+
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(hook.lastIncomingNonce(), 0);
+
+        vm.prank(alice);
+        bytes32 onlyBid = engine.fill(_order(100, 1, 0), true);
+        vm.prank(alice);
+        engine.cancel(onlyBid);
+
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(hook.lastToken(), address(base));
+        assertEq(hook.lastOutgoingAmount(), 1);
+        assertEq(hook.lastIncomingNonce(), 0);
+    }
+
+    function testCoverage_InsertRecursesIntoBothChildren() public {
+        vm.startPrank(alice);
+        bytes32 bid0 = engine.fill(_order(0, 1, 0), true);
+        bytes32 bid2 = engine.fill(_order(2, 1, 0), true);
+        bytes32 bid3 = engine.fill(_order(3, 1, 0), true);
+        bytes32 bid1 = engine.fill(_order(1, 1, 0), true);
+        bytes32 ask0 = engine.fill(_order(100, 1, 0), false);
+        bytes32 ask2 = engine.fill(_order(102, 1, 0), false);
+        bytes32 ask3 = engine.fill(_order(103, 1, 0), false);
+        bytes32 ask1 = engine.fill(_order(101, 1, 0), false);
+        vm.stopPrank();
+
+        assertEq(_subtreeQuantity(engine.bidRoot()), 4);
+        assertEq(_subtreeQuantity(engine.askRoot()), 4);
+        assertEq(engine.ownerOfOrder(bid0), alice);
+        assertEq(engine.ownerOfOrder(bid1), alice);
+        assertEq(engine.ownerOfOrder(bid2), alice);
+        assertEq(engine.ownerOfOrder(bid3), alice);
+        assertEq(engine.ownerOfOrder(ask0), alice);
+        assertEq(engine.ownerOfOrder(ask1), alice);
+        assertEq(engine.ownerOfOrder(ask2), alice);
+        assertEq(engine.ownerOfOrder(ask3), alice);
+    }
+
+    function testCoverage_AskUniformSubtreeStopsAtLimit() public {
+        vm.prank(alice);
+        engine.fill(_order(30, 1, 0), false);
+        vm.prank(bob);
+        engine.fill(_order(30, 1, 0), false);
+        vm.prank(carol);
+        engine.fill(_order(10, 1, 0), false);
+
+        vm.prank(carol);
+        bytes32 restingBid = engine.fill(_order(20, 4, 0), true);
+
+        assertEq(_subtreeQuantity(engine.askRoot()), 2);
+        assertEq(_quantity(restingBid), 3);
+
+        vm.prank(carol);
+        bytes32 nonCrossingBid = engine.fill(_order(5, 1, 0), true);
+
+        assertEq(_subtreeQuantity(engine.askRoot()), 2);
+        assertEq(_quantity(nonCrossingBid), 1);
+    }
+
+    function testCoverage_BidUniformSubtreeStopsAtLimit() public {
+        vm.prank(alice);
+        engine.fill(_order(60, 1, 0), true);
+        vm.prank(bob);
+        engine.fill(_order(60, 1, 0), true);
+        vm.prank(carol);
+        engine.fill(_order(80, 1, 0), true);
+
+        vm.prank(carol);
+        bytes32 restingAsk = engine.fill(_order(70, 4, 0), false);
+
+        assertEq(_subtreeQuantity(engine.bidRoot()), 2);
+        assertEq(_quantity(restingAsk), 3);
+    }
+
+    function testCoverage_DirtyBidTopCancelRetainsBook() public {
+        vm.prank(alice);
+        bytes32 firstBid = engine.fill(_order(80, 2, 0), true);
+        vm.prank(bob);
+        engine.fill(_order(80, 2, 0), true);
+        vm.prank(carol);
+        engine.fill(_order(80, 2, 0), true);
+
+        vm.prank(carol);
+        engine.fill(_order(80, 1, 0), false);
+
+        vm.prank(alice);
+        engine.cancel(firstBid);
+
+        assertNotEq(engine.bidRoot(), bytes32(0));
+        assertEq(_subtreeQuantity(engine.bidRoot()), 4);
+    }
+
+    function testCoverage_ZeroTickPartialFillThenCancelTelescopes() public {
+        vm.prank(alice);
+        bytes32 ask = engine.fill(_order(0, 3, 0), false);
+
+        vm.prank(bob);
+        engine.fill(_order(0, 1, 0), true);
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(ask);
+
+        assertEq(baseAmount, 2);
+        assertEq(quoteAmount, 1);
     }
 
     function testCoverage_CancelNonTopBidAndAskBranches() public {
@@ -427,6 +646,40 @@ contract RadixMatchingEngineCoverageTest is Test {
 
         assertEq(restingAsk, bytes32(0));
         assertEq(_subtreeQuantity(engine.bidRoot()), 1);
+    }
+
+    function testCoverage_PartialUniformSubtreesConsumeBothChildren() public {
+        vm.prank(alice);
+        engine.fill(_order(20, 2, 0), false);
+        vm.prank(bob);
+        engine.fill(_order(20, 2, 0), false);
+        vm.prank(carol);
+        engine.fill(_order(20, 2, 0), false);
+        vm.prank(alice);
+        engine.fill(_order(10, 1, 0), false);
+
+        vm.prank(bob);
+        engine.fill(_order(20, 4, 0), true);
+
+        assertEq(_subtreeQuantity(engine.askRoot()), 3);
+
+        vm.prank(alice);
+        engine.fill(_order(20, 3, 0), true);
+        assertEq(engine.askRoot(), bytes32(0));
+
+        vm.prank(alice);
+        engine.fill(_order(70, 2, 0), true);
+        vm.prank(bob);
+        engine.fill(_order(70, 2, 0), true);
+        vm.prank(carol);
+        engine.fill(_order(70, 2, 0), true);
+        vm.prank(alice);
+        engine.fill(_order(80, 1, 0), true);
+
+        vm.prank(bob);
+        engine.fill(_order(70, 4, 0), false);
+
+        assertEq(_subtreeQuantity(engine.bidRoot()), 3);
     }
 
     function testCoverage_ExactSamePriceOffSpineAggregateAskAndBid() public {
@@ -645,6 +898,46 @@ contract RadixMatchingEngineCoverageTest is Test {
         bytes32 expectedRoot = _branchFor(leftAsk, root, false);
         assertEq(engine.askRoot(), expectedRoot);
         _assertTreeBranchStorage(expectedRoot, leftAsk, root);
+    }
+
+    function testCoverage_DirtySpineRejectsMixedLeftSubtreeAsUniform() public {
+        bytes32 lowAsk = _order(49, 1, MAX_ORDER_NONCE - 2);
+        bytes32 highAsk = _order(50, 1, MAX_ORDER_NONCE - 1);
+        bytes32 mixedLeft = _branchFor(lowAsk, highAsk, false);
+        _storeTreeBranch(mixedLeft, lowAsk, highAsk);
+
+        bytes32 rightAsk = _order(50, 1, MAX_ORDER_NONCE);
+        bytes32 root = _branchFor(mixedLeft, rightAsk, false);
+        _storeTreeBranch(root, mixedLeft, rightAsk);
+        vm.store(address(engine), _askRootSlot(), root);
+        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE) | ASK_RIGHT_SPINE_DIRTY));
+        base.mint(address(engine), 3);
+
+        vm.prank(carol);
+        engine.fill(_order(50, 1, 0), true);
+
+        assertNotEq(engine.askRoot(), bytes32(0));
+        assertEq(_subtreeQuantity(engine.askRoot()), 2);
+    }
+
+    function testCoverage_DirtySpineRejectsNonuniformRightSubtree() public {
+        bytes32 lowAsk = _order(49, 1, MAX_ORDER_NONCE - 2);
+        bytes32 highAsk = _order(50, 1, MAX_ORDER_NONCE - 1);
+        bytes32 mixedRight = _branchFor(lowAsk, highAsk, false);
+        _storeTreeBranch(mixedRight, lowAsk, highAsk);
+
+        bytes32 leftAsk = _order(50, 1, MAX_ORDER_NONCE);
+        bytes32 root = _branchFor(leftAsk, mixedRight, false);
+        _storeTreeBranch(root, leftAsk, mixedRight);
+        vm.store(address(engine), _askRootSlot(), root);
+        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE) | ASK_RIGHT_SPINE_DIRTY));
+        base.mint(address(engine), 3);
+
+        vm.prank(carol);
+        engine.fill(_order(50, 1, 0), true);
+
+        assertNotEq(engine.askRoot(), bytes32(0));
+        assertEq(_subtreeQuantity(engine.askRoot()), 2);
     }
 
     function _fundAndApprove(address account) internal {

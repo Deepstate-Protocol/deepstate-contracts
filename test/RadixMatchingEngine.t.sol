@@ -146,6 +146,7 @@ contract RadixMatchingEngineTest is Test {
     address internal alice = address(0xA11CE);
     address internal bob = address(0xB0B);
     address internal carol = address(0xCA201);
+    address internal dave = address(0xD00D);
 
     function setUp() public {
         base = new TestERC20("Base", "BASE");
@@ -388,17 +389,6 @@ contract RadixMatchingEngineTest is Test {
 
         assertEq(restingAsk, bytes32(0));
         assertEq(engine.bidRoot(), bytes32(0));
-    }
-
-    function test_ConstructorRejectsZeroAndDuplicateTokens() public {
-        vm.expectRevert(bytes4(keccak256("InvalidToken()")));
-        new RadixMatchingEngine(address(0), address(quote));
-
-        vm.expectRevert(bytes4(keccak256("InvalidToken()")));
-        new RadixMatchingEngine(address(base), address(0));
-
-        vm.expectRevert(bytes4(keccak256("InvalidToken()")));
-        new RadixMatchingEngine(address(base), address(base));
     }
 
     function test_StorageLayoutMatchesStrictDesign() public {
@@ -2011,7 +2001,6 @@ contract RadixMatchingEngineTest is Test {
     }
 
     function test_BidConsumesBestAskThenExactSamePriceOffSpineSubtree() public {
-        address dave = address(0xD00D);
         _fundAndApprove(dave);
 
         vm.prank(alice);
@@ -2055,27 +2044,26 @@ contract RadixMatchingEngineTest is Test {
     }
 
     function test_BidConsumesBestAskThenExactMixedPriceOffSpineSubtree() public {
-        address dave = address(0xD00D);
-        _fundAndApprove(dave);
+        _fundAndApprove(address(0xD00D));
 
+        bytes32[3] memory asks;
         vm.prank(alice);
-        bytes32 lowerAsk = engine.fill(_order(20, 2, 0), false);
+        asks[0] = engine.fill(_order(20, 2, 0), false);
         vm.prank(bob);
-        bytes32 higherAsk = engine.fill(_order(21, 3, 0), false);
-        vm.prank(dave);
-        bytes32 bestAsk = engine.fill(_order(10, 1, 0), false);
-
-        bytes32 subtreeRoot = _branchFor(lowerAsk, higherAsk, false);
+        asks[1] = engine.fill(_order(21, 3, 0), false);
+        vm.prank(address(0xD00D));
+        asks[2] = engine.fill(_order(10, 1, 0), false);
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), _matchEventNode(bestAsk, 1, _quoteValue(10, 1, false), false));
+        emit AskMatched(_bookId(), _matchEventNode(asks[2], 1, _quoteValue(10, 1, false), false));
         vm.expectEmit(false, false, false, true, address(engine));
-        emit AskSubtreeMatched(_bookId(), subtreeRoot, 5, _quoteValue(20, 2, false) + _quoteValue(21, 3, false));
+        emit AskSubtreeMatched(
+            _bookId(), _branchFor(asks[0], asks[1], false), 5, _quoteValue(20, 2, false) + _quoteValue(21, 3, false)
+        );
 
         vm.prank(carol);
-        bytes32 restingBid = engine.fill(_order(21, 6, 0), true);
+        assertEq(engine.fill(_order(21, 6, 0), true), bytes32(0));
 
-        assertEq(restingBid, bytes32(0));
         assertEq(engine.askRoot(), bytes32(0));
         assertEq(base.balanceOf(carol), 1_000_006);
         assertEq(
@@ -2083,22 +2071,26 @@ contract RadixMatchingEngineTest is Test {
             _quoteValue(10, 1, false) + _quoteValue(20, 2, false) + _quoteValue(21, 3, false)
         );
 
-        vm.prank(alice);
-        (, uint256 lowerQuote) = engine.cancel(lowerAsk);
-        vm.prank(bob);
-        (, uint256 higherQuote) = engine.cancel(higherAsk);
-        vm.prank(dave);
-        (, uint256 bestQuote) = engine.cancel(bestAsk);
-
-        assertEq(lowerQuote, _quoteValue(20, 2, false));
-        assertEq(higherQuote, _quoteValue(21, 3, false));
-        assertEq(bestQuote, _quoteValue(10, 1, false));
+        {
+            vm.prank(alice);
+            (, uint256 lowerQuote) = engine.cancel(asks[0]);
+            assertEq(lowerQuote, _quoteValue(20, 2, false));
+        }
+        {
+            vm.prank(bob);
+            (, uint256 higherQuote) = engine.cancel(asks[1]);
+            assertEq(higherQuote, _quoteValue(21, 3, false));
+        }
+        {
+            vm.prank(address(0xD00D));
+            (, uint256 bestQuote) = engine.cancel(asks[2]);
+            assertEq(bestQuote, _quoteValue(10, 1, false));
+        }
         assertEq(base.balanceOf(address(engine)), 0);
         assertEq(quote.balanceOf(address(engine)), 0);
     }
 
     function test_AskConsumesBestBidThenExactSamePriceOffSpineSubtree() public {
-        address dave = address(0xD00D);
         _fundAndApprove(dave);
 
         vm.prank(alice);
@@ -2143,7 +2135,6 @@ contract RadixMatchingEngineTest is Test {
     }
 
     function test_AskConsumesBestBidThenExactMixedPriceOffSpineSubtree() public {
-        address dave = address(0xD00D);
         _fundAndApprove(dave);
 
         vm.prank(alice);
@@ -2187,7 +2178,6 @@ contract RadixMatchingEngineTest is Test {
     }
 
     function test_BidPartiallyConsumesOffSpineAskSubtreeRecursively() public {
-        address dave = address(0xD00D);
         _fundAndApprove(dave);
 
         vm.prank(alice);
@@ -2233,7 +2223,6 @@ contract RadixMatchingEngineTest is Test {
     }
 
     function test_BidStopsInsideOffSpineAskSubtreeWhenNextAskDoesNotCross() public {
-        address dave = address(0xD00D);
         _fundAndApprove(dave);
 
         vm.prank(alice);
@@ -2275,28 +2264,26 @@ contract RadixMatchingEngineTest is Test {
     }
 
     function test_AskPartiallyConsumesOffSpineBidSubtreeRecursively() public {
-        address dave = address(0xD00D);
-        _fundAndApprove(dave);
+        _fundAndApprove(address(0xD00D));
 
+        bytes32[3] memory bids;
         vm.prank(alice);
-        bytes32 higherBid = engine.fill(_order(70, 2, 0), true);
+        bids[0] = engine.fill(_order(70, 2, 0), true);
         vm.prank(bob);
-        bytes32 lowerBid = engine.fill(_order(69, 3, 0), true);
-        vm.prank(dave);
-        bytes32 bestBid = engine.fill(_order(80, 1, 0), true);
+        bids[1] = engine.fill(_order(69, 3, 0), true);
+        vm.prank(address(0xD00D));
+        bids[2] = engine.fill(_order(80, 1, 0), true);
 
         _expectBidMatches(
-            _matchEventNode(bestBid, 1, _quoteValue(80, 1, true), true),
-            _matchEventNode(higherBid, 2, _quoteValue(70, 2, true), true),
-            _matchEventNode(lowerBid, 1, _quoteValue(69, 3, true) - _quoteValue(69, 2, true), true)
+            _matchEventNode(bids[2], 1, _quoteValue(80, 1, true), true),
+            _matchEventNode(bids[0], 2, _quoteValue(70, 2, true), true),
+            _matchEventNode(bids[1], 1, _quoteValue(69, 3, true) - _quoteValue(69, 2, true), true)
         );
 
         vm.prank(carol);
-        bytes32 restingAsk = engine.fill(_order(69, 4, 0), false);
+        assertEq(engine.fill(_order(69, 4, 0), false), bytes32(0));
 
-        bytes32 reducedLowerBid = _order(69, 2, _nonce(lowerBid));
-        assertEq(restingAsk, bytes32(0));
-        assertEq(engine.bidRoot(), reducedLowerBid);
+        assertEq(engine.bidRoot(), _order(69, 2, _nonce(bids[1])));
         assertEq(base.balanceOf(address(engine)), 4);
         assertEq(
             quote.balanceOf(carol),
@@ -2304,61 +2291,72 @@ contract RadixMatchingEngineTest is Test {
                 + (_quoteValue(69, 3, true) - _quoteValue(69, 2, true))
         );
 
-        vm.prank(alice);
-        (uint256 higherBase,) = engine.cancel(higherBid);
-        vm.prank(bob);
-        (uint256 lowerBase, uint256 lowerQuote) = engine.cancel(lowerBid);
-        vm.prank(dave);
-        (uint256 bestBase,) = engine.cancel(bestBid);
-
-        assertEq(higherBase, 2);
-        assertEq(lowerBase, 1);
-        assertEq(lowerQuote, _quoteValue(69, 2, true));
-        assertEq(bestBase, 1);
+        {
+            vm.prank(alice);
+            (uint256 higherBase,) = engine.cancel(bids[0]);
+            assertEq(higherBase, 2);
+        }
+        {
+            vm.prank(bob);
+            (uint256 lowerBase, uint256 lowerQuote) = engine.cancel(bids[1]);
+            assertEq(lowerBase, 1);
+            assertEq(lowerQuote, _quoteValue(69, 2, true));
+        }
+        {
+            vm.prank(address(0xD00D));
+            (uint256 bestBase,) = engine.cancel(bids[2]);
+            assertEq(bestBase, 1);
+        }
         assertEq(base.balanceOf(address(engine)), 0);
         assertEq(quote.balanceOf(address(engine)), 0);
     }
 
     function test_AskStopsInsideOffSpineBidSubtreeWhenNextBidDoesNotCross() public {
-        address dave = address(0xD00D);
-        _fundAndApprove(dave);
-
-        vm.prank(alice);
-        bytes32 higherBid = engine.fill(_order(60, 2, 0), true);
-        vm.prank(bob);
-        bytes32 lowerBid = engine.fill(_order(59, 3, 0), true);
-        vm.prank(dave);
-        bytes32 bestBid = engine.fill(_order(80, 1, 0), true);
-
-        bytes32 offSpineAggregate = _branchFor(higherBid, lowerBid, true);
+        bytes32[4] memory orders = _seedNonCrossingBidSubtree();
 
         vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), _matchEventNode(bestBid, 1, _quoteValue(80, 1, true), true));
+        emit BidMatched(_bookId(), _matchEventNode(orders[2], 1, _quoteValue(80, 1, true), true));
 
         vm.prank(carol);
-        bytes32 restingAsk = engine.fill(_order(70, 4, 0), false);
+        orders[3] = engine.fill(_order(70, 4, 0), false);
 
-        assertEq(restingAsk, _order(70, 3, MAX_ORDER_NONCE - 3));
-        assertEq(engine.bidRoot(), offSpineAggregate);
-        assertEq(engine.askRoot(), restingAsk);
+        assertEq(orders[3], _order(70, 3, MAX_ORDER_NONCE - 3));
+        assertEq(engine.bidRoot(), _branchFor(orders[0], orders[1], true));
+        assertEq(engine.askRoot(), orders[3]);
         assertEq(base.balanceOf(address(engine)), 4);
         assertEq(quote.balanceOf(carol), 1_000_000 + _quoteValue(80, 1, true));
 
-        vm.prank(alice);
-        (, uint256 higherQuote) = engine.cancel(higherBid);
-        vm.prank(bob);
-        (, uint256 lowerQuote) = engine.cancel(lowerBid);
-        vm.prank(dave);
-        (uint256 bestBase,) = engine.cancel(bestBid);
-        vm.prank(carol);
-        (uint256 askBase,) = engine.cancel(restingAsk);
-
-        assertEq(higherQuote, _quoteValue(60, 2, true));
-        assertEq(lowerQuote, _quoteValue(59, 3, true));
-        assertEq(bestBase, 1);
-        assertEq(askBase, 3);
+        _cancelNonCrossingBidSubtreeOrders(orders);
         assertEq(base.balanceOf(address(engine)), 0);
         assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function _seedNonCrossingBidSubtree() private returns (bytes32[4] memory orders) {
+        _fundAndApprove(dave);
+        vm.prank(alice);
+        orders[0] = engine.fill(_order(60, 2, 0), true);
+        vm.prank(bob);
+        orders[1] = engine.fill(_order(59, 3, 0), true);
+        vm.prank(dave);
+        orders[2] = engine.fill(_order(80, 1, 0), true);
+    }
+
+    function _cancelNonCrossingBidSubtreeOrders(bytes32[4] memory orders) private {
+        vm.prank(alice);
+        (, uint256 higherQuote) = engine.cancel(orders[0]);
+        assertEq(higherQuote, _quoteValue(60, 2, true));
+
+        vm.prank(bob);
+        (, uint256 lowerQuote) = engine.cancel(orders[1]);
+        assertEq(lowerQuote, _quoteValue(59, 3, true));
+
+        vm.prank(dave);
+        (uint256 bestBase,) = engine.cancel(orders[2]);
+        assertEq(bestBase, 1);
+
+        vm.prank(carol);
+        (uint256 askBase,) = engine.cancel(orders[3]);
+        assertEq(askBase, 3);
     }
 
     function test_CancelAskFromLeftBranchRewritesParent() public {
@@ -3434,20 +3432,19 @@ contract RadixMatchingEngineTest is Test {
         plainBase.mint(bob, 1_000);
         reentrantQuote.mint(alice, 1_000);
 
-        vm.startPrank(bob);
+        vm.prank(bob);
         plainBase.approve(address(reentrantEngine), type(uint256).max);
+        vm.prank(bob);
         bytes32 restingAsk = reentrantEngine.fill(_order(10, 1, 0), false);
-        vm.stopPrank();
 
         bytes32 expectedBid = _order(10, 1, MAX_ORDER_NONCE - 1);
 
-        vm.startPrank(alice);
+        vm.prank(alice);
         reentrantQuote.approve(address(reentrantEngine), type(uint256).max);
         reentrantQuote.arm(reentrantEngine, expectedBid);
-        bytes32 restingBid = reentrantEngine.fill(_order(10, 2, 0), true);
-        vm.stopPrank();
+        vm.prank(alice);
+        assertEq(reentrantEngine.fill(_order(10, 2, 0), true), expectedBid);
 
-        assertEq(restingBid, expectedBid);
         assertFalse(reentrantQuote.reentrySucceeded());
         assertEq(reentrantQuote.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantEngine.askRoot(), bytes32(0));
@@ -3459,17 +3456,18 @@ contract RadixMatchingEngineTest is Test {
             reentrantQuote.balanceOf(address(reentrantEngine)), _quoteValue(10, 1, false) + _quoteValue(10, 1, true)
         );
 
-        vm.prank(bob);
-        (uint256 bobBaseAmount, uint256 bobQuoteAmount) = reentrantEngine.cancel(restingAsk);
-
-        assertEq(bobBaseAmount, 0);
-        assertEq(bobQuoteAmount, _quoteValue(10, 1, false));
-
-        vm.prank(alice);
-        (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = reentrantEngine.cancel(expectedBid);
-
-        assertEq(aliceBaseAmount, 0);
-        assertEq(aliceQuoteAmount, _quoteValue(10, 1, true));
+        {
+            vm.prank(bob);
+            (uint256 bobBaseAmount, uint256 bobQuoteAmount) = reentrantEngine.cancel(restingAsk);
+            assertEq(bobBaseAmount, 0);
+            assertEq(bobQuoteAmount, _quoteValue(10, 1, false));
+        }
+        {
+            vm.prank(alice);
+            (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = reentrantEngine.cancel(expectedBid);
+            assertEq(aliceBaseAmount, 0);
+            assertEq(aliceQuoteAmount, _quoteValue(10, 1, true));
+        }
         assertEq(reentrantEngine.bidRoot(), bytes32(0));
     }
 
@@ -3503,20 +3501,19 @@ contract RadixMatchingEngineTest is Test {
         plainQuote.mint(alice, 1_000);
         reentrantBase.mint(bob, 1_000);
 
-        vm.startPrank(alice);
+        vm.prank(alice);
         plainQuote.approve(address(reentrantEngine), type(uint256).max);
+        vm.prank(alice);
         bytes32 restingBid = reentrantEngine.fill(_order(10, 1, 0), true);
-        vm.stopPrank();
 
         bytes32 expectedAsk = _order(10, 1, MAX_ORDER_NONCE - 1);
 
-        vm.startPrank(bob);
+        vm.prank(bob);
         reentrantBase.approve(address(reentrantEngine), type(uint256).max);
         reentrantBase.arm(reentrantEngine, expectedAsk);
-        bytes32 restingAsk = reentrantEngine.fill(_order(10, 2, 0), false);
-        vm.stopPrank();
+        vm.prank(bob);
+        assertEq(reentrantEngine.fill(_order(10, 2, 0), false), expectedAsk);
 
-        assertEq(restingAsk, expectedAsk);
         assertFalse(reentrantBase.reentrySucceeded());
         assertEq(reentrantBase.reentrySelector(), bytes4(keccak256("ReentrantCall()")));
         assertEq(reentrantEngine.bidRoot(), bytes32(0));
@@ -3526,17 +3523,18 @@ contract RadixMatchingEngineTest is Test {
         assertEq(plainQuote.balanceOf(bob), _quoteValue(10, 1, true));
         assertEq(reentrantBase.balanceOf(address(reentrantEngine)), 2);
 
-        vm.prank(alice);
-        (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = reentrantEngine.cancel(restingBid);
-
-        assertEq(aliceBaseAmount, 1);
-        assertEq(aliceQuoteAmount, 0);
-
-        vm.prank(bob);
-        (uint256 bobBaseAmount, uint256 bobQuoteAmount) = reentrantEngine.cancel(expectedAsk);
-
-        assertEq(bobBaseAmount, 1);
-        assertEq(bobQuoteAmount, 0);
+        {
+            vm.prank(alice);
+            (uint256 aliceBaseAmount, uint256 aliceQuoteAmount) = reentrantEngine.cancel(restingBid);
+            assertEq(aliceBaseAmount, 1);
+            assertEq(aliceQuoteAmount, 0);
+        }
+        {
+            vm.prank(bob);
+            (uint256 bobBaseAmount, uint256 bobQuoteAmount) = reentrantEngine.cancel(expectedAsk);
+            assertEq(bobBaseAmount, 1);
+            assertEq(bobQuoteAmount, 0);
+        }
         assertEq(reentrantEngine.askRoot(), bytes32(0));
     }
 

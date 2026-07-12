@@ -1,29 +1,28 @@
-.PHONY: fmt lint test invariant invariant-deep invariant-deep-shard invariant-deep-shards gas-runtime snapshot-runtime snapshot-runtime-check build-size coverage coverage-check slither formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
+.PHONY: fmt lint test invariant invariant-deep invariant-deep-shard invariant-deep-shards gas-runtime gas-access-list snapshot-runtime snapshot-runtime-check build-size tick-reference coverage coverage-check slither formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
 
 INVARIANT_RUNS ?= 2048
 INVARIANT_DEPTH ?= 64
 INVARIANT_SHARDS ?= 8
 INVARIANT_SHARD ?= 1
 GAS_CONTRACTS ?= RadixMatchingEngine(Gas|HookGas|FeeGas)Test
-COVERAGE_FILE ?= src/RadixMatchingEngine.sol
-COVERAGE_FILES ?= src/RadixMatchingEngine.sol,src/RoutingEngine.sol
+COVERAGE_FILES ?= src/RadixMatchingEngine.sol,src/RoutingEngine.sol,src/libraries/TickMath32.sol
 COVERAGE_EXCLUSIONS ?= coverage.exclusions.json
-# Coverage compiles tests under different optimizer settings than the regular
-# test target. Skip the large integration test dispatcher here; `make test`
-# still runs it, and these thresholds cover the remaining focused suites.
-COVERAGE_SKIP ?= RadixMatchingEngine.t.sol
+# Coverage runs every behavioral, routing, boundary, formal, and math test. Stateful invariants
+# and benchmark-only suites retain dedicated targets because they do not add useful source coverage.
+COVERAGE_SKIP_ARGS ?= --skip RadixMatchingEngineInvariant.t.sol --skip RadixMatchingEngineGas.t.sol --skip RadixMatchingEngineAccessList.t.sol
 COVERAGE_MIN_LINES ?= 100
 COVERAGE_MIN_STATEMENTS ?= 100
 COVERAGE_MIN_BRANCHES ?= 100
 COVERAGE_MIN_FUNCS ?= 100
 SLITHER ?= uv tool run --from slither-analyzer slither
-HALMOS ?= uv tool run --from halmos halmos
-HALMOS_ARGS ?= --match-contract RadixMatchingEngineFormalTest --match-test '^testFuzz_Formal' --solver z3 --solver-timeout-assertion 120s --no-status
+HALMOS ?= uv tool run --python 3.12 --from halmos halmos
+HALMOS_BUILD_OUT ?= out-halmos
+HALMOS_ARGS ?= --forge-build-out $(HALMOS_BUILD_OUT) --match-contract RadixMatchingEngineFormalTest --match-test '^testFuzz_Formal' --solver yices --solver-timeout-assertion 30s --no-status
 KONTROL_IMAGE ?= runtimeverificationinc/kontrol:ubuntu-jammy-1.0.255
 KONTROL ?= docker run --rm --platform linux/amd64 -v "$(CURDIR):/workspace" -w /workspace $(KONTROL_IMAGE) kontrol
 KONTROL_BUILD_ARGS ?= --foundry-project-root /workspace --no-metadata --no-O2 --no-keccak-lemmas
 KONTROL_PROVE_ARGS ?= --foundry-project-root /workspace --match-test $(KONTROL_TEST) --schedule CANCUN --no-gas
-KONTROL_TEST ?= 'RadixMatchingEngineFormalTest.testFuzz_FormalBidAgainstAskConservesAndClaims(uint8,uint8,uint8)'
+KONTROL_TEST ?= 'RadixMatchingEngineFormalTest.testFuzz_FormalBidAgainstAskConservesAndClaims(bool,bool)'
 
 fmt:
 	forge fmt --check
@@ -49,6 +48,9 @@ invariant-deep-shards:
 gas-runtime:
 	forge test --isolate --force --match-contract '$(GAS_CONTRACTS)' --gas-report
 
+gas-access-list:
+	forge test --force --match-contract RadixMatchingEngineAccessListBenchmark -vv
+
 snapshot-runtime:
 	forge snapshot --isolate --force --match-contract '$(GAS_CONTRACTS)' --snap .gas-snapshot.runtime
 
@@ -58,13 +60,16 @@ snapshot-runtime-check:
 build-size:
 	forge build --sizes
 
+tick-reference:
+	python3 script/check_tick_math.py --check test/TickMath32.t.sol
+
 coverage:
-	forge coverage --ir-minimum --skip "$(COVERAGE_SKIP)" --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
+	forge coverage --ir-minimum $(COVERAGE_SKIP_ARGS) --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
 
 coverage-check:
 	@set -e; \
 	tmp="$$(mktemp)"; \
-	if ! NO_COLOR=1 forge coverage --ir-minimum --skip "$(COVERAGE_SKIP)" --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest' > "$$tmp" 2>&1; then \
+	if ! NO_COLOR=1 forge coverage --ir-minimum $(COVERAGE_SKIP_ARGS) --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest' > "$$tmp" 2>&1; then \
 		cat "$$tmp"; \
 		rm -f "$$tmp"; \
 		exit 1; \
@@ -81,9 +86,10 @@ coverage-check:
 	rm -f "$$tmp"
 
 slither:
-	$(SLITHER) src/RadixMatchingEngine.sol --config-file slither.config.json --exclude-informational
+	$(SLITHER) src/RoutingEngine.sol --config-file slither.config.json --exclude-informational
 
 formal-halmos:
+	forge build --force --build-info --out $(HALMOS_BUILD_OUT) test/RadixMatchingEngineFormal.t.sol
 	$(HALMOS) $(HALMOS_ARGS)
 
 formal-kevm-build:
@@ -92,8 +98,8 @@ formal-kevm-build:
 formal-kevm:
 	$(KONTROL) prove $(KONTROL_PROVE_ARGS)
 
-verify: fmt lint test invariant snapshot-runtime-check build-size slither
+verify: fmt lint tick-reference test invariant snapshot-runtime-check build-size slither
 
-verify-deep: fmt lint test invariant-deep-shards snapshot-runtime-check build-size slither
+verify-deep: fmt lint tick-reference test invariant-deep-shards snapshot-runtime-check build-size slither
 
-verify-security: fmt lint test invariant-deep-shards snapshot-runtime-check build-size slither coverage-check formal-halmos
+verify-security: fmt lint test invariant-deep-shards snapshot-runtime-check build-size slither tick-reference coverage-check formal-halmos

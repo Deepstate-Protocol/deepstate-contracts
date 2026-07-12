@@ -28,6 +28,14 @@ contract RoutingTestERC20 is ERC20 {
     }
 }
 
+contract GasBurningHook {
+    function execute(bytes32, bytes32, address, uint160, uint32) external pure {
+        assembly ("memory-safe") {
+            for {} 1 {} {}
+        }
+    }
+}
+
 contract RoutingEngineHarness is RoutingEngine {
     function setNonceAndFlags(bytes32 id, uint256 nonceAndFlags) external {
         books[id].nonceAndFlags = nonceAndFlags;
@@ -125,6 +133,29 @@ contract RoutingEngineTest is Test {
         assertEq(bps, 0);
     }
 
+    function test_OnlyOwnerCanConfigureAndOwnershipTransferTakesEffect() public {
+        assertEq(engine.owner(), address(this));
+
+        vm.startPrank(alice);
+        vm.expectRevert(bytes4(keccak256("Unauthorized()")));
+        engine.setFeeConfig(feeRecipient, 1);
+        vm.expectRevert(bytes4(keccak256("Unauthorized()")));
+        engine.setPoolHookConfig(address(token0), address(token1), address(this), true, false);
+        vm.stopPrank();
+
+        engine.transferOwnership(bob);
+        assertEq(engine.owner(), bob);
+
+        vm.expectRevert(bytes4(keccak256("Unauthorized()")));
+        engine.setFeeConfig(feeRecipient, 1);
+
+        vm.prank(bob);
+        engine.setFeeConfig(feeRecipient, 1);
+        (address recipient, uint16 bps) = engine.feeConfig();
+        assertEq(recipient, feeRecipient);
+        assertEq(bps, 1);
+    }
+
     function test_BidFillTakesFeeFromOutgoingBaseOnly() public {
         engine.setFeeConfig(feeRecipient, 100);
 
@@ -191,6 +222,40 @@ contract RoutingEngineTest is Test {
         assertEq(baseAmount, 10_000);
         assertEq(token0.balanceOf(feeRecipient), 0);
         assertEq(token1.balanceOf(feeRecipient), fee);
+    }
+
+    function test_MaxSignedAskOutputFeeDoesNotOverflow() public {
+        engine.setFeeConfig(feeRecipient, 100);
+
+        uint160 quantity = uint160(uint256(1) << 154);
+        uint256 matchedQuote = _quoteValue(type(int32).max, quantity, true);
+        assertGt(matchedQuote, type(uint256).max / 100);
+        assertLe(matchedQuote, uint256(type(int256).max));
+
+        token1.mint(alice, matchedQuote);
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(type(int32).max, quantity, 0), true, false, false));
+
+        token0.mint(bob, quantity);
+        uint256 bobQuoteBefore = token1.balanceOf(bob);
+        vm.prank(bob);
+        engine.fill(_fill(0, _order(type(int32).max, quantity, 0), false, true, false));
+
+        uint256 fee = matchedQuote / 100;
+        assertEq(token1.balanceOf(bob), bobQuoteBefore + matchedQuote - fee);
+        assertEq(token1.balanceOf(feeRecipient), fee);
+    }
+
+    function test_GasBurningHookCannotBlockFill() public {
+        GasBurningHook hook = new GasBurningHook();
+        engine.setPoolHookConfig(address(token0), address(token1), address(hook), true, false);
+
+        vm.prank(alice);
+        bytes32 restingBid = engine.fill{gas: 600_000}(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        assertEq(engine.ownerOfOrder(engine.orderId(id, restingBid)), alice);
+        assertEq(engine.nextNonce(address(token0), address(token1), 0), MAX_ORDER_NONCE - 1);
     }
 
     function test_FillRouteFeeIsCarvedBeforeRemainderCanRestAndCancel() public {
@@ -282,6 +347,98 @@ contract RoutingEngineTest is Test {
 
         assertEq(token0.balanceOf(bob), bobToken0Before + 5);
         assertEq(token1.balanceOf(bob), bobToken1Before - _quoteValue(10, 5, false));
+    }
+
+    function test_FillRouteAccumulatesRepeatedFeesForOneToken() public {
+        engine.setFeeConfig(feeRecipient, 100);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 20_000, 0), false, false, false));
+
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+
+        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](2);
+        route[0] = _fill(0, _order(10, 10_000, 0), true, true, false);
+        route[1] = _fill(0, _order(10, 10_000, 0), true, true, false);
+
+        vm.prank(bob);
+        engine.fillRoute(route);
+
+        assertEq(token0.balanceOf(bob), bobToken0Before + 19_800);
+        assertEq(token1.balanceOf(bob), bobToken1Before - _quoteValue(10, 20_000, false));
+        assertEq(token0.balanceOf(feeRecipient), 200);
+        assertEq(token1.balanceOf(feeRecipient), 0);
+    }
+
+    function test_LateRouteFailureRevertsEarlierLegAtomically() public {
+        vm.prank(alice);
+        bytes32 restingAsk = engine.fill(_fill(0, _order(10, 5, 0), false, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+        uint256 engineToken0Before = token0.balanceOf(address(engine));
+        uint256 engineToken1Before = token1.balanceOf(address(engine));
+
+        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](2);
+        route[0] = _fill(0, _order(10, 3, 0), true, true, false);
+        route[1] = _fill(0, _order(10, 3, 0), true, true, true);
+
+        vm.prank(bob);
+        vm.expectRevert(bytes4(keccak256("FillOrKill()")));
+        engine.fillRoute(route);
+
+        (bytes32 askRoot,) = engine.roots(address(token0), address(token1), 0);
+        assertEq(askRoot, restingAsk);
+        assertEq(engine.ownerOfOrder(engine.orderId(id, restingAsk)), alice);
+        assertEq(token0.balanceOf(bob), bobToken0Before);
+        assertEq(token1.balanceOf(bob), bobToken1Before);
+        assertEq(token0.balanceOf(address(engine)), engineToken0Before);
+        assertEq(token1.balanceOf(address(engine)), engineToken1Before);
+    }
+
+    function test_FillRouteCrossesPoolsAndNetsIntermediateToken() public {
+        RoutingTestERC20 a = new RoutingTestERC20("Route A", "RA");
+        RoutingTestERC20 b = new RoutingTestERC20("Route B", "RB");
+        RoutingTestERC20 c = new RoutingTestERC20("Route C", "RC");
+        RoutingTestERC20[3] memory sorted = _sortTokens(a, b, c);
+        address makerAb = address(0xAB01);
+        address makerBc = address(0xBC01);
+        address taker = address(0xC0FFEE);
+        uint160 quantity = 100_000;
+
+        sorted[1].mint(makerAb, quantity);
+        sorted[2].mint(makerBc, quantity);
+        sorted[0].mint(taker, quantity);
+        _approveRouteTokens(sorted, makerAb);
+        _approveRouteTokens(sorted, makerBc);
+        _approveRouteTokens(sorted, taker);
+
+        vm.prank(makerAb);
+        bytes32 bidAb = engine.fill(_fillFor(sorted[0], sorted[1], _order(0, quantity, 0), true, false, false));
+        vm.prank(makerBc);
+        bytes32 bidBc = engine.fill(_fillFor(sorted[1], sorted[2], _order(0, quantity, 0), true, false, false));
+
+        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](2);
+        route[0] = _fillFor(sorted[0], sorted[1], _order(0, quantity, 0), false, true, true);
+        route[1] = _fillFor(sorted[1], sorted[2], _order(0, quantity, 0), false, true, true);
+
+        vm.prank(taker);
+        engine.fillRoute(route);
+
+        assertEq(sorted[0].balanceOf(taker), 0);
+        assertEq(sorted[1].balanceOf(taker), 0);
+        assertEq(sorted[2].balanceOf(taker), quantity);
+
+        vm.prank(makerAb);
+        (uint256 baseAb, uint256 quoteAb) = engine.cancel(address(sorted[0]), address(sorted[1]), 0, bidAb);
+        vm.prank(makerBc);
+        (uint256 baseBc, uint256 quoteBc) = engine.cancel(address(sorted[1]), address(sorted[2]), 0, bidBc);
+        assertEq(baseAb, quantity);
+        assertEq(quoteAb, 0);
+        assertEq(baseBc, quantity);
+        assertEq(quoteBc, 0);
     }
 
     function test_FillRouteZeroDeltaLegDoesNotTouchTokens() public {
@@ -445,6 +602,44 @@ contract RoutingEngineTest is Test {
             noRest: noRest,
             fillOrKill: fillOrKill
         });
+    }
+
+    function _fillFor(
+        RoutingTestERC20 lower,
+        RoutingTestERC20 upper,
+        bytes32 order,
+        bool isBid,
+        bool noRest,
+        bool fillOrKill
+    ) internal pure returns (RoutingEngine.FillParams memory params) {
+        params = RoutingEngine.FillParams({
+            token0: address(lower),
+            token1: address(upper),
+            epoch: 0,
+            order: order,
+            isBid: isBid,
+            noRest: noRest,
+            fillOrKill: fillOrKill
+        });
+    }
+
+    function _sortTokens(RoutingTestERC20 a, RoutingTestERC20 b, RoutingTestERC20 c)
+        internal
+        pure
+        returns (RoutingTestERC20[3] memory sorted)
+    {
+        sorted = [a, b, c];
+        if (address(sorted[0]) > address(sorted[1])) (sorted[0], sorted[1]) = (sorted[1], sorted[0]);
+        if (address(sorted[1]) > address(sorted[2])) (sorted[1], sorted[2]) = (sorted[2], sorted[1]);
+        if (address(sorted[0]) > address(sorted[1])) (sorted[0], sorted[1]) = (sorted[1], sorted[0]);
+    }
+
+    function _approveRouteTokens(RoutingTestERC20[3] memory sorted, address user) internal {
+        vm.startPrank(user);
+        sorted[0].approve(address(engine), type(uint256).max);
+        sorted[1].approve(address(engine), type(uint256).max);
+        sorted[2].approve(address(engine), type(uint256).max);
+        vm.stopPrank();
     }
 
     function _fundAndApprove(address user) internal {

@@ -1,5 +1,6 @@
 cache/
 out/
+out-halmos/
 broadcast/
 .DS_Store
 

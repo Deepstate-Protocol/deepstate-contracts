@@ -28,25 +28,12 @@ contract ProductionReadinessERC20 is ERC20 {
     }
 }
 
-contract ProductionReadinessRoutingHarness is RoutingEngine {
-    function restBookForTest(
-        bytes32 id,
-        uint256 nonceAndFlags,
-        int32 price,
-        uint160 quantity,
-        bool isBid,
-        address owner
-    ) external returns (bytes32 restingOrder, uint32 nextNonceAfter) {
-        return _restBook(id, books[id], nonceAndFlags, price, quantity, isBid, owner, false);
-    }
-}
-
 contract ProductionReadinessReproTest is Test {
     uint32 internal constant MAX_ORDER_NONCE = type(uint32).max;
     bytes4 internal constant DELTA_OVERFLOW = bytes4(keccak256("DeltaOverflow()"));
     bytes4 internal constant INVALID_ORDER = bytes4(keccak256("InvalidOrder()"));
 
-    ProductionReadinessRoutingHarness internal engine;
+    RoutingEngine internal engine;
     ProductionReadinessERC20 internal token0;
     ProductionReadinessERC20 internal token1;
 
@@ -64,7 +51,7 @@ contract ProductionReadinessReproTest is Test {
             token1 = a;
         }
 
-        engine = new ProductionReadinessRoutingHarness();
+        engine = new RoutingEngine();
 
         _fundAndApprove(alice);
         _fundAndApprove(bob);
@@ -122,6 +109,27 @@ contract ProductionReadinessReproTest is Test {
         assertNotEq(bidRoot, bytes32(0));
     }
 
+    function test_MatchedQuotePlusRestingCollateralAboveSignedRangeRevertsAtomically() public {
+        uint160 quantity = _signedBoundaryQuantity() + uint160(uint256(1) << 140);
+        token0.mint(alice, uint256(quantity));
+
+        vm.prank(alice);
+        bytes32 restingAsk = engine.fill(_fill(0, _order(type(int32).max, quantity, 0), false, false, false));
+
+        uint256 matchedQuote = _quoteValue(type(int32).max, quantity, false);
+        uint256 restingCollateral = _quoteValue(type(int32).max, quantity, true);
+        assertLe(matchedQuote, uint256(type(int256).max));
+        assertLe(restingCollateral, uint256(type(int256).max));
+        assertGt(matchedQuote + restingCollateral, uint256(type(int256).max));
+
+        vm.prank(bob);
+        vm.expectRevert(DELTA_OVERFLOW);
+        engine.fill(_fill(0, _order(type(int32).max, quantity * 2, 0), true, false, false));
+
+        (bytes32 askRoot,) = engine.roots(address(token0), address(token1), 0);
+        assertEq(askRoot, restingAsk);
+    }
+
     function test_MaxTickLargeAskCanRestInsideSignedRange() public {
         uint160 quantity = uint160(type(uint128).max);
         uint256 proceeds = _quoteValue(type(int32).max, quantity, false);
@@ -137,6 +145,136 @@ contract ProductionReadinessReproTest is Test {
         assertEq(engine.ownerOfOrder(engine.orderId(book, expectedAsk)), alice);
         (bytes32 askRoot,) = engine.roots(address(token0), address(token1), 0);
         assertEq(askRoot, restingAsk);
+    }
+
+    function test_RestingQuoteAboveSignedRangeReverts() public {
+        vm.prank(bob);
+        vm.expectRevert(INVALID_ORDER);
+        engine.fill(_fill(0, _order(type(int32).max, type(uint160).max, 0), true, false, false));
+    }
+
+    function test_RestingAskQuoteAboveSignedRangeReverts() public {
+        token0.mint(alice, type(uint160).max);
+
+        vm.prank(alice);
+        vm.expectRevert(INVALID_ORDER);
+        engine.fill(_fill(0, _order(type(int32).max, type(uint160).max, 0), false, false, false));
+    }
+
+    function test_MinTickMaxQuantityBidRestsAndCancelsExactCollateral() public {
+        uint160 quantity = type(uint160).max;
+        uint256 collateral = _quoteValue(type(int32).min, quantity, true);
+        assertGt(collateral, 0);
+        assertLt(collateral, uint256(type(int256).max));
+        token1.mint(bob, collateral);
+
+        vm.prank(bob);
+        bytes32 restingBid = engine.fill(_fill(0, _order(type(int32).min, quantity, 0), true, false, false));
+
+        bytes32 book = engine.bookId(address(token0), address(token1), 0);
+        assertEq(restingBid, _order(type(int32).min, quantity, MAX_ORDER_NONCE));
+        assertEq(engine.ownerOfOrder(engine.orderId(book, restingBid)), bob);
+        assertEq(token1.balanceOf(address(engine)), collateral);
+
+        vm.prank(bob);
+        (uint256 claimedBase, uint256 returnedQuote) = engine.cancel(address(token0), address(token1), 0, restingBid);
+
+        assertEq(claimedBase, 0);
+        assertEq(returnedQuote, collateral);
+        assertEq(engine.ownerOfOrder(engine.orderId(book, restingBid)), address(0));
+        assertEq(token1.balanceOf(address(engine)), 0);
+    }
+
+    function test_MinTickMaxQuantityAskPartialFillAndCancelTelescopes() public {
+        uint160 quantity = type(uint160).max;
+        uint160 fillQuantity = quantity / 2;
+        uint256 expectedQuote = _quoteValue(type(int32).min, quantity, false)
+            - _quoteValue(type(int32).min, quantity - fillQuantity, false);
+        assertGt(expectedQuote, 0);
+        token0.mint(alice, uint256(quantity));
+        token1.mint(bob, expectedQuote);
+
+        vm.prank(alice);
+        bytes32 restingAsk = engine.fill(_fill(0, _order(type(int32).min, quantity, 0), false, false, false));
+
+        vm.prank(bob);
+        engine.fill(_fill(0, _order(type(int32).min, fillQuantity, 0), true, true, false));
+
+        vm.prank(alice);
+        (uint256 returnedBase, uint256 claimedQuote) = engine.cancel(address(token0), address(token1), 0, restingAsk);
+
+        assertEq(returnedBase, quantity - fillQuantity);
+        assertEq(claimedQuote, expectedQuote);
+        assertEq(token0.balanceOf(address(engine)), 0);
+        assertEq(token1.balanceOf(address(engine)), 0);
+    }
+
+    function testFuzz_AllTicksAskPartialFillAndCancelTelescopes(int32 tick, uint128 quantitySeed, uint128 fillSeed)
+        public
+    {
+        uint160 quantity = uint160(bound(uint256(quantitySeed), 1, type(uint128).max));
+        uint160 fillQuantity = uint160(bound(uint256(fillSeed), 1, quantity));
+        uint256 expectedQuote = _quoteValue(tick, quantity, false) - _quoteValue(tick, quantity - fillQuantity, false);
+        token0.mint(alice, uint256(quantity));
+        token1.mint(bob, expectedQuote);
+
+        vm.prank(alice);
+        bytes32 restingAsk = engine.fill(_fill(0, _order(tick, quantity, 0), false, false, false));
+        vm.prank(bob);
+        engine.fill(_fill(0, _order(tick, fillQuantity, 0), true, true, false));
+        vm.prank(alice);
+        (uint256 returnedBase, uint256 claimedQuote) = engine.cancel(address(token0), address(token1), 0, restingAsk);
+
+        assertEq(returnedBase, quantity - fillQuantity);
+        assertEq(claimedQuote, expectedQuote);
+        assertEq(token0.balanceOf(address(engine)), 0);
+        assertEq(token1.balanceOf(address(engine)), 0);
+    }
+
+    function testFuzz_AllTicksBidPartialFillAndCancelTelescopes(int32 tick, uint128 quantitySeed, uint128 fillSeed)
+        public
+    {
+        uint160 quantity = uint160(bound(uint256(quantitySeed), 1, type(uint128).max));
+        uint160 fillQuantity = uint160(bound(uint256(fillSeed), 1, quantity));
+        uint256 collateral = _quoteValue(tick, quantity, true);
+        uint256 expectedQuote = collateral - _quoteValue(tick, quantity - fillQuantity, true);
+        token1.mint(bob, collateral);
+        token0.mint(alice, uint256(fillQuantity));
+
+        vm.prank(bob);
+        bytes32 restingBid = engine.fill(_fill(0, _order(tick, quantity, 0), true, false, false));
+        uint256 aliceQuoteBefore = token1.balanceOf(alice);
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(tick, fillQuantity, 0), false, true, false));
+        assertEq(token1.balanceOf(alice), aliceQuoteBefore + expectedQuote);
+
+        vm.prank(bob);
+        (uint256 claimedBase, uint256 returnedQuote) = engine.cancel(address(token0), address(token1), 0, restingBid);
+        assertEq(claimedBase, fillQuantity);
+        assertEq(returnedQuote, collateral - expectedQuote);
+        assertEq(token0.balanceOf(address(engine)), 0);
+        assertEq(token1.balanceOf(address(engine)), 0);
+    }
+
+    function test_MaxTickPartialFillAndCancelUsesFullWidthDifference() public {
+        uint160 quantity = _successfulBoundaryQuantity();
+        uint160 fillQuantity = quantity / 2;
+        uint256 quoteAmount = _quoteValue(type(int32).max, quantity, false)
+            - _quoteValue(type(int32).max, quantity - fillQuantity, false);
+        token0.mint(alice, uint256(quantity));
+        token1.mint(bob, quoteAmount);
+
+        vm.prank(alice);
+        bytes32 restingAsk = engine.fill(_fill(0, _order(type(int32).max, quantity, 0), false, false, false));
+
+        vm.prank(bob);
+        engine.fill(_fill(0, _order(type(int32).max, fillQuantity, 0), true, true, false));
+
+        vm.prank(alice);
+        (uint256 returnedBase, uint256 claimedQuote) = engine.cancel(address(token0), address(token1), 0, restingAsk);
+
+        assertEq(returnedBase, quantity - fillQuantity);
+        assertEq(claimedQuote, quoteAmount);
     }
 
     function test_MaxTickMixedAskSubtreeFillsBelowSignedBoundary() public {

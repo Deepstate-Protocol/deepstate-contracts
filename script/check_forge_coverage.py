@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 
 METRICS = ("lines", "statements", "branches", "funcs")
+EXCLUSION_FIELDS = {"reason", "lines", "statements", "functions", "branches"}
 
 
 @dataclass
@@ -158,7 +159,9 @@ def adjusted_lcov_counts(file_name, coverage, exclusions):
 
 def adjusted_statement_counts(file_name, summary_metrics, exclusions):
     metric = summary_metrics["statements"]
-    statement_exclusions = int(exclusions.get("statements", 0))
+    statement_exclusions = exclusions.get("statements", 0)
+    if not isinstance(statement_exclusions, int) or isinstance(statement_exclusions, bool) or statement_exclusions < 0:
+        return None, ["statement exclusions must be a nonnegative integer"]
     missing = metric.total - metric.covered
     if statement_exclusions > missing:
         return None, [f"statement exclusions {statement_exclusions} exceed missing statements {missing}"]
@@ -207,10 +210,20 @@ def main():
     totals = {metric: SummaryMetric(0, 0) for metric in METRICS}
     summaries = []
 
+    stale_files = sorted(set(exclusions) - set(files))
+    failures.extend(f"exclusion entry targets untracked file {file_name}" for file_name in stale_files)
+
     for file_name in files:
         file_summary = summary.get(file_name)
         file_lcov = lcov.get(file_name)
         file_exclusions = exclusions.get(file_name, {})
+
+        unknown_fields = sorted(set(file_exclusions) - EXCLUSION_FIELDS)
+        failures.extend(f"{file_name}: unknown exclusion field {field}" for field in unknown_fields)
+        has_exclusions = any(file_exclusions.get(field) for field in ("lines", "statements", "functions", "branches"))
+        reason = file_exclusions.get("reason")
+        if has_exclusions and (not isinstance(reason, str) or not reason.strip()):
+            failures.append(f"{file_name}: exclusions require a nonempty reason")
 
         if file_summary is None:
             failures.append(f"{file_name}: no forge summary row found")
@@ -224,8 +237,10 @@ def main():
 
         statements, statement_failures = adjusted_statement_counts(file_name, file_summary, file_exclusions)
         failures.extend(f"{file_name}: {failure}" for failure in statement_failures)
-        if statements is not None:
-            adjusted["statements"] = statements
+        # Keep validating the remaining metrics when the statement exclusion itself is invalid.
+        # The recorded failure still makes the command fail, while the raw statement counts avoid
+        # turning a malformed manifest into an unrelated KeyError traceback.
+        adjusted["statements"] = statements if statements is not None else file_summary["statements"]
 
         for metric in METRICS:
             metric_counts = adjusted[metric]

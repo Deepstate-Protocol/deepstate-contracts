@@ -1,65 +1,14 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.28;
 
-/// @title 32-Bit Tick Math
-/// @notice Converts signed 32-bit logarithmic ticks into Q64.96 square-root prices.
+/// @title 32-Bit Tick Price Math
+/// @notice Converts signed 32-bit logarithmic ticks into settlement factors and binary divisors.
 /// @dev
 /// The price at tick `t` is `2 ** (96 * t / 2**31)`. This maps the complete
 /// signed 32-bit domain onto `[2**-96, 2**96)`. Adjacent ticks differ by about
-/// 0.000309861 basis points. The implementation mirrors the constant-product
-/// exponentiation strategy used by Uniswap TickMath, with constants regenerated
-/// for this finer tick base and the full 32-bit magnitude.
+/// 0.000309861 basis points. Constants encode negative fractional powers in Q128
+/// and are composed by hexadecimal nibbles to keep runtime work bounded.
 library TickMath32 {
-    /// @notice Return `sqrt(price) * 2**96` for a signed logarithmic tick.
-    /// @param tick Tick in the complete `int32` domain.
-    /// @return sqrtPriceX96 Q64.96 square-root price.
-    function getSqrtRatioAtTick(int32 tick) internal pure returns (uint160 sqrtPriceX96) {
-        unchecked {
-            uint256 absTick = tick < 0 ? uint256(uint64(-int64(tick))) : uint256(uint32(tick));
-            uint256 ratio = uint256(1) << 128;
-
-            if (absTick & 0x00000001 != 0) ratio = (ratio * 0xffffffbd75370bb73fa17c895f1d1e10) >> 128;
-            if (absTick & 0x00000002 != 0) ratio = (ratio * 0xffffff7aea6e28ba5a1e33b2f9234215) >> 128;
-            if (absTick & 0x00000004 != 0) ratio = (ratio * 0xfffffef5d4dc96a41f97562b4e07d117) >> 128;
-            if (absTick & 0x00000008 != 0) ratio = (ratio * 0xfffffdeba9ba4205ec0a898fcd6f94eb) >> 128;
-            if (absTick & 0x00000010 != 0) ratio = (ratio * 0xfffffbd75378d702870599268a464fd0) >> 128;
-            if (absTick & 0x00000020 != 0) ratio = (ratio * 0xfffff7aea702f9dfa5d5d3bb9279d257) >> 128;
-            if (absTick & 0x00000040 != 0) ratio = (ratio * 0xffffef5d4e4b23288b1a7bde307cacf0) >> 128;
-            if (absTick & 0x00000080 != 0) ratio = (ratio * 0xffffdeba9dab03ed16130032411d9853) >> 128;
-            if (absTick & 0x00000100 != 0) ratio = (ratio * 0xffffbd753fa8fe023cb7f01a95a85618) >> 128;
-            if (absTick & 0x00000200 != 0) ratio = (ratio * 0xffff7aea909dd26544c77f0bdc9ee441) >> 128;
-            if (absTick & 0x00000400 != 0) ratio = (ratio * 0xfffef5d5666aec52038389364772b7c1) >> 128;
-            if (absTick & 0x00000800 != 0) ratio = (ratio * 0xfffdebabe19266e494faa08bf06f95d3) >> 128;
-            if (absTick & 0x00001000 != 0) ratio = (ratio * 0xfffbd75c161287e4a9d98eb29b205e4f) >> 128;
-            if (absTick & 0x00002000 != 0) ratio = (ratio * 0xfff7aec977b80143043f6d3dd6d17ccb) >> 128;
-            if (absTick & 0x00004000 != 0) ratio = (ratio * 0xffef5dd81c9c14e14a6e387701ae244c) >> 128;
-            if (absTick & 0x00008000 != 0) ratio = (ratio * 0xffdebcc4e4eb184180b1fe46ef229c18) >> 128;
-            if (absTick & 0x00010000 != 0) ratio = (ratio * 0xffbd7ddc30bb29b9304ec1b3093eeb73) >> 128;
-            if (absTick & 0x00020000 != 0) ratio = (ratio * 0xff7b0cffbe1596751b6382200cc3b5d9) >> 128;
-            if (absTick & 0x00040000 != 0) ratio = (ratio * 0xfef65f0afb18a3ca235953e0a4f60a89) >> 128;
-            if (absTick & 0x00080000 != 0) ratio = (ratio * 0xfdedd1b496a89f34c46757b38a53619a) >> 128;
-            if (absTick & 0x00100000 != 0) ratio = (ratio * 0xfbdfed6ce5f09c489da5ff395ecae2e7) >> 128;
-            if (absTick & 0x00200000 != 0) ratio = (ratio * 0xf7d0df730ad13bb8fe90d496d60fb6ea) >> 128;
-            if (absTick & 0x00400000 != 0) ratio = (ratio * 0xefe4b99bdcdaf5cb46561cf6948db912) >> 128;
-            if (absTick & 0x00800000 != 0) ratio = (ratio * 0xe0ccdeec2a94e111065895048dd333ca) >> 128;
-            if (absTick & 0x01000000 != 0) ratio = (ratio * 0xc5672a115506dadd3e2ad0c964dd9f37) >> 128;
-            if (absTick & 0x02000000 != 0) ratio = (ratio * 0x9837f0518db8a96f46ad23182e42f6f6) >> 128;
-            if (absTick & 0x04000000 != 0) ratio = (ratio * 0x5a827999fcef32422cbec4d9baa55f4f) >> 128;
-            if (absTick & 0x08000000 != 0) ratio = (ratio * 0x20000000000000000000000000000000) >> 128;
-            if (absTick & 0x10000000 != 0) ratio = (ratio * 0x04000000000000000000000000000000) >> 128;
-            if (absTick & 0x20000000 != 0) ratio = (ratio * 0x00100000000000000000000000000000) >> 128;
-            if (absTick & 0x40000000 != 0) ratio = (ratio * 0x00000100000000000000000000000000) >> 128;
-            if (absTick & 0x80000000 != 0) ratio = (ratio * 0x00000000000100000000000000000000) >> 128;
-
-            if (tick > 0) ratio = type(uint256).max / ratio;
-
-            // Convert Q128.128 to Q64.96 and round upward so the inverse mapping is stable.
-            uint256 shifted = ratio >> 32;
-            if (uint32(ratio) != 0) ++shifted;
-            sqrtPriceX96 = uint160(shifted);
-        }
-    }
-
     /// @notice Return the fractional Q128 price factor and binary divisor shift for a tick.
     /// @dev `price = factor / 2**shift`. The nearest integer exponent is used so ticks
     /// close to a lower boundary do not become dense six-nibble complements.
@@ -67,6 +16,8 @@ library TickMath32 {
         unchecked {
             int256 scaledTick = int256(tick) * 3;
             int256 integerExponent = scaledTick >> 26;
+            // Floor decomposition guarantees `0 <= fraction < 2**26`.
+            // forge-lint: disable-next-line(unsafe-typecast)
             uint256 fraction = uint256(scaledTick - (integerExponent << 26));
 
             if (fraction <= 0x2000000) {
@@ -80,6 +31,9 @@ library TickMath32 {
                 factor = _fractionFactor(0x4000000 - fraction);
             }
 
+            // The complete int32 tick domain maps integerExponent into [-96, 96], so the
+            // resulting divisor shift is in [32, 224] and is exactly representable in uint16.
+            // forge-lint: disable-next-line(unsafe-typecast)
             shift = uint16(uint256(128 - integerExponent));
         }
     }
