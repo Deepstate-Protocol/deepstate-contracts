@@ -90,6 +90,8 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     uint256 private constant _BPS_DENOMINATOR = 10_000;
     /// @dev Maximum fee rate: 100 bps = 1%.
     uint16 private constant _MAX_FEE_BPS = 100;
+    /// @dev Maximum gas forwarded to an optional hook. Matching must remain usable if a hook loops.
+    uint256 private constant _HOOK_GAS_LIMIT = 200_000;
     /// @dev High-bit domain separator for transient protocol fee slots.
     uint256 private constant _FEE_DELTA_DOMAIN = uint256(1) << 255;
     /// @dev Low 32-bit nonce mask duplicated here to avoid exposing the engine's private constant.
@@ -128,6 +130,8 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     error InvalidHook();
     /// @notice Fee config is invalid.
     error InvalidFeeConfig();
+    /// @notice A token delta cannot be represented in the signed settlement accumulator.
+    error DeltaOverflow();
 
     /// @notice Set deployer as owner.
     constructor() {
@@ -168,7 +172,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     {
         _requireSortedTokens(token0, token1);
 
-        uint256 activeFlags;
+        uint256 activeFlags = 0;
         if (token0Active) activeFlags |= _POOL_HOOK_TOKEN0_ACTIVE;
         if (token1Active) activeFlags |= _POOL_HOOK_TOKEN1_ACTIVE;
         if (activeFlags != 0 && hook == address(0)) revert InvalidHook();
@@ -379,6 +383,10 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
     /// negative token1; any resting bid collateral is also negative token1. For an ask, matched
     /// base is negative token0 and received quote is positive token1; any resting ask collateral is
     /// negative token0.
+    // Hook callbacks are reached only through `fill`, `fillRoute`, and `cancel`, all of which hold
+    // the transient reentrancy guard. The only unguarded mutators are owner-only configuration;
+    // a hook can call them only when the trusted owner deliberately makes the hook itself owner.
+    // slither-disable-start reentrancy-no-eth,reentrancy-benign
     function _executeFill(FillParams calldata params)
         private
         returns (bytes32 restingOrder, int256 token0Delta, int256 token1Delta)
@@ -402,8 +410,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
 
         if (params.isBid) {
             token0Delta = int256(uint256(baseFilled));
-            // forge-lint: disable-next-line(unsafe-typecast)
-            token1Delta = -int256(quoteAmount);
+            token1Delta = _debitDelta(0, quoteAmount);
 
             if (remaining != 0 && !params.noRest) {
                 restingOrder = _restRemaining(
@@ -419,14 +426,12 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
                     true
                 );
                 uint256 collateral = _quoteValue(limitPrice, remaining, true);
-                // forge-lint: disable-next-line(unsafe-typecast)
-                token1Delta -= int256(collateral);
+                token1Delta = _debitDelta(token1Delta, collateral);
             }
         } else {
             // forge-lint: disable-next-line(unsafe-typecast)
             token0Delta = -int256(uint256(baseFilled));
-            // forge-lint: disable-next-line(unsafe-typecast)
-            token1Delta = int256(quoteAmount);
+            token1Delta = _creditDelta(quoteAmount);
 
             if (remaining != 0 && !params.noRest) {
                 restingOrder = _restRemaining(
@@ -611,7 +616,7 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
 
         // forge-lint: disable-next-line(unsafe-typecast)
         uint32 nonce = uint32(nonceAndFlags);
-        uint256 bookHookFlags;
+        uint256 bookHookFlags = 0;
         if (poolState & _POOL_HOOK_ACTIVE_MASK != 0) bookHookFlags = _bookHookFlags(poolState);
         if (nonce == 0) {
             nonceAndFlags = uint256(type(uint32).max) | bookHookFlags;
@@ -677,8 +682,13 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         if (hook == address(0)) return;
 
         address token = isBid ? token0 : token1;
-        try IHook(hook).execute(pid, id, token, outgoingAmount, incomingNonce) {} catch {}
+        // A gas cap makes the best-effort guarantee meaningful for a hook that loops or otherwise
+        // consumes all gas. Reverts and out-of-gas inside this bounded call are intentionally ignored.
+        // slither-disable-next-line calls-loop
+        try IHook(hook).execute{gas: _HOOK_GAS_LIMIT}(pid, id, token, outgoingAmount, incomingNonce) {} catch {}
     }
+
+    // slither-disable-end reentrancy-no-eth,reentrancy-benign
 
     /// @notice Extract the active epoch from a packed pool state word.
     function _poolEpoch(uint256 poolState) private pure returns (uint256) {
@@ -814,6 +824,22 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         return false;
     }
 
+    /// @notice Convert an unsigned outgoing amount into a positive signed settlement delta.
+    function _creditDelta(uint256 amount) private pure returns (int256) {
+        if (amount > uint256(type(int256).max)) revert DeltaOverflow();
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return int256(amount);
+    }
+
+    /// @notice Subtract an unsigned incoming amount from a signed settlement delta.
+    function _debitDelta(int256 current, uint256 amount) private pure returns (int256) {
+        if (amount > uint256(type(int256).max)) revert DeltaOverflow();
+        // forge-lint: disable-next-line(unsafe-typecast)
+        int256 signedAmount = int256(amount);
+        if (current < type(int256).min + signedAmount) revert DeltaOverflow();
+        return current - signedAmount;
+    }
+
     /// @notice Settle route user deltas after all route legs have completed.
     /// @dev
     /// Positive deltas are paid first, then negative deltas are pulled. Since all route state
@@ -925,16 +951,27 @@ contract RoutingEngine is RadixMatchingEngine, Ownable {
         if (isBid) {
             if (token0Delta <= 0) return (token0Delta, token1Delta, 0);
             // forge-lint: disable-next-line(unsafe-typecast)
-            feeAmount = (uint256(token0Delta) * uint256(feeBps)) / _BPS_DENOMINATOR;
+            feeAmount = _feeAmount(uint256(token0Delta), feeBps);
             // forge-lint: disable-next-line(unsafe-typecast)
             nextToken0Delta = token0Delta - int256(feeAmount);
         } else {
             if (token1Delta <= 0) return (token0Delta, token1Delta, 0);
             // forge-lint: disable-next-line(unsafe-typecast)
-            feeAmount = (uint256(token1Delta) * uint256(feeBps)) / _BPS_DENOMINATOR;
+            feeAmount = _feeAmount(uint256(token1Delta), feeBps);
             // forge-lint: disable-next-line(unsafe-typecast)
             nextToken1Delta = token1Delta - int256(feeAmount);
         }
+    }
+
+    /// @dev Return `floor(amount * feeBps / 10_000)` without overflowing for signed-delta-sized amounts.
+    function _feeAmount(uint256 amount, uint16 feeBps) private pure returns (uint256 feeAmount) {
+        // This quotient/remainder decomposition is exactly equivalent to multiplying first, but it
+        // avoids overflowing when `amount` is near int256.max.
+        // slither-disable-next-line divide-before-multiply
+        uint256 whole = amount / _BPS_DENOMINATOR;
+        uint256 remainder = amount % _BPS_DENOMINATOR;
+        // `feeBps <= 100`: each multiplication is bounded even when `amount` is int256.max.
+        feeAmount = whole * uint256(feeBps) + (remainder * uint256(feeBps)) / _BPS_DENOMINATOR;
     }
 
     /// @notice Transient storage slot for protocol fees in one token.

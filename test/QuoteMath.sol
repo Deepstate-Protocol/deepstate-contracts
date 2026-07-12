@@ -18,20 +18,11 @@ library QuoteMath {
             let productHigh := sub(mm, add(productLow, lt(mm, productLow)))
             let remainder := 0
 
-            switch shift
-            case 0 {
-                if productHigh { revert(0, 0) }
-                quoteAmount := productLow
-            }
-            case 256 {
-                quoteAmount := productHigh
-                remainder := productLow
-            }
-            default {
-                if shr(shift, productHigh) { revert(0, 0) }
-                quoteAmount := or(shl(sub(256, shift), productHigh), shr(shift, productLow))
-                remainder := and(productLow, sub(shl(shift, 1), 1))
-            }
+            // TickMath32 proves `shift` is in [32, 224]. The high-half check keeps this
+            // deliberately slower oracle fail-closed if that domain contract ever changes.
+            if shr(shift, productHigh) { revert(0, 0) }
+            quoteAmount := or(shl(sub(256, shift), productHigh), shr(shift, productLow))
+            remainder := and(productLow, sub(shl(shift, 1), 1))
             if and(roundUp, iszero(iszero(remainder))) { quoteAmount := add(quoteAmount, 1) }
         }
     }
