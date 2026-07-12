@@ -30,6 +30,7 @@ contract ProductionReadinessERC20 is ERC20 {
 
 contract ProductionReadinessReproTest is Test {
     uint32 internal constant MAX_ORDER_NONCE = type(uint32).max;
+    uint256 internal constant BID_RIGHT_SPINE_DIRTY = uint256(1) << 32;
     bytes4 internal constant DELTA_OVERFLOW = bytes4(keccak256("DeltaOverflow()"));
     bytes4 internal constant INVALID_ORDER = bytes4(keccak256("InvalidOrder()"));
 
@@ -305,6 +306,57 @@ contract ProductionReadinessReproTest is Test {
         (, bytes32 bidRoot) = engine.roots(address(token0), address(token1), 0);
         assertEq(bidRoot, bytes32(0));
         assertEq(token1.balanceOf(address(engine)), 0);
+    }
+
+    function test_EmptyDirtyBidSideCannotAliasAskRootOnNextRest() public {
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+
+        vm.startPrank(alice);
+        bytes32 lowBid = engine.fill(_fill(0, _order(10, 1, 0), true, false, false));
+        bytes32 highBid = engine.fill(_fill(0, _order(11, 3, 0), true, false, false));
+
+        engine.fill(_fill(0, _order(11, 1, 0), false, true, false));
+        engine.cancel(address(token0), address(token1), 0, highBid);
+        engine.cancel(address(token0), address(token1), 0, lowBid);
+
+        bytes32 bookSlot = keccak256(abi.encode(id, uint256(0)));
+        assertEq(uint256(vm.load(address(engine), bookSlot)) & BID_RIGHT_SPINE_DIRTY, BID_RIGHT_SPINE_DIRTY);
+
+        bytes32 dustAsk = engine.fill(_fill(0, _order(1000, 1, 0), false, false, false));
+        vm.stopPrank();
+
+        (bytes32 askRootBefore, bytes32 bidRootBefore) = engine.roots(address(token0), address(token1), 0);
+        assertEq(askRootBefore, dustAsk);
+        assertEq(bidRootBefore, bytes32(0));
+
+        vm.prank(bob);
+        bytes32 victimBid = engine.fill(_fill(0, _order(9, 2, 0), true, false, false));
+
+        (bytes32 askRootAfter, bytes32 bidRootAfter) = engine.roots(address(token0), address(token1), 0);
+        assertEq(askRootAfter, dustAsk);
+        assertEq(bidRootAfter, victimBid);
+        assertEq(engine.ownerOfOrder(engine.orderId(id, victimBid)), bob);
+        assertTrue(engine.isBidOrder(engine.orderId(id, victimBid)));
+        assertEq(uint256(vm.load(address(engine), bookSlot)) & BID_RIGHT_SPINE_DIRTY, 0);
+    }
+
+    function test_EmptySideMaterializationNeverTraversesSharedRootAnchor() public {
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+
+        vm.prank(alice);
+        bytes32 dustAsk = engine.fill(_fill(0, _order(1000, 1, 0), false, false, false));
+
+        bytes32 bookSlot = keccak256(abi.encode(id, uint256(0)));
+        uint256 nonceAndFlags = uint256(vm.load(address(engine), bookSlot));
+        vm.store(address(engine), bookSlot, bytes32(nonceAndFlags | BID_RIGHT_SPINE_DIRTY));
+
+        vm.prank(bob);
+        bytes32 victimBid = engine.fill(_fill(0, _order(9, 2, 0), true, false, false));
+
+        (bytes32 askRoot, bytes32 bidRoot) = engine.roots(address(token0), address(token1), 0);
+        assertEq(askRoot, dustAsk);
+        assertEq(bidRoot, victimBid);
+        assertEq(uint256(vm.load(address(engine), bookSlot)) & BID_RIGHT_SPINE_DIRTY, 0);
     }
 
     function _fill(uint256 epoch, bytes32 order, bool isBid, bool noRest, bool fillOrKill)
