@@ -507,7 +507,9 @@ abstract contract RadixMatchingEngine {
     /// @dev
     /// Right-spine dirty flags are materialized before insertion on the same side. This preserves
     /// exact branch quantities for the insertion path while allowing earlier best-price fills to
-    /// avoid rewriting ancestors.
+    /// avoid rewriting ancestors. A side that becomes empty may conservatively retain its dirty
+    /// flag. `_materializeRightSpine` treats its zero root as an empty subtree, then the flag clear
+    /// is folded into the nonce decrement written below instead of consuming a standalone SSTORE.
     function _restBook(
         bytes32 bookId,
         Book storage book,
@@ -1286,8 +1288,11 @@ abstract contract RadixMatchingEngine {
     /// @param node Current subtree root.
     /// @return Exact subtree root.
     /// @dev Only the right spine can contain stable anchors. Left subtrees remain exact because the
-    /// optimization is used only for right-child updates.
+    /// optimization is used only for right-child updates. Node zero is the shared root anchor, not
+    /// a branch; treating it as an empty subtree prevents one side from aliasing the other root.
     function _materializeRightSpine(Book storage book, bytes32 node, bool isBid) private returns (bytes32) {
+        if (node == bytes32(0)) return bytes32(0);
+
         bytes32 leftNode = book.tree[node].leftNode;
         if (leftNode == bytes32(0)) return node;
 
