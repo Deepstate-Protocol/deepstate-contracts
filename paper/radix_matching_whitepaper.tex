@@ -31,7 +31,7 @@
 \DeclareMathOperator{\ceil}{ceil}
 
 \title{Formal Specification of a Radix Tree Limit Order Book}
-\author{Nigiri Contracts}
+\author{Radix Matching Contracts}
 \date{\today}
 
 \begin{document}
@@ -39,8 +39,8 @@
 \maketitle
 
 \begin{abstract}
-We formalize the radix tree limit order book implemented in the Nigiri
-contracts.  The protocol stores bids and asks as binary radix trees over
+We formalize a radix tree limit order book implementation.  The protocol
+stores bids and asks as binary radix trees over
 a fixed 64-bit price-time key.  Each node is one 32-byte word containing
 a signed 32-bit logarithmic tick, a 160-bit quantity, a 32-bit same-tick
 rounding-correction code, and a 32-bit nonce or path suffix.  Tick \(t\)

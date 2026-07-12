@@ -10,7 +10,7 @@ deployment should wait for an audit of the exact commit and compiler profile bei
 ## Reporting
 
 Report suspected vulnerabilities privately through a GitHub security advisory for
-`dangerousfood/nigiri-contracts`. Do not open a public issue containing an exploit or affected user
+this repository. Do not open a public issue containing an exploit or affected user
 data. Include the affected commit, reproduction steps, impact, and any proposed mitigation.
 
 ## Trust Model
