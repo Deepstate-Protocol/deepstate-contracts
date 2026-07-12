@@ -6,7 +6,6 @@
 \usepackage{array}
 \usepackage{enumitem}
 \usepackage{hyperref}
-\usepackage{xcolor}
 
 \hypersetup{
   colorlinks=true,
@@ -16,24 +15,23 @@
 }
 
 \newtheorem{definition}{Definition}
-\newtheorem{assumption}{Assumption}
-\newtheorem{invariant}{Invariant}
 \newtheorem{theorem}{Theorem}
 \newtheorem{lemma}{Lemma}
 \newtheorem{corollary}{Corollary}
+\newtheorem{assumption}{Assumption}
 \newtheorem{remark}{Remark}
 
-\DeclareMathOperator{\price}{price}
+\DeclareMathOperator{\tick}{tick}
 \DeclareMathOperator{\qty}{qty}
 \DeclareMathOperator{\nonce}{nonce}
+\DeclareMathOperator{\corr}{corr}
+\DeclareMathOperator{\key}{key}
 \DeclareMathOperator{\lcp}{lcp}
-\DeclareMathOperator{\rank}{rank}
-\DeclareMathOperator{\leftc}{left}
-\DeclareMathOperator{\rightc}{right}
-\DeclareMathOperator{\val}{val}
+\DeclareMathOperator{\floor}{floor}
+\DeclareMathOperator{\ceil}{ceil}
 
-\title{A Self-Addressing Radix Tree for On-Chain Limit Order Matching}
-\author{Radix Matching Research Note}
+\title{Formal Specification of a Radix Tree Limit Order Book}
+\author{Nigiri Contracts}
 \date{\today}
 
 \begin{document}
@@ -41,746 +39,946 @@
 \maketitle
 
 \begin{abstract}
-This paper specifies a compact on-chain limit order book whose storage
-state is a binary radix tree over a 64-bit price-time key.  Resting
-orders and internal aggregate nodes are represented by one 32-byte word:
-24 bits of price, 192 bits of quantity, and 40 bits of decrementing
-nonce.  The decrementing nonce gives earlier orders larger time-priority
-keys at a fixed price.  Two conceptual books, bids and asks, coexist in
-one mapping from node words to child pairs.  We formalize the node
-encoding, the bid and ask orderings, insertion, removal, matching, and
-claim/cancel semantics as a state transition system.  We then compare
-the computational complexity of the radix construction with classical
-price-tree order books, off-chain relay systems, and automated market
-makers.  The analysis distinguishes two variants.  The fully aggregated
-variant described in the Warp and Hanji materials stores both subtree
-quantity and subtree value and can decide large fills in a number of
-steps bounded by the fixed key width.  The strict one-word instantiation
-specified here stores quantity in the 192-bit aggregate field and
-therefore preserves compact storage while exact immediate quote
-settlement across mixed prices requires either leaf traversal or an
-additional value aggregate.  This distinction is material to the
-complexity theorem and is made explicit.
+We formalize the radix tree limit order book implemented in the Nigiri
+contracts.  The protocol stores bids and asks as binary radix trees over
+a fixed 64-bit price-time key.  Each node is one 32-byte word containing
+a signed 32-bit logarithmic tick, a 160-bit quantity, a 32-bit same-tick
+rounding-correction code, and a 32-bit nonce or path suffix.  Tick \(t\)
+represents the quote/base price \(2^{96t/2^{31}}\).  The complete tick
+domain spans \([2^{-96},2^{96})\), with \(2^{32}\) ticks and adjacent
+ticks separated by \(2^{96/2^{31}}\).  We specify the state transition
+system, integer quote calculation, rounding corrections, accounting
+invariants, nonce rollover, and computational bounds.
 \end{abstract}
 
-\section{Introduction}
+\section{Formal Overview}
 
-An open limit order book maintains two sets of resting orders.  A bid
-order offers quote asset for base asset up to a limit price; an ask order
-offers base asset for quote asset down to a limit price.  Price-time
-priority requires that more aggressive prices execute first and that
-orders at the same price execute in arrival order.  Electronic open
-limit order books have a substantial market-structure literature; for
-example, Glosten analyzes equilibrium price schedules in an open limit
-order book \cite{Glosten1994}.
+Consider a pair of ERC-20 tokens \((X,Y)\).  The token addresses are
+ordered by address, and the lower address is denoted \(X\), or
+\(\mathsf{token0}\).  The higher address is denoted \(Y\), or
+\(\mathsf{token1}\).  A bid buys \(X\) and pays \(Y\).  An ask sells
+\(X\) and receives \(Y\).
 
-The on-chain setting changes the data-structure problem.  A conventional
-matching engine may scan a sequence of price levels and FIFO queues.
-This is acceptable in a trusted low-latency server, but it is problematic
-on a smart-contract platform where every storage read and write is paid
-by a transaction and every transaction is subject to a gas limit.  Hybrid
-decentralized exchange systems such as 0x reduce on-chain work by
-relaying signed orders off-chain and settling matched orders on-chain
-\cite{ZeroExV2}.  Automated market makers avoid order matching entirely
-by trading against a pool according to a conservation function
-\cite{Xu2021,Angeris2020}.  These designs are important prior art, but
-they are not equivalent to a fully on-chain price-time-priority order
-book.
-
-The radix design considered here follows the direction publicly
-presented by Poon and Jeffrey for Warp and subsequently described in
-Hanji documentation: store orders in radix trees keyed by price and order
-number, and store aggregate fields in internal nodes so matching can be
-bounded by key depth rather than by the number of filled orders
-\cite{WarpVideo,EthCCWarp,HanjiMatching}.  The present paper gives a
-formal specification for a strict EVM-oriented node layout in which each
-resting node is one \texttt{bytes32} word:
+All quantities and prices in this paper are denominated in raw ERC-20
+units.  If \(X\) has \(d_X\) decimals and \(Y\) has \(d_Y\) decimals,
+then the displayed human price in units of \(Y\) per unit of \(X\) is
 \[
-  \underbrace{p}_{24\ \mathrm{bits}}
-  \;\Vert\;
-  \underbrace{q}_{192\ \mathrm{bits}}
-  \;\Vert\;
-  \underbrace{n}_{40\ \mathrm{bits}} .
+  P_{\mathrm{human}}(t)=P(t)10^{d_X-d_Y}.
 \]
-The goal is not to replace a line-by-line audit.  Rather, the goal is to
-state the mathematical objects precisely enough that implementation
-claims, invariant tests, and gas measurements can be evaluated against a
-common model, in the style of prior formal DeFi specifications such as
-the Runtime Verification treatment of the constant-product market maker
-\cite{Zhang2018}.
+The contracts do not query token decimals and do not rescale token
+transfers.
 
-\paragraph{Contributions.}
-This note makes four contributions.
+The protocol state is divided into books.  A book is identified by
+\[
+  \mathsf{bookId} = H(X,Y,e),
+\]
+where \(H\) is \(\mathtt{keccak256}\) and \(e\) is the pool epoch.  Each
+book contains two conceptual radix trees, one for bids and one for asks.
+The two trees share one mapping from node words to branch children.
+
+The engine exposes three state-changing classes of operations:
 \begin{enumerate}[label=(\roman*)]
-  \item It specifies a self-addressing one-word node encoding and
-  side-dependent radix orderings for bids and asks.
-  \item It gives state-transition definitions for insertion, matching,
-  cancel, and filled-order claim.
-  \item It proves fixed-depth bounds for insertion and removal and gives
-  conditional bounds for fully aggregated matching.
-  \item It identifies the exact condition under which aggregate matching
-  is logarithmic: the contract state must contain enough aggregate
-  information to compute both the base quantity and quote value of a
-  removed subtree.
+  \item fill one incoming order against one routed book;
+  \item fill a sequence of routed orders and settle each touched token
+  once at the end of the route;
+  \item cancel a live order or claim the proceeds of a filled order.
 \end{enumerate}
 
-\section{Related Work}
+Fills may leave unmatched quantity.  If resting is permitted, the
+unmatched quantity is inserted into the active book for the pair.  If the
+routed book has nonce space, the routed book is restable.  Otherwise the
+active pool epoch determines the restable book.  When a book reaches
+nonce \(1\), it remains matchable and cancelable, but new resting orders
+move to the next epoch.
 
-\paragraph{Classical limit order books.}
-The standard engineering model for a high-performance order book stores
-price levels in a balanced search tree and stores orders at each price
-level in a FIFO list.  Selph's widely circulated note describes this
-design and the usual operations of add, cancel, and execute
-\cite{Selph2011}.  This family of designs can provide efficient local
-updates in an in-memory engine, but a market order that crosses many
-price levels or many resting orders still exposes work proportional to
-the number of consumed orders or levels.  In a smart contract, that
-linear work becomes a direct gas-boundedness problem.
+\begin{definition}[Identifier encoding]
+Let \(\mathrm{word}(a)\) denote the 32-byte EVM word containing address
+\(a\) left-padded to 32 bytes, and let \(\mathrm{word}(e)\) denote the
+32-byte unsigned integer encoding of epoch \(e\).  The pool and book
+identifiers are
+\[
+  \mathsf{poolId}=H(\mathrm{word}(X)\Vert\mathrm{word}(Y)),
+\]
+and
+\[
+  \mathsf{bookId}=H(\mathrm{word}(X)\Vert\mathrm{word}(Y)\Vert
+  \mathrm{word}(e)).
+\]
+The initial epoch is \(0\).  Epochs increase by one when the active book
+has assigned its last restable nonce.
+\end{definition}
 
-\paragraph{Radix trees.}
-Radix trees store keys by successive key fragments rather than by
-comparison with whole keys.  Patricia tries and adaptive radix trees are
-standard examples of path-compressed radix structures
-\cite{Morrison1968,Leis2013}.  For fixed-width integer keys, the height
-of a binary radix tree is bounded by the key width.  This property is
-well suited to an EVM design where a 64-bit key can be traversed in at
-most 64 branch decisions.  Persistent-memory work also observes that the
-radix structure is determined by key prefixes and does not require
-rotations or rebalancing \cite{Lee2017}.
+\begin{remark}[Specification boundary]
+This paper specifies the mathematical state machine and arithmetic
+contracts.  It does not reproduce every hexadecimal constant used by the
+tick conversion library.  The byte-exact implementation of
+\(\widehat{P}(t)\) is the Solidity library \(\mathtt{TickMath32}\);
+generated vectors and an independent high-precision decimal oracle are
+the conformance tests for that implementation.
+\end{remark}
 
-\paragraph{On-chain exchange alternatives.}
-0x uses off-chain order relay with on-chain settlement: signed orders
-are broadcast outside the blockchain and are submitted to a settlement
-contract by a counterparty when execution is desired \cite{ZeroExV2}.
-DutchX used a Dutch-auction mechanism rather than a continuous order book
-\cite{DutchXDocs}.  AMM protocols replace bilateral order matching with
-pool-based trading governed by an invariant or conservation function;
-the AMM literature includes both formal specifications and systematized
-surveys \cite{Zhang2018,Xu2021}.  Uniswap v3 adds concentrated
-liquidity to the constant-product model, increasing capital efficiency
-relative to uniform liquidity over the entire price range
-\cite{UniswapV3}.  These designs show that on-chain exchange is possible
-when the on-chain state transition is kept bounded, but they make
-different tradeoffs from a price-time-priority order book.
-
-\paragraph{Warp and Hanji logarithmic matching.}
-The Warp presentation by Poon and Jeffrey introduced an EVM-oriented
-logarithmic matching engine based on radix trees and aggregate internal
-nodes \cite{WarpVideo,EthCCWarp}.  Hanji's documentation describes the
-same high-level mechanism: separate bid and ask radix trees, a
-price-plus-order-number key, internal nodes containing subtree sums, and
-a 64-bit key giving a maximum height of 64 and an execution bound of up
-to 127 steps \cite{HanjiMatching}.  The present work formalizes a
-closely related self-addressing storage layout with a stricter one-word
-node representation.
-
-\section{Notation and Encoding}
+\section{Node Encoding}
 
 Let
 \[
-  P = \{1,\ldots,2^{24}-1\}, \qquad
-  Q = \{1,\ldots,2^{192}-1\}, \qquad
-  N = \{0,\ldots,2^{40}-1\}.
+  T = \{-2^{31},\ldots,2^{31}-1\},
+  \qquad
+  Q = \{0,\ldots,2^{160}-1\},
+  \qquad
+  N = \{0,\ldots,2^{32}-1\}.
 \]
-The value \(p=0\) is excluded for valid external orders.  The nonce is
-assigned by the contract and decreases from \(2^{40}-1\).  Thus, at a
-fixed price, an earlier order has a larger nonce.
 
-\begin{definition}[Order word]
-For \(p \in P\), \(q \in Q\), and \(n \in N\), define
+\begin{definition}[Packed node]
+For \(t\in T\), \(q\in Q\), \(c\in N\), and \(n\in N\), define
 \[
-  W(p,q,n) = p 2^{232} + q 2^{40} + n .
+  W(t,q,c,n)
+    = (u_{32}(t) \ll 224) + (q \ll 64) + (c \ll 32) + n,
 \]
-The corresponding field extractors are
+where \(u_{32}(t)\) is the two's-complement 32-bit representation of
+\(t\).  The field projections are
 \[
-  \price(W)=p,\qquad \qty(W)=q,\qquad \nonce(W)=n.
+  \tick(W)=t,\qquad \qty(W)=q,\qquad
+  \corr(W)=c,\qquad \nonce(W)=n.
 \]
 \end{definition}
 
-\begin{definition}[Path and sort keys]
-The raw path key of a node is
-\[
-  \kappa(W) = \price(W)2^{40} + \nonce(W).
-\]
-The side-dependent sort keys are
-\[
-  \kappa_B(W) = \price(W)2^{40}+\nonce(W)
-\]
-for bids and
-\[
-  \kappa_A(W) = (2^{24}-1-\price(W))2^{40}+\nonce(W)
-\]
-for asks.
+\begin{definition}[Valid incoming order]
+An incoming order is a word \(W(t,q,0,0)\) with \(q>0\).  The caller
+chooses \(t\) and \(q\).  The correction field and nonce field must be
+zero.
 \end{definition}
 
-The bid key orders larger prices to the right.  The ask key reverses
-price so that lower ask prices also move to the right.  In both books,
-larger nonce means earlier time priority and therefore higher rank at a
-fixed price.  The result is that the best executable liquidity is found
-by traversing the right side of either tree.
-
-\begin{definition}[Side key]
-The zero-quantity side key associated with an order is
+\begin{definition}[Resting order]
+A resting order is a word \(W(t,q,0,n)\) with \(q>0\) and
 \[
-  \sigma(W(p,q,n)) = W(p,0,n).
+  2 \le n \le 2^{32}-1.
 \]
-It is used as a compact side marker for filled resting orders.  It is not
-a valid external order because external orders require nonzero quantity.
+The contract assigns \(n\) from the book's decrementing nonce.
 \end{definition}
 
-\section{Radix Tree Model}
-
-Each book is a binary Patricia-style radix tree over a 64-bit sort key.
-Leaves are order words.  Internal nodes are also represented by one
-32-byte word and are used as storage addresses into a single mapping
-\[
-  \mathsf{tree}: \{0,1\}^{256} \to
-  \{(\mathsf{leftNode},\mathsf{rightNode})\}.
-\]
-The two conceptual trees coexist in this mapping because their roots are
-separate variables and reachability is defined from the corresponding
-root.
-
-\begin{definition}[Common prefix and branch depth]
-For 64-bit keys \(x,y\), let
-\[
-  \lcp(x,y) = \min\{d \in \{0,\ldots,63\}: x_d \ne y_d\},
-\]
-where bit \(0\) is the most significant bit.  If \(x=y\), define
-\(\lcp(x,y)=64\).  A valid branch has children with distinct keys, so its
-branch depth is \(d<64\).
+\begin{definition}[Branch node]
+A nonzero word \(W(t,q,c,n)\) is a branch node when it has a nonzero left
+child in the book's tree mapping.  The zero word is reserved as a root
+anchor and is not a branch even when one of its root pointers is
+nonzero.  For an exact branch, the quantity field \(q\) is the aggregate
+base quantity represented by the subtree.  The pair \((t,n)\) is the
+raw address path suffix of the branch.  The correction field is nonzero
+only for same-tick aggregate branches.
 \end{definition}
 
-\begin{definition}[Branch ordering]
-For side \(s \in \{A,B\}\) and branch children \(L,R\), let
+The packed word has the following field layout:
 \[
-  d = \lcp(\kappa_s(L),\kappa_s(R)).
+\begin{array}{c|c|c|c}
+\text{bits }224\ldots255 & \text{bits }64\ldots223
+  & \text{bits }32\ldots63 & \text{bits }0\ldots31 \\
+\hline
+\text{signed tick} & \text{quantity} & \text{correction code}
+  & \text{nonce/path}
+\end{array}
 \]
-The child with bit \(0\) at depth \(d\) is the left child, and the child
-with bit \(1\) at depth \(d\) is the right child.
-\end{definition}
 
-\begin{definition}[One-word branch address]
-For children \(L,R\), define the branch quantity and raw boundary key by
+The word size is fixed at 256 bits.  The radix key is fixed at 64 bits:
+32 bits of sortable tick and 32 bits of nonce.
+
+\section{Tick Price Model}
+
+\subsection{Real Arithmetic Model}
+
+\begin{definition}[Mathematical tick price]
+For \(t\in T\), define
 \[
-  Q(L,R) = \qty(L)+\qty(R),\qquad
-  b(L,R) = \max\{\kappa(L),\kappa(R)\}.
-\]
-The branch address is
-\[
-  \mathsf{br}(L,R) =
-  W\!\left(\left\lfloor b(L,R)/2^{40}\right\rfloor,\,
-           Q(L,R),\,
-           b(L,R) \bmod 2^{40}\right).
+  P(t) = 2^{96t/2^{31}}.
 \]
 \end{definition}
 
-This address is self-describing in the same bit layout as an order.  The
-price and nonce fields encode the raw boundary key; the quantity field
-encodes the aggregate base quantity of the two child subtrees.  No
-additional branch nonce, tag, or namespace is introduced.
-
-\begin{invariant}[Well-formed branch]
-A reachable branch node \(X\) is well formed if
+The minimum tick is
 \[
-  X = \mathsf{br}(L,R), \qquad
-  \mathsf{tree}[X] = (L,R),
+  P(-2^{31}) = 2^{-96}.
 \]
-and \(L,R\) are nonzero reachable nodes satisfying the branch ordering
-for the side of the root from which \(X\) is reached.
-\end{invariant}
-
-\begin{invariant}[Aggregate quantity]
-Let \(\mathcal{L}(X)\) be the multiset of leaves below a reachable node
-\(X\).  The quantity field of \(X\) satisfies
+The maximum tick is
 \[
-  \qty(X) = \sum_{Y \in \mathcal{L}(X)} \qty(Y).
+  P(2^{31}-1) = 2^{96-96/2^{31}} < 2^{96}.
 \]
-\end{invariant}
+The adjacent-tick ratio is constant:
+\[
+  \frac{P(t+1)}{P(t)} = 2^{96/2^{31}}.
+\]
+Thus the relative tick spacing is
+\[
+  2^{96/2^{31}}-1 \approx 3.09861\cdot 10^{-8},
+\]
+or approximately \(0.000309861\) basis points.
 
-\begin{remark}
-The self-addressing construction moves structural information into the
-node word itself.  Correctness therefore depends on the reachable-tree
-invariants, not on a separate branch identifier.  Implementations should
-test that every reachable branch is two-child, ordered by the appropriate
-side key, and has a quantity equal to the sum of reachable leaves.
+\begin{theorem}[Quote range]
+For every \(t\in T\) and \(q\in Q\),
+\[
+  0 \le qP(t) < 2^{256}.
+\]
+\end{theorem}
+
+\begin{proof}
+By definition, \(q < 2^{160}\) and \(P(t)<2^{96}\).  Therefore
+\[
+  qP(t) < 2^{160}2^{96}=2^{256}.
+\]
+\end{proof}
+
+\subsection{Integer Price Code}
+
+The implementation does not evaluate \(P(t)\) with real arithmetic.
+Instead, it computes a normalized integer factor \(F(t)\) and a shift
+\(S(t)\) such that
+\[
+  \widehat{P}(t)=\frac{F(t)}{2^{S(t)}}.
+\]
+The implemented bounds are
+\[
+  2^{127} \le F(t) < 2^{129},
+  \qquad
+  32 \le S(t) \le 224.
+\]
+For \(t=0\), \(F(t)=2^{128}\), \(S(t)=128\), and
+\(\widehat{P}(0)=1\).
+
+The tick conversion decomposes \(96t/2^{31}\) into an integer exponent
+and a fractional exponent.  Constants encode negative fractional powers
+in Q128.  The implementation composes the fractional factor by nibbles
+and then chooses a shift so that the factor remains normalized.
+
+The implementation-level conformance condition is:
+\[
+  \widehat{P}(t)=F(t)2^{-S(t)}
+\]
+with \(F(t)\) and \(S(t)\) equal to the values returned by
+\(\mathtt{TickMath32.getPriceFactorAtTick}(t)\).  The generated test
+vectors allow at most 64 units of error in the Q128 factor relative to
+the independent decimal oracle.  Settlement uses the integer
+\(\widehat{P}\) exactly; it does not use the real-valued \(P\) at
+runtime.
+
+\begin{remark}[Reference oracle]
+The repository includes an independent differential oracle for this
+conversion.  The oracle uses Python decimal arithmetic with precision
+180 and computes \(2^{96t/2^{31}}\) directly from \(\ln 2\).  It also
+checks that generated Solidity vectors, boundary ticks, sampled
+exponent boundaries, random ticks, monotonicity, factor normalization,
+and shift bounds agree with the independent calculation within the
+configured Q128 unit bound.  This is an implementation check, not a
+replacement for the mathematical definition above.
 \end{remark}
 
-\section{State Transition System}
+\section{Integer Quote Functions}
 
-The exchange state is
+Let \(F=F(t)\) and \(S=S(t)\).  For an integer quantity \(q\), define
 \[
-  S = (T_B,T_A,O,\nu,C_B,C_Q),
+  M(t,q) = \frac{qF}{2^S}.
 \]
-where \(T_B\) and \(T_A\) are the bid and ask roots, \(O\) is the
-owner-of-order mapping, \(\nu\) is the next nonce, and \(C_B,C_Q\) are
-contract balances of base and quote tokens.  Token balances of external
-accounts are omitted except when required for conservation statements.
 
-\subsection{Insertion}
-
-An external order must have nonce field zero.  If it rests, the contract
-assigns nonce \(\nu\), then decrements \(\nu\).
-
-\begin{definition}[Resting bid]
-For \(p \in P\), \(r \in Q\), and \(\nu>0\), define
+\begin{definition}[Rounded quote]
+The bid-side rounded quote is
 \[
-  X = W(p,r,\nu).
+  Q^{+}(t,q)=\lceil M(t,q)\rceil .
 \]
-The resting bid transition inserts \(X\) into \(T_B\) according to key
-\(\kappa_B(X)\), sets \(O[X]\) to the trader, and sets \(\nu'=\nu-1\).
+The ask-side rounded quote is
+\[
+  Q^{-}(t,q)=\lfloor M(t,q)\rfloor .
+\]
 \end{definition}
 
-\begin{definition}[Resting ask]
-The resting ask transition is identical except that \(X\) is inserted
-into \(T_A\) according to \(\kappa_A(X)\).
+The implementation computes these values by a 512-bit product
+\[
+  qF = H2^{256}+L
+\]
+and a right shift by \(S\).  The value \(Q^{+}\) adds one iff the
+discarded low bits are nonzero.  The value \(Q^{-}\) does not add this
+unit.
+
+\begin{definition}[Same-tick difference]
+For \(q_1\ge q_2\), define
+\[
+  D^{+}(t,q_1,q_2)=Q^{+}(t,q_1)-Q^{+}(t,q_2),
+\]
+and
+\[
+  D^{-}(t,q_1,q_2)=Q^{-}(t,q_1)-Q^{-}(t,q_2).
+\]
 \end{definition}
 
-\begin{lemma}[Insertion depth]
-Let \(h=64\).  Inserting a new leaf into a well-formed binary radix tree
-over 64-bit keys touches at most \(h\) branch depths before either
-finding an empty root, splitting a leaf, or descending into one child.
+These difference functions are used for partial fills and cancel
+payouts.  They make repeated partial fills telescope exactly.
+
+\begin{theorem}[Telescoping]
+Let
+\[
+  q_0 \ge q_1 \ge \cdots \ge q_m .
+\]
+For either rounding direction \(r\in\{+,-\}\),
+\[
+  \sum_{i=1}^{m} D^{r}(t,q_{i-1},q_i)
+    = Q^{r}(t,q_0)-Q^{r}(t,q_m).
+\]
+\end{theorem}
+
+\begin{proof}
+The sum is
+\[
+  \sum_{i=1}^{m}\bigl(Q^{r}(t,q_{i-1})-Q^{r}(t,q_i)\bigr),
+\]
+which cancels adjacent terms.
+\end{proof}
+
+\section{Same-Tick Correction Code}
+
+If a branch contains only one tick, the protocol can represent the exact
+sum of leaf-level rounded quotes without storing a second aggregate
+word.  The 32-bit correction field stores the difference between
+rounding the aggregate quantity once and summing the already rounded
+children.
+
+\begin{definition}[Uniform branch]
+A branch \(X\) is uniform if every leaf below it has the same tick
+\(t\).  Leaves are uniform.  A branch with nonzero correction code is
+uniform.
+\end{definition}
+
+\begin{definition}[Uniform quote]
+For a uniform subtree \(X\), let \(L(X)\) be the multiset of live leaves
+below \(X\), and let
+\[
+  q_X=\sum_{Y\in L(X)}\qty(Y).
+\]
+For a bid subtree, define
+\[
+  U^{+}(X)=\sum_{Y\in L(X)} Q^{+}(\tick(X),\qty(Y)).
+\]
+For an ask subtree, define
+\[
+  U^{-}(X)=\sum_{Y\in L(X)} Q^{-}(\tick(X),\qty(Y)).
+\]
+\end{definition}
+
+\begin{definition}[Correction]
+For a bid uniform branch, the stored correction is
+\[
+  C^{+}(X)=U^{+}(X)-Q^{+}(\tick(X),q_X).
+\]
+For an ask uniform branch, the stored correction is
+\[
+  C^{-}(X)=Q^{-}(\tick(X),q_X)-U^{-}(X).
+\]
+The branch stores \(\corr(X)=C^{r}(X)+1\).  A zero correction code means
+that the node is either a leaf or a mixed-tick branch.
+\end{definition}
+
+\begin{lemma}[Correction is nonnegative]
+For a uniform bid branch, \(C^{+}(X)\ge 0\).  For a uniform ask branch,
+\(C^{-}(X)\ge 0\).
 \end{lemma}
 
 \begin{proof}
-At each non-leaf step, the algorithm compares the new key with the
-children's common-prefix depth and either creates a new branch at the
-first earlier disagreement or descends to the child selected by the next
-key bit.  The depth strictly increases along a descent and cannot exceed
-63 for distinct 64-bit keys.  Therefore there are at most 64 branch
-decisions.
+For real numbers \(a,b\),
+\[
+  \lceil a\rceil+\lceil b\rceil \ge \lceil a+b\rceil,
+\]
+and
+\[
+  \lfloor a+b\rfloor \ge \lfloor a\rfloor+\lfloor b\rfloor .
+\]
+The result follows by induction over the leaves in the subtree.
 \end{proof}
 
-\subsection{Matching Semantics}
-
-Let \(\mathsf{rank}_B\) order bids by descending price and descending
-nonce, and let \(\mathsf{rank}_A\) order asks by ascending price and
-descending nonce.  In either book, the radix rightmost order has the best
-rank under its side ordering.
-
-\begin{definition}[Crossing predicate]
-A bid with limit price \(p\) crosses an ask leaf \(Y\) if
+\begin{lemma}[Correction bound]
+If a uniform branch has \(m\) leaves, then
 \[
-  \price(Y) \le p.
+  0\le C^{r}(X)\le m-1.
 \]
-An ask with limit price \(p\) crosses a bid leaf \(Y\) if
+\end{lemma}
+
+\begin{proof}
+Each time two rounded components are aggregated, the difference between
+rounding separately and rounding once is at most one integer unit for
+the ceiling case and at most one integer unit for the floor case.  Since the
+branch has \(m\) leaves, at most \(m-1\) binary aggregations contribute
+integer units to the stored correction.
+\end{proof}
+
+Since one book can assign at most \(2^{32}-2\) resting nonces,
 \[
-  \price(Y) \ge p.
+  C^{r}(X)+1 \le 2^{32}-1.
+\]
+The correction code therefore fits in 32 bits.
+
+\section{Radix Keys and Branches}
+
+The raw path key of a node is
+\[
+  K(W)=\bigl(u_{32}(\tick(W))\oplus 2^{31}\bigr)2^{32}+\nonce(W).
+\]
+This converts signed ticks into unsigned sortable ticks.
+
+The bid sort key is
+\[
+  K_B(W)=K(W).
+\]
+The ask sort key is
+\[
+  K_A(W)=\bigl(2^{32}-1-(u_{32}(\tick(W))\oplus 2^{31})\bigr)2^{32}
+    +\nonce(W).
+\]
+Thus the rightmost bid is the highest tick and earliest nonce, and the
+rightmost ask is the lowest tick and earliest nonce.
+
+\begin{definition}[Branch split]
+For two distinct sort keys \(a,b\), define
+\[
+  \lcp(a,b)=\min\{d\in\{0,\ldots,63\}:a_d\ne b_d\},
+\]
+where \(d=0\) is the most significant bit.  The child with bit \(0\) at
+depth \(d\) is the left child.  The child with bit \(1\) at depth \(d\)
+is the right child.
+\end{definition}
+
+\begin{definition}[Self-addressed branch]
+Let \(A,B\) be nonzero child nodes.  Let
+\[
+  q=\qty(A)+\qty(B)
+\]
+and
+\[
+  k=\max\{K(A),K(B)\}.
+\]
+If the children are uniform with the same tick, let \(c\) be the
+correction code defined above.  Otherwise let \(c=0\).  The branch word
+is
+\[
+  \mathsf{branch}(A,B)=W(t_k,q,c,n_k),
+\]
+where \(t_k\) and \(n_k\) are the tick and low nonce fields encoded by
+the raw key \(k\).
+\end{definition}
+
+The child pointers are stored in
+\[
+  \mathsf{tree}[\mathsf{branch}(A,B)] = (L,R).
+\]
+Except for the zero root anchor, a node is a branch iff its stored left
+child is nonzero.  A branch word may numerically equal a possible order
+word.  Ownership is not keyed by the branch word alone; it is keyed by
+\(\mathsf{keccak256}(\mathsf{bookId},\) original order word\()\).
+Branch structure is keyed by reachability in the book's tree mapping.
+Cancel and claim search by the 64-bit side sort key \((\tick,\nonce)\),
+not by equality with the original 256-bit order word, because a partial
+fill changes the live quantity while preserving the order's time key.
+
+\section{Book State}
+
+\begin{definition}[Book]
+A book has state
+\[
+  B=(\nu,f,T,O),
+\]
+where \(\nu\in N\) is the low 32-bit next nonce, \(f\) is a set of
+book-local flags, \(T\) is the branch mapping, and \(O\) is the owner
+mapping shared by all books.
+\end{definition}
+
+The zero node is reserved as the root anchor:
+\[
+  T[0].\mathsf{leftNode}=A_0,\qquad T[0].\mathsf{rightNode}=B_0,
+\]
+where \(A_0\) is the ask root and \(B_0\) is the bid root.
+
+The low 32 bits of the packed book word are \(\nu\).  A book with
+\(\nu=0\) is uninitialized.  A book with \(\nu=1\) is exhausted for new
+resting orders.  It remains valid for matching and cancellation.
+
+The flags \(f\) include bid and ask right-spine dirty flags and optional
+hook activation flags.  If a side's right-spine dirty flag is clear,
+every reachable branch on that side is exact.  If the flag is set,
+reachable branch words on the global right spine may have stale
+quantity, path, or correction fields, but their child pointers remain
+authoritative.  Off-spine branches remain exact.  Before same-side
+insertion, the dirty right spine is materialized into exact aggregate
+branches.
+
+\begin{definition}[Order id]
+The owner key for an order word \(X\) in book \(b\) is
+\[
+  \mathsf{orderId}(b,X)=H(b,X).
+\]
+The owner state is
+\[
+  O[\mathsf{orderId}(b,X)]=(\mathsf{owner},\mathsf{isBid}).
 \]
 \end{definition}
 
-\begin{definition}[Leaf fill]
-Let an incoming order have remaining base quantity \(r\), and let \(Y\)
-be a crossing resting leaf.  The fill amount is
+\section{State Transition System}
+
+\subsection{Rest}
+
+\begin{definition}[Rest code]
+Let the selected restable book have next nonce \(\nu\).  If \(\nu=0\),
+the router initializes that book by setting \(\nu=2^{32}-1\) and copying
+the active hook flags.  If \(\nu\le 1\) after restable-book resolution,
+rest reverts.  Otherwise, for an incoming order \(W(t,q,0,0)\), the
+resting order is
 \[
-  \delta = \min\{r,\qty(Y)\}.
+  X=W(t,q,0,\nu).
 \]
-The remaining incoming quantity becomes \(r-\delta\).  The resting leaf
-is removed if \(\delta=\qty(Y)\) and is replaced by
+The next nonce becomes \(\nu-1\), the owner entry
 \[
-  W(\price(Y), \qty(Y)-\delta, \nonce(Y))
+  O[H(\mathsf{bookId},X)]
 \]
-otherwise.  The quote value of the fill is
+is set to the maker and side, and \(X\) is inserted into the
+corresponding radix tree.
+\end{definition}
+
+If the new nonce is \(1\), the router initializes the next epoch for the
+pool.  The old book is not modified except for hook-flag handling and
+remains matchable and cancelable.
+
+Resting is valid only if the quote collateral or claim represented by
+the order is at most \(\mathtt{int256.max}\).  This is a settlement-layer
+bound: aggregate mathematical quotes fit below \(2^{256}\), but signed
+route deltas must fit in \(\mathtt{int256}\).
+
+\subsection{Leaf Match}
+
+\begin{definition}[Ask leaf fill]
+An incoming bid at limit tick \(t_b\) crosses an ask leaf \(Y\) iff
 \[
-  \val(Y,\delta)=\price(Y)\delta .
+  \tick(Y)\le t_b.
+\]
+If the incoming remaining quantity is \(r\), the filled base quantity is
+\[
+  \delta=\min\{r,\qty(Y)\}.
+\]
+If the leaf is fully consumed, the quote value is
+\[
+  Q^{-}(\tick(Y),\qty(Y)).
+\]
+If the leaf is partially consumed to remaining quantity
+\(q'=\qty(Y)-\delta\), the quote value is
+\[
+  D^{-}(\tick(Y),\qty(Y),q').
 \]
 \end{definition}
+
+\begin{definition}[Bid leaf fill]
+An incoming ask at limit tick \(t_a\) crosses a bid leaf \(Y\) iff
+\[
+  \tick(Y)\ge t_a.
+\]
+The filled base quantity is
+\[
+  \delta=\min\{r,\qty(Y)\}.
+\]
+If the leaf is fully consumed, the quote value is
+\[
+  Q^{+}(\tick(Y),\qty(Y)).
+\]
+If the leaf is partially consumed to remaining quantity \(q'\), the
+quote value is
+\[
+  D^{+}(\tick(Y),\qty(Y),q').
+\]
+\end{definition}
+
+If \(\delta<\qty(Y)\), the live leaf is replaced by
+\[
+  W(\tick(Y),\qty(Y)-\delta,0,\nonce(Y)).
+\]
+The owner mapping remains keyed by the original full-quantity order.
+The replacement is propagated upward.  A parent with two surviving
+children is rewritten as the self-addressed branch for those children.
+A parent with one surviving child collapses to that child.  Obsolete
+mapping entries may remain in storage, but they are unreachable from the
+side root and therefore are not part of the live book.
+
+\subsection{Subtree Match}
+
+Matching descends through the right child first.  That child is the best
+side for both bid and ask books under the side-specific keys.
+
+A same-tick subtree can be consumed as one aggregate if its whole
+quantity fits and its tick crosses the incoming limit.  Its quote value
+is obtained from the aggregate quantity and the correction code.  A
+mixed-tick off-spine subtree can be structurally removed as one subtree
+when its whole quantity fits and its worst executable leaf crosses the
+incoming limit.  The worst executable leaf is the leftmost leaf in the
+side-specific radix ordering.  For an ask subtree, the condition is that
+the highest ask in the subtree is at most the incoming bid limit.  For a
+bid subtree, the condition is that the lowest bid in the subtree is at
+least the incoming ask limit.  The packed tick of a mixed branch is only
+an address suffix and is not a crossing bound.  The exact quote value of
+a mixed subtree is computed by recursively summing children.  Uniform
+children terminate this quote recursion in constant time through their
+correction code.
 
 \begin{definition}[Linear reference semantics]
-For a bid taker, list ask leaves in increasing price and decreasing
-nonce at equal price:
-\[
-  A_1,A_2,\ldots,A_m .
-\]
-The reference match consumes the longest prefix, possibly followed by
-one partial leaf, such that every consumed leaf crosses the bid limit and
-the total consumed quantity does not exceed the incoming quantity.  Ask
-takers are defined symmetrically over bid leaves in decreasing price and
-decreasing nonce at equal price.
+For a bid taker, sort ask leaves by increasing tick and then decreasing
+nonce.  For an ask taker, sort bid leaves by decreasing tick and then
+decreasing nonce.  The reference match consumes the longest prefix of
+crossing leaves, possibly followed by one partial leaf, whose total base
+quantity does not exceed the incoming quantity.
 \end{definition}
 
-The radix implementation is correct if its right-first traversal
-produces the same consumed sequence as the linear reference semantics.
-
 \begin{theorem}[Price-time priority]
-For a well-formed bid or ask tree, right-first traversal by the
-side-dependent sort key visits crossing leaves in the same price-time
-order as the linear reference semantics.
+For a well-formed book, the right-first radix traversal consumes leaves
+in the same order as the linear reference semantics.
 \end{theorem}
 
 \begin{proof}
-For bids, the sort key is \(\price 2^{40}+\nonce\).  Thus larger price
-sorts right of smaller price, and at equal price larger nonce sorts
-right of smaller nonce.  For asks, the sort key replaces \(\price\) with
-\(2^{24}-1-\price\), so smaller price sorts right of larger price, while
-the nonce ordering is unchanged.  A binary radix tree preserves sorted
-order under in-order traversal; therefore right-first traversal produces
-descending sort-key order, which is exactly price-time priority for the
-corresponding side.
+For bids, \(K_B\) orders larger ticks to larger keys and preserves
+larger nonce as earlier priority at the same tick.  For asks, \(K_A\)
+reverses the tick order and preserves the nonce order.  A binary radix
+tree ordered by these keys has the rightmost leaf as the maximum key.
+Right-first traversal therefore enumerates best price first and earlier
+nonce first at equal price.
 \end{proof}
+
+\begin{corollary}[Best executable price]
+Let \(Y_i\) and \(Y_j\) be two resting leaves consumed by one match, with
+\(Y_i\) consumed before \(Y_j\).  If the incoming order is a bid, then
+\[
+  \tick(Y_i) \le \tick(Y_j).
+\]
+If the incoming order is an ask, then
+\[
+  \tick(Y_i) \ge \tick(Y_j).
+\]
+At equal tick, \(\nonce(Y_i)\ge\nonce(Y_j)\).  Thus no consumed leaf is
+executed after another consumed leaf with a strictly better price for
+the incoming order, and equal-price leaves are consumed in time-priority
+order.
+\end{corollary}
 
 \subsection{Cancel and Claim}
 
-Cancel is also the filled-order claim operation.  The owner mapping is
-indexed by the original resting order word, not by the reduced leaf that
-may remain after a partial fill.
+Cancel is also the maker claim operation.  The caller supplies the
+original order word and the book epoch.  The contract computes the order
+id and checks ownership.
 
-\begin{definition}[Cancel search]
-Given an order \(X\), cancellation first searches \(T_B\) by
-\(\kappa_B(X)\).  If no leaf is removed, it searches \(T_A\) by
-\(\kappa_A(X)\).  If neither search removes a leaf, the transition checks
-the side marker \(O[\sigma(X)]\) to determine whether a fully filled
-claim exists.
+Let the original order be \(X=W(t,q,0,n)\).  Let \(r\) be the live
+remaining quantity found in the tree.  If no live leaf is found, let
+\(r=0\).  The filled quantity is
+\[
+  f=q-r.
+\]
+If \(r>q\), the operation reverts.
+
+For a bid maker, the payout is
+\[
+  \mathsf{base}=f,\qquad \mathsf{quote}=Q^{+}(t,r).
+\]
+For an ask maker, the payout is
+\[
+  \mathsf{base}=r,\qquad
+  \mathsf{quote}=D^{-}(t,q,r).
+\]
+After this computation, the order state is deleted.  If an external
+token transfer reverts, the transaction reverts and the deletion is
+reverted with it.
+
+\section{Routing, Fees, and Hooks}
+
+\subsection{Pool and Book Routing}
+
+The router validates that \(0<X<Y\) by address.  It does not check token
+code.  Token admissibility is a deployment configuration condition.
+The core contracts do not enforce an allowlist and do not verify token
+balance deltas.
+
+For a fill leg, the caller supplies \(X\), \(Y\), an epoch, an order, a
+side, a no-rest flag, and a fill-or-kill flag.  The routed book id is
+\[
+  H(X,Y,e).
+\]
+If the routed book is uninitialized, matching cannot occur.  Such a leg
+is valid only if the order is allowed to rest, is not fill-or-kill, and
+the routed epoch is the active epoch for the pair.  In that case the
+rest path initializes the book before assigning the resting nonce.
+
+For a route of several legs, all book mutations happen before ERC-20
+settlement.  The route accumulates signed deltas by token in transient
+storage:
+\[
+  \Delta_Z = \sum_i \Delta_{Z,i}.
+\]
+At the end, positive deltas are transferred to the caller and negative
+deltas are pulled from the caller.  Each touched token is settled once
+per sign pass.
+
+\subsection{Fees}
+
+The fee configuration is a single packed word containing a recipient and
+a basis-point value \(b\).  The maximum is
+\[
+  0 \le b \le 100.
+\]
+A zero recipient disables fees.
+
+Fees are charged only on the taker's positive matched output.  For a bid
+taker, the fee token is \(X\).  For an ask taker, the fee token is \(Y\).
+Cancel and claim do not charge fees.
+
+In a route, the fee is computed per fill leg before route settlement
+deltas are aggregated.  Fee rounding is therefore per-leg, not per-route
+or per-token.
+
+\begin{definition}[Fee]
+For taker output \(a\), the fee is
+\[
+  \phi(a,b)=\left\lfloor \frac{ab}{10000}\right\rfloor .
+\]
 \end{definition}
 
-\begin{definition}[Cancel payout]
-Let \(q_0=\qty(X)\) be the original quantity and let \(q_r\) be the
-remaining quantity found in the book, or zero if the order is fully
-filled.  Let \(q_f=q_0-q_r\).  For a bid owner, the payout is
+The implementation computes this value as
 \[
-  (B,Q) = (q_f, \price(X)q_r).
+  \left\lfloor\frac{a}{10000}\right\rfloor b
+  + \left\lfloor \frac{(a\bmod 10000)b}{10000}\right\rfloor ,
 \]
-For an ask owner, the payout is
+which is equal to \(\lfloor ab/10000\rfloor\) and avoids overflowing
+when \(a\) is near the signed settlement bound.
+
+\subsection{Hooks}
+
+Hooks are optional and pool scoped.  A pool can enable hooks for top bid
+changes, top ask changes, or both.  Hook flags are copied into canonical
+books.  Older epochs remain matchable and cancelable but do not acquire
+new hook activation after rotation.
+
+The core matcher records only
 \[
-  (B,Q) = (q_r, \price(X)q_f).
+  (\mathsf{outgoingAmount},\mathsf{incomingNonce})
 \]
-After payout, \(O[X]\) is deleted; if the order was fully filled, the
-side marker \(O[\sigma(X)]\) is also deleted.
-\end{definition}
+in transient storage when the top order changes.  The router adds
+\(\mathsf{poolId}\), \(\mathsf{bookId}\), token address, and hook
+address after the tree mutation returns.  Hook calls are wrapped in
+\(\mathtt{try/catch}\) and are gas capped.  A hook failure does not
+revert the matching transition.
 
-This claim model makes fill execution and maker settlement asynchronous.
-At match time, the taker receives the asset owed by the matched resting
-orders.  Makers later call cancel to claim filled proceeds and any
-unfilled remainder.
+The hook token identifies the top-buyer side that changed: \(X\) for
+top bids and \(Y\) for top asks.  The outgoing amount is the live base
+quantity encoded in the displaced top order.  It is not a mixed-subtree
+quote notional.  The incoming nonce is the nonce of the new top order,
+or zero if the side is empty.
 
-\section{Complexity Analysis}
+The implementation uses transient storage for the reentrancy guard,
+route deltas, and hook-change handoff.  It therefore assumes an EVM with
+EIP-1153 transient storage semantics.
 
-Let \(h\) be the key width.  In this design \(h=64\).  Let \(z\) be the
-number of resting leaves whose quantities are actually examined during a
-match.
+\section{Accounting}
 
-\begin{theorem}[Insertion and cancel bound]
-For a well-formed tree over 64-bit keys, insertion and single-order
-removal each require \(O(h)\) radix decisions.  Since \(h=64\), this is a
-constant upper bound with respect to the number of orders in the book.
+\begin{assumption}[Exact ERC-20 transfers]
+Every configured token debits the sender and credits the receiver by the
+exact requested amount, or reverts.  Fee-on-transfer, rebasing, and
+malicious tokens are outside this accounting model.
+\end{assumption}
+
+\begin{assumption}[No unsolicited transfers for equality]
+No external actor transfers tokens directly to the contract except
+through successful protocol calls.  If unsolicited transfers occur, the
+balance equality below becomes a lower-bound statement: balances may
+exceed obligations.
+\end{assumption}
+
+Let \(O_B\) be the set of active bid orders and \(O_A\) be the set of
+active ask orders in all books.  For an order \(i\), let \(q_i\) be its
+original quantity and \(r_i\) its live remaining quantity.  If an order
+is fully filled and not yet claimed, \(r_i=0\).  Let \(t_i\) be its tick.
+
+The contract's token \(X\) obligations are
+\[
+  \sum_{i\in O_A} r_i
+  +
+  \sum_{i\in O_B} (q_i-r_i).
+\]
+The first term is unfilled ask collateral.  The second term is filled
+base owed to bid makers.
+
+The contract's token \(Y\) obligations are
+\[
+  \sum_{i\in O_B} Q^{+}(t_i,r_i)
+  +
+  \sum_{i\in O_A} D^{-}(t_i,q_i,r_i).
+\]
+The first term is unfilled bid collateral.  The second term is filled
+quote owed to ask makers.
+
+\begin{theorem}[Accounting stability]
+Under exact ERC-20 transfers and no unsolicited transfers, after every
+successful fill, route, cancel, or claim, the contract token balances
+equal the outstanding obligations defined above, excluding fees already
+transferred to the fee recipient.  Without the no-unsolicited-transfer
+assumption, balances are greater than or equal to the outstanding
+obligations.
 \end{theorem}
 
 \begin{proof}
-Insertion follows Lemma 1.  Removal follows the same unique path
-selected by successive key bits.  If the target key diverges before a
-branch depth, the key is absent and the search terminates.  Otherwise
-the search descends at most one child per depth until a leaf is reached
-or absence is proven.  The depth is bounded by 64.
+The proof is by induction over state transitions.
+
+Resting an ask increases contract token \(X\) balance by \(q\) and adds
+the obligation \(r=q\) to the first \(X\) term.  Resting a bid increases
+contract token \(Y\) balance by \(Q^{+}(t,q)\) and adds the same amount
+to the first \(Y\) term.
+
+Matching an ask leaf with old remaining quantity \(q_1\) and new
+remaining quantity \(q_2\) transfers \(q_1-q_2\) units of \(X\) to the
+bid taker and pulls \(D^{-}(t,q_1,q_2)\) units of \(Y\) from the bid
+taker.  The ask's \(X\) obligation decreases by \(q_1-q_2\), and its
+\(Y\) claim increases by \(D^{-}(t,q_1,q_2)\).  Matching a bid leaf is
+dual: the bid's \(Y\) collateral decreases by \(D^{+}(t,q_1,q_2)\), and
+its \(X\) claim increases by \(q_1-q_2\).  By the telescoping theorem,
+multiple partial fills produce the same total claim as one fill from
+original quantity to final remaining quantity.
+
+Canceling or claiming deletes the order state and transfers exactly the
+remaining obligation computed from \(r\).  If a transfer reverts, the EVM
+reverts the deletion and all earlier writes in the transaction.  Fees are
+deducted from taker output after match accounting has been computed and
+do not change maker obligations.
 \end{proof}
 
-\subsection{Fully Aggregated Matching}
+\section{Computational Complexity}
 
-The asymptotically strongest version of the Warp/Hanji construction
-stores two aggregate fields in each internal node:
+Let
 \[
-  Q(X)=\sum_{Y\in\mathcal{L}(X)}\qty(Y),
-  \qquad
-  V(X)=\sum_{Y\in\mathcal{L}(X)}\price(Y)\qty(Y).
+  h=64
 \]
-Then a matching algorithm can remove an entire crossing subtree \(X\)
-when \(Q(X)\le r\), immediately adding \(V(X)\) to quote settlement.
+be the radix key width.  Let \(m\) be the number of mixed-tick leaves or
+mixed-tick internal components whose quote values must be visited to
+compute an exact mixed-tick quote sum.
 
-\begin{theorem}[Aggregated fill bound]
-Assume every branch stores both \(Q(X)\) and \(V(X)\), and assume
-execution of removed makers is represented asynchronously by claim state
-rather than by per-maker transfers in the taker transaction.  A marketable
-incoming order can be matched by removing maximal covered subtrees and at
-most one partial boundary leaf in \(O(h)\) branch decisions.  For a
-binary tree, a right-spine search followed by at most one complementary
-left-spine search visits at most \(2h-1\) decision points.
+\begin{theorem}[Insertion and cancel depth]
+Insertion and exact-key removal touch at most \(h\) radix depths.
 \end{theorem}
 
 \begin{proof}
-At each depth on the best-side spine, the algorithm compares the
-incoming remaining quantity with the aggregate quantity of a candidate
-subtree.  If the candidate subtree is fully covered, the subtree is
-removed as one unit and its aggregate value is added to settlement.  If
-it is not covered, the algorithm descends into that subtree.  Each
-descent increases depth.  A binary trie over \(h\) bits has height at
-most \(h\).  The search may traverse one spine to find the first
-non-covered subtree and one adjacent spine to repair the boundary, hence
-at most \(2h-1\) decision points.  No step depends on the number of
-leaves contained in a fully removed subtree.
+At each branch, the algorithm either terminates, splits at the first
+earlier differing bit, or descends to exactly one child selected by the
+next key bit.  The split depth strictly increases on descent and is
+bounded by the 64-bit key width.
 \end{proof}
 
-This theorem is the source of the superior computational complexity
-claim: the matching decision is bounded by the key width instead of the
-number of filled orders or crossed price points.  It is the same class of
-claim described in the Hanji documentation for a 64-bit key and in the
-Warp presentation materials \cite{HanjiMatching,WarpVideo}.
+\begin{theorem}[Uniform aggregate matching]
+If every consumed aggregate subtree is uniform, matching work is bounded
+by \(O(h)\) radix decisions plus a constant amount of quote work per
+aggregate subtree.
+\end{theorem}
 
-\subsection{Strict One-Word Quantity-Only Instantiation}
+\begin{proof}
+Uniform quote values are represented by aggregate quantity and a 32-bit
+correction code.  Therefore consuming a uniform subtree does not require
+visiting each leaf.  The traversal follows right-first radix paths whose
+depth is bounded by \(h\).
+\end{proof}
 
-The strict node layout in this paper allocates the 192-bit middle field
-to quantity.  It does not also store a quote-value aggregate for mixed
-price subtrees.  Therefore, for exact immediate quote settlement across a
-mixed-price subtree, one of the following must hold:
-\begin{enumerate}[label=(\alph*)]
-  \item the subtree is known to contain a single price, so
-  \(V(X)=\price(X)Q(X)\);
-  \item an additional value aggregate is present in state or derivable
-  from another commitment; or
-  \item the matcher traverses leaves or smaller subtrees until the quote
-  value is exactly computed.
+\begin{theorem}[Mixed quote computation]
+For mixed-tick subtrees, exact quote computation is \(O(m)\) in the
+number of mixed components visited by the recursive quote function.
+\end{theorem}
+
+\begin{proof}
+A mixed branch has no single tick and no correction code that can
+represent the sum of child rounded quote values.  The implementation
+therefore recursively computes the quote value of the right child and
+the left child.  Recursion terminates at leaves and uniform branches.
+Thus the work is proportional to the number of visited mixed components.
+\end{proof}
+
+There is no separate resumable cursor in the core state machine.  If a
+transaction chooses a path whose mixed-component work exceeds the
+available gas, the transaction reverts and no partial progress is
+committed.  The fixed 64-bit key depth bounds path selection and exact
+same-tick aggregate operations; it does not by itself bound the number
+of mixed quote components visited in a fully exact mixed subtree.
+
+\subsection{Pathological Cases}
+
+The key width bounds tree depth, but it does not make every exact quote
+calculation independent of subtree composition.
+
+\begin{enumerate}[label=(\roman*)]
+  \item A same-tick nonce comb can have depth up to 64, but uniform
+  correction codes allow aggregate quote calculation without visiting
+  every leaf.
+  \item A mixed-tick comb can force traversal along the full key depth
+  and can require recursive quote calculation for mixed components.
+  \item A dirty right spine can have stale branch words along the best
+  side.  Matching a same-tick dirty spine recovers quantity and quote
+  through right-child recursion bounded by depth.  Matching a mixed-tick
+  dirty spine falls back to recursive matching because a stale mixed
+  branch has no valid aggregate quote code.
+  \item Same-side insertion after right-spine optimization materializes
+  the dirty right spine before inserting the new leaf.  This work is
+  bounded by the radix depth.
 \end{enumerate}
 
-\begin{corollary}[Quantity-only exact settlement]
-For the strict one-word layout without an additional value aggregate,
-exact immediate quote settlement has complexity \(O(h+z)\) in the number
-of visited matching leaves in the usual trie traversal model.  In the
-worst case, \(z\) may be the number of filled leaves.  Insertion,
-single-order cancel, and membership proofs remain \(O(h)\).
-\end{corollary}
-
-\begin{proof}
-The branch quantity determines whether enough base quantity exists below
-a subtree, but it does not determine the sum
-\(\sum_i \price(Y_i)\qty(Y_i)\) when the subtree contains multiple
-prices.  Exact quote transfer must therefore obtain price and quantity
-data from each price component contributing to the fill, unless an
-equivalent value aggregate is available.  Each visited leaf lies below a
-path of length at most \(h\), and trie traversal visits a bounded number
-of branch nodes per visited leaf plus boundary nodes.
-\end{proof}
-
-\begin{remark}
-This corollary is not a defect in the mathematical model; it is a
-storage-design tradeoff.  A one-word node minimizes state per reachable
-node.  A double-sum node gives the stronger fill bound but requires
-either a wider node, a second aggregate commitment, or a different
-encoding of price, quantity, and value.
-\end{remark}
-
-\section{Collateral and Accounting}
-
-The design is non-custodial in the limited sense that user balances move
-through ERC-20 transfers controlled by the contract state transition.
-The contract does not assume an off-chain matcher has custody.  It does,
-however, rely on configured tokens behaving as exact ERC-20 assets.
-Fee-on-transfer, rebasing, mint-on-transfer, or adversarially
-inconsistent tokens are outside the exact-accounting model.
-
-\begin{definition}[Bid collateral]
-When a bid with price \(p\) and quantity \(q\) rests, the contract must
-hold \(pq\) quote units for its unfilled remainder.  If a bid partially
-matches and rests \(r\) units, quote collateral for the resting remainder
-is \(pr\), while quote paid for immediate fills is computed from the
-prices of matched asks.
-\end{definition}
-
-\begin{definition}[Ask collateral]
-When an ask with quantity \(q\) is submitted, the contract must receive
-\(q\) base units.  Any immediate fills produce quote proceeds for the ask
-taker; any unfilled remainder stays as base collateral in the book.
-\end{definition}
-
-\begin{theorem}[Conservation under exact tokens]
-Assume all ERC-20 transfers debit the source and credit the recipient by
-exactly the requested amount, and assume every successful state
-transition follows the payout equations above.  Then contract balances
-equal the sum of unfilled resting collateral plus unclaimed filled
-proceeds.
-\end{theorem}
-
-\begin{proof}
-The statement follows by induction over transitions.  Insertion adds
-exactly the collateral associated with the new resting remainder.
-Matching transfers taker proceeds immediately and records maker claim
-state by retaining the corresponding collateral in the contract.  Cancel
-or claim deletes the owner entry and transfers exactly the amount
-computed from the original order and remaining quantity.  Each transition
-therefore preserves the equality between contract balances and
-outstanding obligations.
-\end{proof}
-
-\section{Implementation Considerations}
-
-\subsection{One mapping for two books}
-
-The storage type is
+The theoretical maximum number of resting leaves in one book is
 \[
-  \mathsf{tree}[X] = (L,R),
+  2^{32}-2,
 \]
-where \(X,L,R\) are node words.  There is no separate bid-tree mapping
-and ask-tree mapping.  Coexistence is achieved by separate roots
-\(T_B,T_A\) and by side-dependent traversal keys.  Any security argument
-must therefore be stated over reachability from roots: a storage entry is
-active for a book only if it is reachable from that book's root by valid
-side routing.
+because nonce \(0\) is reserved for incoming orders and uninitialized
+books, and nonce \(1\) is the exhausted sentinel.  This nonce bound also
+bounds the maximum number of leaf-level rounding units represented by a
+same-tick correction.
 
-\subsection{Decrementing nonce}
+\section{Integer Safety}
 
-Let \(\nu_0=2^{40}-1\).  If \(m\) orders have rested, and no nonce
-exhaustion has occurred, then
-\[
-  \nu = \nu_0 - m .
-\]
-Since earlier orders have larger nonce values, appending the nonce to the
-price key gives FIFO priority at each price without a linked list.  The
-nonce is part of the order identity and of the radix path.
+All live quantities are bounded by \(2^{160}-1\).  The mathematical price
+range is below \(2^{96}\).  Therefore aggregate quote values are below
+\(2^{256}\).  The quote code computes the product with a high and low
+word before shifting.  It does not require the unshifted product to fit
+in 256 bits.
 
-\subsection{Partial fills}
+The routing layer separately requires final signed deltas to fit in
+\(\mathtt{int256}\).  If a fill would produce a positive or negative
+token delta outside that range, the route reverts and all book writes in
+the transaction are reverted.
 
-When a leaf is partially filled, the remaining leaf has the same price
-and nonce but a smaller quantity.  The owner mapping remains keyed by the
-original order.  Consequently, an implementation must reject attempts to
-claim using the reduced leaf word as though it were the original order.
-The side key \(\sigma(X)\) exists only for fully filled orders and is
-zero-quantity by construction.
-
-\subsection{Reentrancy and external calls}
-
-Because token transfers are external calls, a production implementation
-requires a reentrancy guard around fill and cancel.  The formal model
-above treats each state transition as atomic.  The implementation must
-restore this atomicity in the EVM execution model by preventing callbacks
-from observing or mutating intermediate state.
-
-\section{Comparison}
-
-\begin{table}[h]
-\centering
-\begin{tabular}{@{}p{0.27\linewidth}p{0.22\linewidth}p{0.38\linewidth}@{}}
-\toprule
-Design & On-chain matching work & Principal tradeoff \\
-\midrule
-Price tree plus FIFO lists & Linear in filled orders or crossed price
-levels for large marketable orders & Efficient in-memory design, but the
-filled range is unbounded on-chain \\
-Off-chain relay with on-chain settlement & On-chain work is settlement
-of submitted signed orders & Matching and order availability are
-performed outside contract state \\
-AMM / CFMM & Constant or small bounded pool update & No
-price-time-priority book; price is determined by a conservation function \\
-Double-sum radix LME & \(O(h)\), with \(h=64\), for aggregate matching
-decisions & Requires aggregate quantity and aggregate value in branch
-state \\
-Strict one-word quantity radix & \(O(h)\) insert/cancel; exact mixed-price
-fill requires visited value computation & Minimal node footprint; full
-logarithmic mixed-price settlement requires an additional value aggregate
-or deferred execution representation \\
-\bottomrule
-\end{tabular}
-\caption{Computational comparison of exchange-state designs.}
-\end{table}
+Branch quantities are computed by checked 160-bit addition.  If a branch
+would exceed \(2^{160}-1\), the state transition reverts.  This prevents
+silent quantity wraparound.
 
 \section{Conclusion}
 
-A binary radix tree over the 64-bit price-time key provides a natural
-fixed-depth order-book representation for an EVM setting.  The
-decrementing nonce removes the need for per-price FIFO lists: price and
-time priority are both embedded in the key.  The self-addressing
-\texttt{bytes32} layout further reduces storage by representing orders
-and aggregate branches in the same word format and by using one mapping
-for both conceptual books.
+The protocol is a fixed-key radix order book with logarithmic key depth
+and exact integer accounting.  The price domain has \(2^{32}\) logarithmic
+ticks over \([2^{-96},2^{96})\).  The quantity domain is 160 bits.  Each
+book has \(2^{32}-2\) assignable resting nonces before rollover.  The
+node word allocates the remaining 32 bits to same-tick rounding
+correction.
 
-The main complexity result is conditional and precise.  If internal
-nodes carry enough aggregate information to remove a covered subtree and
-settle its value, then matching work is bounded by the fixed key depth,
-independent of the number of resting orders represented by the removed
-subtree.  This is the logarithmic matching-engine idea described in the
-Warp and Hanji references.  If the implementation stores only aggregate
-quantity in the one-word node, it retains fixed-depth insertion and
-cancellation and obtains a compact order-book representation, but exact
-immediate quote settlement across mixed prices must recover value by
-leaf traversal or by another aggregate mechanism.  A complete production
-specification should therefore state which aggregate fields are present
-and which execution semantics are immediate versus asynchronous.
+The main accounting property follows from using differences of rounded
+same-tick notionals.  Partial fills telescope, cancel uses the original
+order and live remaining quantity, and aggregate same-tick branches store
+the correction required to recover the sum of leaf-level rounded quotes.
+Mixed-tick quote calculation remains exact by recursion.  The computational
+bound for insertion and cancel is the 64-bit radix depth.  Matching is
+bounded by radix depth for uniform aggregate paths and by the number of
+mixed components whose exact quote must be computed for mixed-tick
+subtrees.
 
-\begin{thebibliography}{99}
-
-\bibitem{Glosten1994}
-Lawrence R. Glosten.
-\newblock Is the electronic open limit order book inevitable?
-\newblock \emph{The Journal of Finance}, 49(4):1127--1161, 1994.
-\newblock \url{https://doi.org/10.1111/j.1540-6261.1994.tb02450.x}.
-
-\bibitem{Selph2011}
-W. K. Selph.
-\newblock How to build a fast limit order book.
-\newblock Blog post, archived 2011.
-\newblock \url{https://web.archive.org/web/20110219163448/http://howtohft.wordpress.com/2011/02/15/how-to-build-a-fast-limit-order-book/}.
-
-\bibitem{Morrison1968}
-Donald R. Morrison.
-\newblock PATRICIA -- Practical algorithm to retrieve information coded in
-alphanumeric.
-\newblock \emph{Journal of the ACM}, 15(4):514--534, 1968.
-\newblock \url{https://doi.org/10.1145/321479.321481}.
-
-\bibitem{Leis2013}
-Viktor Leis, Alfons Kemper, and Thomas Neumann.
-\newblock The adaptive radix tree: ARTful indexing for main-memory
-databases.
-\newblock In \emph{IEEE ICDE}, 2013.
-\newblock \url{https://www.db.in.tum.de/~leis/papers/ART.pdf}.
-
-\bibitem{Lee2017}
-Se Kwon Lee, K. Hyun Lim, Hyunsub Song, Beomseok Nam, and Sam H. Noh.
-\newblock WORT: Write optimal radix tree for persistent memory storage
-systems.
-\newblock In \emph{15th USENIX Conference on File and Storage Technologies},
-2017.
-\newblock \url{https://www.usenix.org/conference/fast17/technical-sessions/presentation/lee-se-kwon}.
-
-\bibitem{ZeroExV2}
-0x Project.
-\newblock 0x protocol specification v2.
-\newblock \url{https://github.com/0xProject/0x-protocol-specification/blob/master/v2/v2-specification.md}.
-
-\bibitem{DutchXDocs}
-Gnosis.
-\newblock DutchX documentation.
-\newblock \url{https://dutchx.readthedocs.io/}.
+\begin{thebibliography}{9}
 
 \bibitem{Zhang2018}
 Yi Zhang, Xiaohong Chen, and Daejun Park.
 \newblock Formal specification of constant product \((x \times y = k)\)
 market maker model and implementation.
 \newblock Runtime Verification, 2018.
-\newblock \url{https://github.com/runtimeverification/verified-smart-contracts/blob/master/uniswap/x-y-k.pdf}.
 
-\bibitem{Xu2021}
-Jiahua Xu, Krzysztof Paruch, Simon Cousaert, and Yebo Feng.
-\newblock SoK: Decentralized exchanges (DEX) with automated market maker
-(AMM) protocols.
-\newblock \emph{ACM Computing Surveys}, 55(11), 2023.
-\newblock \url{https://arxiv.org/abs/2103.12732}.
-
-\bibitem{Angeris2020}
-Guillermo Angeris, Alex Evans, and Tarun Chitra.
-\newblock When does the tail wag the dog? Curvature and market making.
-\newblock arXiv:2012.08040, 2020.
-\newblock \url{https://arxiv.org/abs/2012.08040}.
+\bibitem{Morrison1968}
+Donald R. Morrison.
+\newblock PATRICIA -- Practical algorithm to retrieve information coded
+in alphanumeric.
+\newblock \emph{Journal of the ACM}, 15(4):514--534, 1968.
 
 \bibitem{UniswapV3}
 Hayden Adams, Noah Zinsmeister, Moody Salem, River Keefer, and Dan
 Robinson.
 \newblock Uniswap v3 core.
 \newblock Whitepaper, 2021.
-\newblock \url{https://app.uniswap.org/whitepaper-v3.pdf}.
-
-\bibitem{WarpVideo}
-Joseph Poon and Christopher Jeffrey.
-\newblock Warp -- efficient decentralized exchange.
-\newblock EthCC 2023 presentation video, timestamp supplied by the project.
-\newblock \url{https://www.youtube.com/live/E4YkppHQZgw?si=GunMcT_DjjNiRIW4&t=5855}.
-
-\bibitem{EthCCWarp}
-EthCC 2023 program data.
-\newblock Joseph Poon and Christopher Jeffrey, Warp -- Efficient
-Decentralized Exchange.
-\newblock \url{https://gist.github.com/valer-cara/cf41cf56a6184dbfa8823350ee24a38a}.
-
-\bibitem{HanjiMatching}
-Hanji.
-\newblock Matching engine architecture documentation.
-\newblock \url{https://docs.hanji.io/architecture/matching-engine}.
 
 \end{thebibliography}
 
