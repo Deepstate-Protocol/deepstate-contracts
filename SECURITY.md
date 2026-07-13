@@ -15,7 +15,7 @@ data. Include the affected commit, reproduction steps, impact, and any proposed 
 
 ## Trust Model
 
-- `RoutingEngine.owner()` may configure the protocol fee recipient/rate and pool hook contracts.
+- `DeepstateV1.owner()` may configure the protocol fee recipient/rate and pool hook contracts.
   Use a reviewed multisig or governance executor, verify ownership after deployment, and protect its
   signers. Renouncing ownership permanently freezes fee and hook configuration.
 - Fees are capped at 100 bps and are charged only against matched taker output. Cancels and maker

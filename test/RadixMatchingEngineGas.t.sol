@@ -3,7 +3,7 @@ pragma solidity ^0.8.28;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
-import {RoutingEngine} from "../src/RoutingEngine.sol";
+import {DeepstateV1} from "../src/DeepstateV1.sol";
 import {TickMath32} from "../src/libraries/TickMath32.sol";
 
 contract GasTestERC20 is ERC20 {
@@ -47,7 +47,7 @@ contract RadixMatchingEngineGasTest is Test {
 
     GasTestERC20 internal base;
     GasTestERC20 internal quote;
-    RoutingEngine internal engine;
+    DeepstateV1 internal engine;
 
     address internal alice = address(0xA11CE);
     address internal bob = address(0xB0B);
@@ -63,7 +63,7 @@ contract RadixMatchingEngineGasTest is Test {
             base = tokenB;
             quote = tokenA;
         }
-        engine = new RoutingEngine();
+        engine = new DeepstateV1();
 
         _fundAndApprove(alice);
         _fundAndApprove(bob);
@@ -511,7 +511,7 @@ contract RadixMatchingEngineGasTest is Test {
 
     function _fill(bytes32 order, bool isBid) internal returns (bytes32 restingOrder) {
         restingOrder = engine.fill(
-            RoutingEngine.FillParams({
+            DeepstateV1.FillParams({
                 token0: address(base),
                 token1: address(quote),
                 epoch: 0,

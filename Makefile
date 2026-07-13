@@ -5,7 +5,7 @@ INVARIANT_DEPTH ?= 64
 INVARIANT_SHARDS ?= 8
 INVARIANT_SHARD ?= 1
 GAS_CONTRACTS ?= RadixMatchingEngine(Gas|HookGas|FeeGas)Test
-COVERAGE_FILES ?= src/RadixMatchingEngine.sol,src/RoutingEngine.sol,src/libraries/TickMath32.sol
+COVERAGE_FILES ?= src/DeepstateV1.sol,src/libraries/TickMath32.sol
 COVERAGE_EXCLUSIONS ?= coverage.exclusions.json
 # Coverage runs every behavioral, routing, boundary, formal, and math test. Stateful invariants
 # and benchmark-only suites retain dedicated targets because they do not add useful source coverage.
@@ -86,7 +86,7 @@ coverage-check:
 	rm -f "$$tmp"
 
 slither:
-	$(SLITHER) src/RoutingEngine.sol --config-file slither.config.json --exclude-informational
+	$(SLITHER) src/DeepstateV1.sol --config-file slither.config.json --exclude-informational
 
 formal-halmos:
 	forge build --force --build-info --out $(HALMOS_BUILD_OUT) test/RadixMatchingEngineFormal.t.sol

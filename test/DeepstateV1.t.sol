@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
-import {RoutingEngine} from "../src/RoutingEngine.sol";
+import {DeepstateV1} from "../src/DeepstateV1.sol";
 import {QuoteMath} from "./QuoteMath.sol";
 
 contract RoutingTestERC20 is ERC20 {
@@ -36,7 +36,7 @@ contract GasBurningHook {
     }
 }
 
-contract RoutingEngineHarness is RoutingEngine {
+contract DeepstateV1Harness is DeepstateV1 {
     function setNonceAndFlags(bytes32 id, uint256 nonceAndFlags) external {
         books[id].nonceAndFlags = nonceAndFlags;
     }
@@ -53,10 +53,10 @@ contract RoutingEngineHarness is RoutingEngine {
     }
 }
 
-contract RoutingEngineTest is Test {
+contract DeepstateV1Test is Test {
     uint32 internal constant MAX_ORDER_NONCE = type(uint32).max;
 
-    RoutingEngineHarness internal engine;
+    DeepstateV1Harness internal engine;
     RoutingTestERC20 internal token0;
     RoutingTestERC20 internal token1;
 
@@ -75,7 +75,7 @@ contract RoutingEngineTest is Test {
             token1 = a;
         }
 
-        engine = new RoutingEngineHarness();
+        engine = new DeepstateV1Harness();
 
         _fundAndApprove(alice);
         _fundAndApprove(bob);
@@ -267,7 +267,7 @@ contract RoutingEngineTest is Test {
         uint256 bobToken0Before = token0.balanceOf(bob);
         uint256 bobToken1Before = token1.balanceOf(bob);
 
-        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](2);
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](2);
         route[0] = _fill(0, _order(10, 10_000, 0), true, true, false);
         route[1] = _fill(0, _order(20, 5_000, 0), false, false, false);
 
@@ -316,7 +316,7 @@ contract RoutingEngineTest is Test {
         uint256 bobToken0Before = token0.balanceOf(bob);
         uint256 bobToken1Before = token1.balanceOf(bob);
 
-        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](1);
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](1);
         route[0] = _fill(0, _order(10, 3, 0), true, true, false);
 
         vm.prank(bob);
@@ -338,7 +338,7 @@ contract RoutingEngineTest is Test {
         uint256 bobToken0Before = token0.balanceOf(bob);
         uint256 bobToken1Before = token1.balanceOf(bob);
 
-        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](2);
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](2);
         route[0] = _fill(0, _order(10, 2, 0), true, true, false);
         route[1] = _fill(0, _order(10, 3, 0), true, true, false);
 
@@ -358,7 +358,7 @@ contract RoutingEngineTest is Test {
         uint256 bobToken0Before = token0.balanceOf(bob);
         uint256 bobToken1Before = token1.balanceOf(bob);
 
-        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](2);
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](2);
         route[0] = _fill(0, _order(10, 10_000, 0), true, true, false);
         route[1] = _fill(0, _order(10, 10_000, 0), true, true, false);
 
@@ -381,7 +381,7 @@ contract RoutingEngineTest is Test {
         uint256 engineToken0Before = token0.balanceOf(address(engine));
         uint256 engineToken1Before = token1.balanceOf(address(engine));
 
-        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](2);
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](2);
         route[0] = _fill(0, _order(10, 3, 0), true, true, false);
         route[1] = _fill(0, _order(10, 3, 0), true, true, true);
 
@@ -420,7 +420,7 @@ contract RoutingEngineTest is Test {
         vm.prank(makerBc);
         bytes32 bidBc = engine.fill(_fillFor(sorted[1], sorted[2], _order(0, quantity, 0), true, false, false));
 
-        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](2);
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](2);
         route[0] = _fillFor(sorted[0], sorted[1], _order(0, quantity, 0), false, true, true);
         route[1] = _fillFor(sorted[1], sorted[2], _order(0, quantity, 0), false, true, true);
 
@@ -448,7 +448,7 @@ contract RoutingEngineTest is Test {
         uint256 bobToken0Before = token0.balanceOf(bob);
         uint256 bobToken1Before = token1.balanceOf(bob);
 
-        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](1);
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](1);
         route[0] = _fill(0, _order(9, 1, 0), true, true, false);
 
         vm.prank(bob);
@@ -476,7 +476,7 @@ contract RoutingEngineTest is Test {
         vm.prank(alice);
         engine.fill(_fill(0, _order(10, 1, 0), false, false, false));
 
-        RoutingEngine.FillParams[] memory route = new RoutingEngine.FillParams[](1);
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](1);
         route[0] = _fill(0, _order(10, 2, 0), true, true, true);
 
         vm.prank(bob);
@@ -591,9 +591,9 @@ contract RoutingEngineTest is Test {
     function _fill(uint256 epoch, bytes32 order, bool isBid, bool noRest, bool fillOrKill)
         internal
         view
-        returns (RoutingEngine.FillParams memory params)
+        returns (DeepstateV1.FillParams memory params)
     {
-        params = RoutingEngine.FillParams({
+        params = DeepstateV1.FillParams({
             token0: address(token0),
             token1: address(token1),
             epoch: epoch,
@@ -611,8 +611,8 @@ contract RoutingEngineTest is Test {
         bool isBid,
         bool noRest,
         bool fillOrKill
-    ) internal pure returns (RoutingEngine.FillParams memory params) {
-        params = RoutingEngine.FillParams({
+    ) internal pure returns (DeepstateV1.FillParams memory params) {
+        params = DeepstateV1.FillParams({
             token0: address(lower),
             token1: address(upper),
             epoch: 0,

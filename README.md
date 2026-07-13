@@ -20,7 +20,7 @@ quantity produces a quote value that fits `uint256`.
 Prices apply to raw token units. The engine does not read token decimals or normalize amounts;
 routers must choose ticks that incorporate the decimal relationship of each token pair.
 
-`RoutingEngine` exposes these order actions:
+`DeepstateV1` exposes these order actions:
 
 - `fill(FillParams params)`
 - `fillRoute(FillParams[] fills)`
@@ -98,7 +98,7 @@ forge snapshot --isolate --force --match-contract 'RadixMatchingEngine(Gas|HookG
 forge snapshot --isolate --force --match-contract 'RadixMatchingEngine(Gas|HookGas|FeeGas)Test' --check .gas-snapshot.runtime
 forge build --sizes
 python3 script/check_tick_math.py --check test/TickMath32.t.sol
-uv tool run --from slither-analyzer slither src/RoutingEngine.sol --config-file slither.config.json --exclude-informational
+uv tool run --from slither-analyzer slither src/DeepstateV1.sol --config-file slither.config.json --exclude-informational
 forge coverage --ir-minimum --skip RadixMatchingEngineInvariant.t.sol --skip RadixMatchingEngineGas.t.sol --skip RadixMatchingEngineAccessList.t.sol --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
 make coverage-check
 make formal-halmos
@@ -121,5 +121,5 @@ token behaviors, and operation sequences remain covered by fuzz, integration, an
 Deploy script:
 
 ```sh
-forge script script/RadixMatchingEngine.s.sol:RadixMatchingEngineScript --rpc-url <rpc> --private-key <key> --broadcast
+forge script script/DeepstateV1.s.sol:DeepstateV1Script --rpc-url <rpc> --private-key <key> --broadcast
 ```
