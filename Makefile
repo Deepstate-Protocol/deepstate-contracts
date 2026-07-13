@@ -8,9 +8,9 @@ INVARIANT_CONTRACTS ?= .*(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolI
 GAS_CONTRACTS ?= RadixMatchingEngine(Gas|HookGas|FeeGas)Test
 COVERAGE_FILES ?= src/DeepstateV1.sol,src/libraries/TickMath32.sol
 COVERAGE_EXCLUSIONS ?= coverage.exclusions.json
-# Coverage runs every behavioral, routing, boundary, formal, and math test. Stateful invariants
-# and benchmark-only suites retain dedicated targets because they do not add useful source coverage.
-COVERAGE_SKIP_ARGS ?= --skip RadixMatchingEngineInvariant.t.sol --skip DeepstateV1Invariant.t.sol --skip RadixMatchingEngineGas.t.sol --skip RadixMatchingEngineAccessList.t.sol
+# Coverage runs every behavioral, routing, boundary, and math test. Formal proofs, stateful
+# invariants, and benchmarks retain dedicated targets because they do not add source coverage.
+COVERAGE_SKIP_ARGS ?= --skip RadixMatchingEngineInvariant.t.sol --skip DeepstateV1Invariant.t.sol --skip RadixMatchingEngineGas.t.sol --skip RadixMatchingEngineAccessList.t.sol --skip RadixMatchingEngineFormal.t.sol
 COVERAGE_MIN_LINES ?= 100
 COVERAGE_MIN_STATEMENTS ?= 100
 COVERAGE_MIN_BRANCHES ?= 100
@@ -18,12 +18,12 @@ COVERAGE_MIN_FUNCS ?= 100
 SLITHER ?= uv tool run --from slither-analyzer slither
 HALMOS ?= uv tool run --python 3.12 --from halmos halmos
 HALMOS_BUILD_OUT ?= out-halmos
-HALMOS_ARGS ?= --forge-build-out $(HALMOS_BUILD_OUT) --match-contract RadixMatchingEngineFormalTest --match-test '^testFuzz_Formal' --solver yices --solver-timeout-assertion 30s --no-status
+HALMOS_ARGS ?= --forge-build-out $(HALMOS_BUILD_OUT) --match-contract '.*FormalTest' --match-test '^testFuzz_Formal' --solver yices --solver-timeout-assertion 30s --no-status
 KONTROL_IMAGE ?= runtimeverificationinc/kontrol:ubuntu-jammy-1.0.255
 KONTROL ?= docker run --rm --platform linux/amd64 -v "$(CURDIR):/workspace" -w /workspace $(KONTROL_IMAGE) kontrol
 KONTROL_BUILD_ARGS ?= --foundry-project-root /workspace --no-metadata --no-O2 --no-keccak-lemmas
 KONTROL_PROVE_ARGS ?= --foundry-project-root /workspace --match-test $(KONTROL_TEST) --schedule CANCUN --no-gas
-KONTROL_TEST ?= 'RadixMatchingEngineFormalTest.testFuzz_FormalBidAgainstAskConservesAndClaims(bool,bool)'
+KONTROL_TEST ?= 'RadixMatchingEngineFormalTest.testFuzz_FormalBidAgainstAskConservesAndClaims(uint8,uint8)'
 
 fmt:
 	forge fmt --check
