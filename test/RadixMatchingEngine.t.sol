@@ -701,7 +701,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(base.balanceOf(bob), bobBaseBefore);
     }
 
-    function test_ExhaustedBookRestsNewSameSideOrderInActiveEpoch() public {
+    function test_ExhaustedBookAutomaticallyDisablesSameSideRest() public {
         bytes32 nextNonceSlot = _nextNonceSlot();
         vm.store(address(engine), nextNonceSlot, bytes32(uint256(2)));
 
@@ -721,13 +721,12 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.nextNonce(), 1);
 
         (, bytes32 epochOneBidRoot) = engine.roots(address(base), address(quote), 1);
-        assertEq(nextBid, _order(11, 1, MAX_ORDER_NONCE));
-        assertEq(epochOneBidRoot, nextBid);
-        assertEq(engine.ownerOfOrder(nextBid), bob);
-        assertEq(quote.balanceOf(address(engine)), _quoteValue(10, 1, true) + _quoteValue(11, 1, true));
+        assertEq(nextBid, bytes32(0));
+        assertEq(epochOneBidRoot, bytes32(0));
+        assertEq(quote.balanceOf(address(engine)), _quoteValue(10, 1, true));
     }
 
-    function test_BidRemainderFromExhaustedBookRestsInActiveEpoch() public {
+    function test_BidRemainderFromExhaustedBookIsAutomaticallyNoRest() public {
         bytes32 nextNonceSlot = _nextNonceSlot();
         vm.store(address(engine), nextNonceSlot, bytes32(uint256(2)));
 
@@ -742,7 +741,7 @@ contract RadixMatchingEngineTest is Test {
         vm.prank(alice);
         bytes32 restingBid = engine.fill(_order(100, 2, 0), true);
 
-        assertEq(restingBid, _order(100, 1, MAX_ORDER_NONCE));
+        assertEq(restingBid, bytes32(0));
         assertEq(engine.askRoot(), bytes32(0));
         assertEq(engine.bidRoot(), bytes32(0));
         assertEq(engine.ownerOfOrder(restingAsk), bob);
@@ -750,16 +749,16 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.nextNonce(), 1);
 
         (, bytes32 epochOneBidRoot) = engine.roots(address(base), address(quote), 1);
-        assertEq(epochOneBidRoot, restingBid);
+        assertEq(epochOneBidRoot, bytes32(0));
         assertEq(base.balanceOf(alice), 1_000_001);
-        assertEq(quote.balanceOf(alice), 1_000_000 - _quoteValue(90, 1, false) - _quoteValue(100, 1, true));
+        assertEq(quote.balanceOf(alice), 1_000_000 - _quoteValue(90, 1, false));
         assertEq(base.balanceOf(bob), 1_000_000 - 1);
         assertEq(quote.balanceOf(bob), 1_000_000);
         assertEq(base.balanceOf(address(engine)), 0);
-        assertEq(quote.balanceOf(address(engine)), _quoteValue(90, 1, false) + _quoteValue(100, 1, true));
+        assertEq(quote.balanceOf(address(engine)), _quoteValue(90, 1, false));
     }
 
-    function test_AskRemainderFromExhaustedBookRestsInActiveEpoch() public {
+    function test_AskRemainderFromExhaustedBookIsAutomaticallyNoRest() public {
         bytes32 nextNonceSlot = _nextNonceSlot();
         vm.store(address(engine), nextNonceSlot, bytes32(uint256(2)));
 
@@ -774,7 +773,7 @@ contract RadixMatchingEngineTest is Test {
         vm.prank(bob);
         bytes32 restingAsk = engine.fill(_order(90, 2, 0), false);
 
-        assertEq(restingAsk, _order(90, 1, MAX_ORDER_NONCE));
+        assertEq(restingAsk, bytes32(0));
         assertEq(engine.bidRoot(), bytes32(0));
         assertEq(engine.askRoot(), bytes32(0));
         assertEq(engine.ownerOfOrder(restingBid), alice);
@@ -782,12 +781,12 @@ contract RadixMatchingEngineTest is Test {
         assertEq(engine.nextNonce(), 1);
 
         (bytes32 epochOneAskRoot,) = engine.roots(address(base), address(quote), 1);
-        assertEq(epochOneAskRoot, restingAsk);
+        assertEq(epochOneAskRoot, bytes32(0));
         assertEq(base.balanceOf(alice), 1_000_000);
         assertEq(quote.balanceOf(alice), 1_000_000 - _quoteValue(100, 1, true));
-        assertEq(base.balanceOf(bob), 1_000_000 - 2);
+        assertEq(base.balanceOf(bob), 1_000_000 - 1);
         assertEq(quote.balanceOf(bob), 1_000_000 + _quoteValue(100, 1, true));
-        assertEq(base.balanceOf(address(engine)), 2);
+        assertEq(base.balanceOf(address(engine)), 1);
         assertEq(quote.balanceOf(address(engine)), 0);
     }
 
