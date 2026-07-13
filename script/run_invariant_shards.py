@@ -8,8 +8,11 @@ import sys
 from pathlib import Path
 
 
-INVARIANT_FILE = Path("test/RadixMatchingEngineInvariant.t.sol")
-INVARIANT_CONTRACT = ".*RadixMatchingEngineInvariantTest.*"
+INVARIANT_FILES = (
+    Path("test/RadixMatchingEngineInvariant.t.sol"),
+    Path("test/DeepstateV1Invariant.t.sol"),
+)
+INVARIANT_CONTRACT = ".*(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest).*"
 
 
 def parse_args():
@@ -23,10 +26,14 @@ def parse_args():
 
 
 def invariant_names():
-    text = INVARIANT_FILE.read_text(encoding="utf-8")
-    names = re.findall(r"function\s+(invariant_[A-Za-z0-9_]+)\s*\(", text)
+    names = []
+    for invariant_file in INVARIANT_FILES:
+        text = invariant_file.read_text(encoding="utf-8")
+        names.extend(re.findall(r"function\s+(invariant_[A-Za-z0-9_]+)\s*\(", text))
     if not names:
-        raise RuntimeError(f"no invariant functions found in {INVARIANT_FILE}")
+        raise RuntimeError(f"no invariant functions found in {INVARIANT_FILES}")
+    if len(names) != len(set(names)):
+        raise RuntimeError("invariant function names must be unique across invariant suites")
     return names
 
 
@@ -36,9 +43,8 @@ def select_shard(names, shard, shards):
     if shard < 1 or shard > shards:
         raise ValueError("--shard must be between 1 and --shards")
 
-    size = math.ceil(len(names) / shards)
-    start = (shard - 1) * size
-    end = min(start + size, len(names))
+    start = math.floor((shard - 1) * len(names) / shards)
+    end = math.floor(shard * len(names) / shards)
     return names[start:end]
 
 
@@ -77,7 +83,7 @@ def main():
         return 2
 
     names = invariant_names()
-    print(f"found {len(names)} invariant(s) in {INVARIANT_FILE}", flush=True)
+    print(f"found {len(names)} invariant(s) in {len(INVARIANT_FILES)} files", flush=True)
 
     if args.all:
         for shard in range(1, args.shards + 1):

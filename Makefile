@@ -4,12 +4,13 @@ INVARIANT_RUNS ?= 2048
 INVARIANT_DEPTH ?= 64
 INVARIANT_SHARDS ?= 8
 INVARIANT_SHARD ?= 1
+INVARIANT_CONTRACTS ?= .*(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest).*
 GAS_CONTRACTS ?= RadixMatchingEngine(Gas|HookGas|FeeGas)Test
 COVERAGE_FILES ?= src/DeepstateV1.sol,src/libraries/TickMath32.sol
 COVERAGE_EXCLUSIONS ?= coverage.exclusions.json
 # Coverage runs every behavioral, routing, boundary, formal, and math test. Stateful invariants
 # and benchmark-only suites retain dedicated targets because they do not add useful source coverage.
-COVERAGE_SKIP_ARGS ?= --skip RadixMatchingEngineInvariant.t.sol --skip RadixMatchingEngineGas.t.sol --skip RadixMatchingEngineAccessList.t.sol
+COVERAGE_SKIP_ARGS ?= --skip RadixMatchingEngineInvariant.t.sol --skip DeepstateV1Invariant.t.sol --skip RadixMatchingEngineGas.t.sol --skip RadixMatchingEngineAccessList.t.sol
 COVERAGE_MIN_LINES ?= 100
 COVERAGE_MIN_STATEMENTS ?= 100
 COVERAGE_MIN_BRANCHES ?= 100
@@ -31,13 +32,13 @@ lint:
 	forge lint
 
 test:
-	forge test --force -vv --no-match-contract '.*RadixMatchingEngineInvariantTest.*'
+	forge test --force -vv --no-match-contract '$(INVARIANT_CONTRACTS)'
 
 invariant:
-	forge test --force --match-contract '.*RadixMatchingEngineInvariantTest.*' --match-test 'invariant_.*'
+	forge test --force --match-contract '$(INVARIANT_CONTRACTS)' --match-test 'invariant_.*'
 
 invariant-deep:
-	FOUNDRY_INVARIANT_RUNS=$(INVARIANT_RUNS) FOUNDRY_INVARIANT_DEPTH=$(INVARIANT_DEPTH) forge test --force --match-contract '.*RadixMatchingEngineInvariantTest.*' --match-test 'invariant_.*'
+	FOUNDRY_INVARIANT_RUNS=$(INVARIANT_RUNS) FOUNDRY_INVARIANT_DEPTH=$(INVARIANT_DEPTH) forge test --force --match-contract '$(INVARIANT_CONTRACTS)' --match-test 'invariant_.*'
 
 invariant-deep-shard:
 	python3 script/run_invariant_shards.py --runs "$(INVARIANT_RUNS)" --depth "$(INVARIANT_DEPTH)" --shards "$(INVARIANT_SHARDS)" --shard "$(INVARIANT_SHARD)"
@@ -64,12 +65,12 @@ tick-reference:
 	python3 script/check_tick_math.py --check test/TickMath32.t.sol
 
 coverage:
-	forge coverage --ir-minimum $(COVERAGE_SKIP_ARGS) --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
+	forge coverage --ir-minimum $(COVERAGE_SKIP_ARGS) --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract '$(INVARIANT_CONTRACTS)'
 
 coverage-check:
 	@set -e; \
 	tmp="$$(mktemp)"; \
-	if ! NO_COLOR=1 forge coverage --ir-minimum $(COVERAGE_SKIP_ARGS) --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest' > "$$tmp" 2>&1; then \
+	if ! NO_COLOR=1 forge coverage --ir-minimum $(COVERAGE_SKIP_ARGS) --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract '$(INVARIANT_CONTRACTS)' > "$$tmp" 2>&1; then \
 		cat "$$tmp"; \
 		rm -f "$$tmp"; \
 		exit 1; \
