@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.28;
 
-import {RoutingEngine} from "../src/RoutingEngine.sol";
+import {DeepstateV1} from "../src/DeepstateV1.sol";
 
-contract SinglePairEngineHarness is RoutingEngine {
+contract SinglePairEngineHarness is DeepstateV1 {
     struct LegacyOrderState {
         address owner;
         bool isBid;
@@ -32,7 +32,7 @@ contract SinglePairEngineHarness is RoutingEngine {
             noRest: false,
             fillOrKill: false
         });
-        bytes memory data = abi.encodeCall(RoutingEngine.fill, (params));
+        bytes memory data = abi.encodeCall(DeepstateV1.fill, (params));
         bytes memory result = _delegate(data);
         restingOrder = abi.decode(result, (bytes32));
         if (restingOrder != bytes32(0)) {
@@ -41,7 +41,7 @@ contract SinglePairEngineHarness is RoutingEngine {
     }
 
     function cancel(bytes32 order) external returns (uint256 baseAmount, uint256 quoteAmount) {
-        bytes memory data = abi.encodeCall(RoutingEngine.cancel, (BASE_TOKEN, QUOTE_TOKEN, uint256(0), order));
+        bytes memory data = abi.encodeCall(DeepstateV1.cancel, (BASE_TOKEN, QUOTE_TOKEN, uint256(0), order));
         bytes memory result = _delegate(data);
         (baseAmount, quoteAmount) = abi.decode(result, (uint256, uint256));
         delete legacyOrderOf[order];
