@@ -2260,9 +2260,10 @@ contract DeepstateV1 is Ownable {
     /// @param params Fill parameters.
     /// @return restingOrder Packed order node if any quantity rested, otherwise zero.
     /// @dev
-    /// The routed `epoch` is used for matching. If unmatched quantity is allowed to rest and the
-    /// routed book is exhausted or empty/stale, the remainder is routed to the current active book
-    /// for the pool. Settlement order is taker output, taker input, then protocol fee.
+    /// The routed `epoch` is matched first. If it is exhausted and unmatched quantity may rest, the
+    /// remainder next matches the pool's active book before any final remainder is inserted there.
+    /// This prevents a historical route from creating a crossed active book. Settlement order is
+    /// taker output, taker input, then protocol fee.
     function fill(FillParams calldata params) external nonReentrant returns (bytes32 restingOrder) {
         int256 token0Delta;
         int256 token1Delta;
@@ -2476,6 +2477,17 @@ contract DeepstateV1 is Ownable {
         (limitPrice, remaining, baseFilled, quoteAmount) =
             _matchOrValidate(params, routedBookId, routedBook, routedNonceAndFlags);
 
+        if (routedNonce == 1 && remaining != 0 && !params.noRest) {
+            uint160 activeBaseFilled;
+            uint256 activeQuoteAmount;
+            (remaining, activeBaseFilled, activeQuoteAmount) =
+                _matchActiveBookBeforeRest(params, routedBookId, limitPrice, remaining);
+            unchecked {
+                baseFilled += activeBaseFilled;
+                quoteAmount += activeQuoteAmount;
+            }
+        }
+
         if (remaining != 0 && params.fillOrKill) revert FillOrKill();
 
         if (params.isBid) {
@@ -2577,6 +2589,40 @@ contract DeepstateV1 is Ownable {
         }
     }
 
+    /// @notice Match an exhausted historical remainder against the pool's active book.
+    /// @param params Original fill parameters.
+    /// @param routedBookId Exhausted book that was matched first.
+    /// @param limitPrice Incoming limit price.
+    /// @param remaining Quantity left after matching the exhausted book.
+    /// @return newRemaining Quantity left after matching the active book.
+    /// @return baseFilled Additional base quantity matched in the active book.
+    /// @return quoteAmount Additional quote value matched in the active book.
+    /// @dev
+    /// A nonce-one book can remain matchable after rotation, but it cannot accept another order.
+    /// Matching the active book before resting preserves the uncrossed-book invariant across epoch
+    /// boundaries. A zero-nonce routed book does not use this path: stale uninitialized epochs must
+    /// still fail validation in `_restableBook` rather than implicitly routing into another book.
+    function _matchActiveBookBeforeRest(
+        FillParams calldata params,
+        bytes32 routedBookId,
+        int32 limitPrice,
+        uint160 remaining
+    ) private returns (uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount) {
+        bytes32 pid = poolId(params.token0, params.token1);
+        uint256 activeEpoch = _poolEpoch(_poolEpochAndHookFlags[pid]);
+        bytes32 activeId = bookId(params.token0, params.token1, activeEpoch);
+        if (activeId == routedBookId) return (remaining, 0, 0);
+
+        Book storage activeBook = books[activeId];
+        uint256 activeNonceAndFlags = activeBook.nonceAndFlags;
+        if (activeNonceAndFlags & _BOOK_NONCE_MASK == 0) return (remaining, 0, 0);
+
+        bool hookEnabled = _bookHookEnabled(activeNonceAndFlags, !params.isBid);
+        (, newRemaining, baseFilled, quoteAmount) =
+            _matchBook(activeId, activeBook, _pack(limitPrice, remaining, 0), params.isBid, hookEnabled);
+        if (hookEnabled) _executeTopOrderHook(params.token0, params.token1, activeId, !params.isBid);
+    }
+
     /// @notice Rest unmatched quantity in either the routed book or the current active book.
     /// @param token0 Lower token address.
     /// @param token1 Higher token address.
@@ -2591,8 +2637,9 @@ contract DeepstateV1 is Ownable {
     /// @return restingOrder Packed order with assigned nonce.
     /// @dev
     /// If the routed book still has nonce space, the remainder rests there. Otherwise the function
-    /// resolves the pool's current active book, initializing or rotating if needed. This avoids
-    /// silently placing maker liquidity in an expired namespace.
+    /// resolves the pool's current active book, initializing or rotating if needed. Before this
+    /// function receives a remainder from a historical nonce-one book, `_executeFill` has already
+    /// matched that remainder against the active book so insertion cannot cross existing liquidity.
     function _restRemaining(
         address token0,
         address token1,
@@ -2713,8 +2760,9 @@ contract DeepstateV1 is Ownable {
     /// @param token1 Higher token address.
     /// @dev
     /// The order that receives nonce `2` leaves `nextNonce == 1`; that exhausted book remains
-    /// matchable and cancelable, but any later rest should use the next active epoch. Hook flags are
-    /// removed from the old book and copied into the newly initialized book.
+    /// matchable and cancelable. A later fill may match it first, then matches the active successor
+    /// before resting there. Hook flags are removed from the old book and copied into the newly
+    /// initialized book.
     function _rotateIfExhausted(address token0, address token1) private {
         bytes32 pid = poolId(token0, token1);
         uint256 poolState = _poolEpochAndHookFlags[pid];

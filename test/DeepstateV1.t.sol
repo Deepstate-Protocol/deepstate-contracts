@@ -309,6 +309,51 @@ contract DeepstateV1Test is Test {
         assertEq(engine.ownerOfOrder(engine.orderId(oldBook, restingAsk)), address(0));
     }
 
+    function test_HistoricalRemainderMatchesActiveBookBeforeResting() public {
+        engine.setPoolHookConfig(address(token0), address(token1), address(this), true, true);
+        bytes32 oldBook = engine.bookId(address(token0), address(token1), 0);
+        engine.setNonceAndFlags(oldBook, 2);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(type(int32).min, 1, 0), true, false, false));
+        assertEq(engine.poolEpoch(engine.poolId(address(token0), address(token1))), 1);
+
+        vm.prank(alice);
+        bytes32 activeAsk = engine.fill(_fill(1, _order(-10, 5, 0), false, false, false));
+        assertTrue(activeAsk != bytes32(0));
+
+        vm.prank(bob);
+        bytes32 resting = engine.fill(_fill(0, _order(0, 5, 0), true, false, false));
+        assertEq(resting, bytes32(0));
+
+        (bytes32 askRoot, bytes32 bidRoot) = engine.roots(address(token0), address(token1), 1);
+        assertEq(askRoot, bytes32(0));
+        assertEq(bidRoot, bytes32(0));
+
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(address(token0), address(token1), 1, activeAsk);
+        assertEq(baseAmount, 0);
+        assertEq(quoteAmount, _quoteValue(-10, 5, false));
+    }
+
+    function test_HistoricalRemainderInitializesEmptyActiveBook() public {
+        bytes32 oldBook = engine.bookId(address(token0), address(token1), 0);
+        engine.setNonceAndFlags(oldBook, 2);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(type(int32).min, 1, 0), true, false, false));
+
+        bytes32 activeBook = engine.bookId(address(token0), address(token1), 1);
+        engine.setNonceAndFlags(activeBook, 0);
+
+        vm.prank(bob);
+        bytes32 resting = engine.fill(_fill(0, _order(-1, 5, 0), true, false, false));
+
+        assertEq(resting, _order(-1, 5, MAX_ORDER_NONCE));
+        assertEq(engine.nextNonce(address(token0), address(token1), 1), MAX_ORDER_NONCE - 1);
+        assertEq(engine.ownerOfOrder(engine.orderId(activeBook, resting)), bob);
+    }
+
     function test_FillRouteMatchesOldEpochAndNetsTransfers() public {
         vm.prank(alice);
         bytes32 ask = engine.fill(_fill(0, _order(10, 5, 0), false, false, false));
