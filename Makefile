@@ -1,4 +1,4 @@
-.PHONY: fmt lint test invariant invariant-deep invariant-deep-shard invariant-deep-shards gas-runtime gas-access-list snapshot-runtime snapshot-runtime-check build-size tick-reference coverage coverage-check slither formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
+.PHONY: fmt lint test invariant invariant-deep invariant-deep-shard invariant-deep-shards gas-runtime gas-access-list snapshot-runtime snapshot-runtime-check build-size tick-reference coverage coverage-check slither formal-smt formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
 
 INVARIANT_RUNS ?= 2048
 INVARIANT_DEPTH ?= 64
@@ -17,6 +17,7 @@ COVERAGE_MIN_BRANCHES ?= 100
 COVERAGE_MIN_FUNCS ?= 100
 SLITHER ?= uv tool run --from slither-analyzer slither
 HALMOS ?= uv tool run --python 3.12 --from halmos halmos
+SMT ?= uv run --with z3-solver python
 HALMOS_BUILD_OUT ?= out-halmos
 HALMOS_ARGS ?= --forge-build-out $(HALMOS_BUILD_OUT) --match-contract '.*FormalTest' --match-test '^testFuzz_Formal' --solver yices --solver-timeout-assertion 30s --no-status
 KONTROL_IMAGE ?= runtimeverificationinc/kontrol:ubuntu-jammy-1.0.255
@@ -93,6 +94,9 @@ formal-halmos:
 	forge build --force --build-info --out $(HALMOS_BUILD_OUT) test/RadixMatchingEngineFormal.t.sol
 	$(HALMOS) $(HALMOS_ARGS)
 
+formal-smt:
+	$(SMT) script/prove_protocol.py
+
 formal-kevm-build:
 	$(KONTROL) build $(KONTROL_BUILD_ARGS)
 
@@ -103,4 +107,4 @@ verify: fmt lint tick-reference test invariant snapshot-runtime-check build-size
 
 verify-deep: fmt lint tick-reference test invariant-deep-shards snapshot-runtime-check build-size slither
 
-verify-security: fmt lint test invariant-deep-shards snapshot-runtime-check build-size slither tick-reference coverage-check formal-halmos
+verify-security: fmt lint test invariant-deep-shards snapshot-runtime-check build-size slither tick-reference coverage-check formal-smt formal-halmos
