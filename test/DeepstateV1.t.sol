@@ -574,6 +574,32 @@ contract DeepstateV1Test is Test {
         assertEq(engine.ownerOfOrder(engine.orderId(newBook, resting)), address(0));
     }
 
+    function test_FinalEpochCannotAliasHookFlagsAndFailedRestIsAtomic() public {
+        uint256 finalEpoch = (uint256(1) << 254) - 1;
+        bytes32 pid = engine.poolId(address(token0), address(token1));
+        // `_poolEpochAndHookFlags` is mapping slot two; the strict storage-layout test pins this.
+        bytes32 poolStateSlot = keccak256(abi.encode(pid, uint256(2)));
+        vm.store(address(engine), poolStateSlot, bytes32(finalEpoch));
+
+        bytes32 finalBook = engine.bookId(address(token0), address(token1), finalEpoch);
+        engine.setNonceAndFlags(finalBook, 2);
+        bytes32 candidate = _order(10, 5, 2);
+        uint256 aliceToken1Before = token1.balanceOf(alice);
+
+        vm.startPrank(alice);
+        vm.expectRevert(DeepstateV1.EpochExhausted.selector);
+        engine.fill(_fill(finalEpoch, _order(10, 5, 0), true, false, false));
+        vm.stopPrank();
+
+        assertEq(engine.poolEpoch(pid), finalEpoch);
+        assertEq(engine.nextNonce(address(token0), address(token1), finalEpoch), 2);
+        (bytes32 askRoot, bytes32 bidRoot) = engine.roots(address(token0), address(token1), finalEpoch);
+        assertEq(askRoot, bytes32(0));
+        assertEq(bidRoot, bytes32(0));
+        assertEq(engine.ownerOfOrder(engine.orderId(finalBook, candidate)), address(0));
+        assertEq(token1.balanceOf(alice), aliceToken1Before);
+    }
+
     function test_ExhaustedBookAutomaticallyDisablesRest() public {
         bytes32 oldBook = engine.bookId(address(token0), address(token1), 0);
         engine.setNonceAndFlags(oldBook, 1);

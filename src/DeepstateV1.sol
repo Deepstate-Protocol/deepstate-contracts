@@ -221,6 +221,8 @@ contract DeepstateV1 is Ownable {
     error InvalidOrder();
     /// @notice The decrementing 32-bit nonce space has been exhausted.
     error NonceExhausted();
+    /// @notice A pool consumed the final epoch representable beside its packed hook flags.
+    error EpochExhausted();
     /// @notice Routed book has not been initialized.
     error InvalidBook();
     /// @notice A fill-or-kill leg could not fully fill.
@@ -2675,6 +2677,7 @@ contract DeepstateV1 is Ownable {
         bytes32 pid = poolId(token0, token1);
         uint256 poolState = _poolEpochAndHookFlags[pid];
         uint256 oldEpoch = _poolEpoch(poolState);
+        if (oldEpoch == _POOL_EPOCH_MASK) revert EpochExhausted();
         uint256 bookHookFlags = _bookHookFlags(poolState);
         if (bookHookFlags != 0) _setBookHookFlags(books[bookId(token0, token1, oldEpoch)], 0);
 

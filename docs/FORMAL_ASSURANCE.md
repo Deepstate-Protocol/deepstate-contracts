@@ -1,14 +1,19 @@
 # Formal Assurance Scope
 
 This document maps each safety-critical subsystem to its automated evidence. It distinguishes
-symbolic proofs from bounded state exploration and sampled differential checks. Passing these gates
-does not constitute an external audit or a proof of every possible contract execution.
+complete-domain algebraic proofs, production-bytecode symbolic proofs, mathematical induction,
+bounded state exploration, and sampled differential checks. The precise theorem statements and
+assumptions are in [PROOF_OBLIGATIONS.md](PROOF_OBLIGATIONS.md), with the history-preservation
+arguments in [INDUCTIVE_PROOFS.md](INDUCTIVE_PROOFS.md). Passing these gates does not replace an
+independent audit of the exact release bytecode.
 
 ## Evidence Classes
 
 | Class | Mechanism | Meaning |
 |---|---|---|
+| Complete-domain SMT | Z3 over integer and bit-vector models source-bound to production expressions | The stated finite-domain algebraic or encoding proposition has no counterexample and its assumptions are satisfiable. |
 | Symbolic | Halmos with Yices | The assertion holds for every input satisfying the assumptions in the named harness. |
+| Inductive | Explicit base case and operation-local preservation arguments | The local theorems lift to every finite valid protocol history under the stated trusted bases. |
 | Stateful model | Foundry invariant handlers | Random operation sequences preserve an independently maintained accounting and order-book model. |
 | Differential | Independent Python `Decimal` and Solidity quote oracles | Production output agrees with a separately implemented reference over the checked domain. |
 | Behavioral | Unit, fuzz, boundary, corruption, reentrancy, and gas-isolated tests | Named execution paths have concrete regression coverage. |
@@ -72,13 +77,18 @@ histories.
 ## Tick And Quote Oracles
 
 `script/check_tick_math.py` parses the production factor tables rather than importing generated test
-answers. It checks every table constant against a high-precision `Decimal` exponential calculation,
-then checks deterministic boundary, exponent-boundary, nibble-boundary, and seeded random ticks. For
-each sampled tick it verifies:
+answers. It checks every table constant with directed high-precision `Decimal` evaluation. Each
+constant under-approximates its exact negative fractional power by fewer than five Q128 ulps. An
+interval composition proof covers the at-most-six Q128 multiplications and reciprocal branch, yielding
+a full-domain factor-error envelope. The independently computed minimum adjacent-tick gap exceeds the
+worst aligned error by more than the required margin, which proves strict monotonicity for all
+`2**32` ticks conditional on the directed transcendental reference. Deterministic boundary,
+exponent-boundary, nibble-boundary, and seeded random ticks then serve as an additional implementation
+cross-check. For each sampled tick the script also verifies:
 
 - the independently calculated exponent shift;
 - normalized Q128 factor bounds;
-- at most 64 Q128 ulps of factor error; and
+- the tighter sampled error threshold, within the certified global Q128-ulp envelope; and
 - strict monotonicity against the next tick.
 
 `test/QuoteMath.sol` always reconstructs the full 512-bit quantity-factor product. Production-path
@@ -104,22 +114,32 @@ The assurance claims depend on the following conditions:
    matching correctness, and missed hook calls must be reconciled by the hook consumer.
 5. Administrative fee and hook configuration is controlled according to `SECURITY.md`.
 
-## Residual Scope
+## Proof Scope And Residual Boundaries
 
-The following claims are intentionally not made:
+`script/prove_protocol.py` discharges the complete numeric, packing, transient-namespace, guarded
+epoch, local tree-transition, priority, route, fee, hook-state, and termination measures used by the
+inductive proof. It first checks that each theorem's assumptions are satisfiable, preventing vacuous
+success. The model is fail-closed against the critical production expressions it represents.
 
-- Halmos does not quantify arbitrary-length order histories or arbitrary tree populations.
-- Direct production/oracle quote equivalence is symbolic at seven representative boundary ticks,
-  not at all `2**32` tick factors. Tick `-1` and tick `1_000_000_000` remain full-width differential
-  fuzz checks for the solver-tractability reason documented above.
-- The independent real-number tick oracle samples the 32-bit tick domain; it does not enumerate all
-  `2**32` ticks. The decomposition bounds themselves are symbolically proved for the complete domain.
-- Stateful fuzzing does not prove that no longer or adversarially selected sequence can fail.
-- The repository does not prove properties of third-party token or hook implementations.
-- Runtime gas bounds and liveness under a block gas limit are benchmarked, not formally proved.
+Halmos intentionally proves smaller production-bytecode transition kernels rather than attempting an
+unbounded symbolic history in one query. The explicit induction in `INDUCTIVE_PROOFS.md` lifts those
+kernels and the complete-domain local lemmas to arbitrary finite valid histories. Stateful fuzzing
+does not supply that universal proof; it remains an independent attempt to falsify the theorem with
+long concrete histories and a separate accounting model.
 
-These residuals are why an independent audit of the exact release commit remains a deployment
-requirement even when every automated gate passes.
+The following stronger claims remain intentionally outside the theorem:
+
+- collision-free Keccak over an input domain larger than 256 bits;
+- correct balance accounting for a token that lies, rebases, taxes transfers, or otherwise violates
+  exact-transfer semantics;
+- successful delivery of a best-effort hook notification;
+- Solidity compiler, EVM, SMT-solver, or directed-transcendental-library correctness; and
+- successful execution under every possible chain block-gas limit.
+
+Termination is proved for every finite input in the unmetered semantics. A mixed-price subtree or a
+sufficiently large route can still require more gas than a particular block permits and therefore
+revert atomically. These explicit trusted bases and environmental limits are why an independent audit
+of the exact release commit remains a deployment requirement.
 
 ## Reproduction
 
@@ -133,6 +153,7 @@ Run the principal assurance layers separately:
 
 ```sh
 make formal-halmos
+make formal-smt
 make tick-reference
 make invariant-deep-shards
 make coverage-check

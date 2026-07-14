@@ -5,7 +5,7 @@ import argparse
 import random
 import re
 import sys
-from decimal import Decimal, ROUND_FLOOR, getcontext
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, getcontext
 from pathlib import Path
 
 
@@ -16,6 +16,8 @@ HALF_FRACTION = 1 << 25
 MIN_TICK = -(1 << 31)
 MAX_TICK = (1 << 31) - 1
 MAX_ULP_ERROR = 64
+MAX_COMPONENT_ERROR = 5
+MAX_COMPONENT_MULTIPLIES = 6
 RANDOM_SAMPLES = 4096
 VECTOR_PATTERN = re.compile(r"_assertReference\((-?\d+),\s*(0x[0-9a-f]+|\d+),\s*(\d+)\);")
 
@@ -106,6 +108,54 @@ class ProductionFactors:
                 error = reference - encoded
                 if not 0 <= error <= 4:
                     raise ValueError(f"{name}[{value}] is {error} Q128 ulps below its independent floor")
+                if encoded <= 0 or encoded > Q128:
+                    raise ValueError(f"{name}[{value}] is outside the negative-factor interval (0, Q128]")
+                if value != 0 and encoded == Q128:
+                    raise ValueError(f"{name}[{value}] must be strictly below Q128")
+
+
+def global_factor_error_bound():
+    """Bound every composed factor without enumerating all 2**26 fractional inputs.
+
+    Each table value is an under-approximation less than five Q128 ulps below its exact
+    multiplicand. Multiplication followed by a Q128 floor adds less than one further ulp. Since all
+    multiplicands are at most Q128, each of the at most six composition steps increases absolute
+    error by less than six ulps. The reciprocal half of the tick interval amplifies this error by at
+    most two because the inverted factor is at least Q128 / sqrt(2).
+    """
+    composed_error = MAX_COMPONENT_ERROR + MAX_COMPONENT_MULTIPLIES * (MAX_COMPONENT_ERROR + 1)
+    inverse_floor = DECIMAL_Q128 / Decimal(2).sqrt() - Decimal(composed_error)
+    reciprocal_error = (
+        DECIMAL_Q128 * DECIMAL_Q128 * Decimal(composed_error) / (inverse_floor * inverse_floor)
+    ) + Decimal(2)
+    return max(composed_error, int(reciprocal_error.to_integral_value(rounding=ROUND_CEILING)))
+
+
+def verify_global_factor_bounds(error_bound):
+    """Certify the factor limits consumed by the complete-domain quote proof."""
+    inverse_floor = DECIMAL_Q128 / Decimal(2).sqrt() - Decimal(error_bound)
+    reciprocal_ceiling = (DECIMAL_Q128 * DECIMAL_Q128 / inverse_floor).to_integral_value(
+        rounding=ROUND_CEILING
+    )
+    if reciprocal_ceiling >= 2 * DECIMAL_Q128:
+        raise ValueError("reciprocal factors are not globally below 2**129")
+    return int(reciprocal_ceiling)
+
+
+def verify_global_tick_separation(error_bound):
+    """Prove the analytic error envelope cannot reverse any pair of adjacent ticks."""
+    tick_ratio = (LN2 * Decimal(3) / Decimal(1 << 26)).exp()
+    minimum_normalized_factor = DECIMAL_Q128 / Decimal(2).sqrt()
+    minimum_gap = int(
+        (minimum_normalized_factor * (tick_ratio - Decimal(1))).to_integral_value(rounding=ROUND_FLOOR)
+    )
+    # Adjacent ticks can cross one binary-exponent boundary. Aligning both rational prices to the
+    # larger divisor scales at most one error term by two, so four bounds is conservative.
+    if minimum_gap <= 4 * error_bound:
+        raise ValueError(
+            f"global factor error {error_bound} is too large for minimum adjacent gap {minimum_gap}"
+        )
+    return minimum_gap
 
 
 def reference_factor(tick):
@@ -200,6 +250,9 @@ def main():
         source = SOURCE.read_text(encoding="utf-8")
         production = ProductionFactors(source)
         production.verify_constants()
+        global_error = global_factor_error_bound()
+        maximum_factor = verify_global_factor_bounds(global_error)
+        minimum_gap = verify_global_tick_separation(global_error)
     except (OSError, ValueError) as exc:
         print(f"tick reference check failed: {exc}", file=sys.stderr)
         return 1
@@ -247,7 +300,9 @@ def main():
     vector_suffix = f", {vector_count} generated Solidity vectors" if vector_count else ""
     print(
         f"tick reference check passed: {len(ticks)} ticks, max error {max_error} Q128 ulps "
-        f"at tick {worst_tick}{vector_suffix}"
+        f"at tick {worst_tick}{vector_suffix}; full-domain error <= {global_error} ulps, "
+        f"factor < 2**129 (analytic max {maximum_factor}), "
+        f"minimum adjacent normalized gap >= {minimum_gap} ulps"
     )
     return 0
 

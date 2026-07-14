@@ -65,6 +65,8 @@ Higher order nonce still means earlier time priority at the same price.
 See [SECURITY.md](SECURITY.md) for the deployment checklist, administrative trust model, supported-token requirements, and vulnerability-reporting process. The contracts have extensive automated verification but have not yet received an independent external audit.
 See [docs/FORMAL_ASSURANCE.md](docs/FORMAL_ASSURANCE.md) for the property-to-evidence map,
 symbolic proof domains, stateful model scope, and residual assumptions.
+See [docs/PROOF_OBLIGATIONS.md](docs/PROOF_OBLIGATIONS.md) for the exact theorem registry and
+[docs/INDUCTIVE_PROOFS.md](docs/INDUCTIVE_PROOFS.md) for the finite-history preservation proof.
 
 ## Commands
 
@@ -80,6 +82,7 @@ make snapshot-runtime-check
 make tick-reference
 make coverage
 make coverage-check
+make formal-smt
 make formal-halmos
 make formal-kevm-build
 make formal-kevm
@@ -110,7 +113,8 @@ make formal-halmos
 `make verify` runs the invariant contract through its dedicated `invariant` target, so the regular `test` target excludes that contract to avoid duplicate invariant execution.
 `invariant-deep-shard` and `invariant-deep-shards` split the deep invariant suite into deterministic batches with `INVARIANT_SHARDS` and `INVARIANT_SHARD`, which makes long 2048-run profiles easier to audit and retry.
 `make verify` and `make verify-deep` include `snapshot-runtime-check` so runtime gas drift is reviewed instead of silently accepted.
-Pull requests run both `make verify` and the additional security job for `make coverage-check` plus `make formal-halmos`.
+Pull requests run both `make verify` and the additional security job for the coverage, SMT, and Halmos
+formal gates included by `make verify-security`.
 The security job also runs `make tick-reference`, an independent Python `Decimal` check of the
 logarithmic settlement constants and thousands of deterministic full-domain tick samples.
 The Halmos gate proves bid- and ask-side accounting for every quantity pair in `[1, 8]`, same-tick
@@ -121,7 +125,12 @@ ERC-20 model so the solver analyzes matching state rather than third-party token
 state sequences and multi-pool interactions remain covered by independent models, fuzz tests, and
 stateful invariants as detailed in the assurance map.
 `coverage-check` emits `lcov.info` and fails unless the tracked source contracts stay at 100% line, statement, branch, and function coverage after explicit exclusions.
-`make verify-security` is the heavyweight local gate: it runs the deep invariant profile, runtime gas snapshot check, build-size check, clean Slither gate, enforced contract-focused Forge LCOV plus summary coverage, and Halmos symbolic tests. `formal-kevm-build` and `formal-kevm` are optional KEVM/Kontrol targets and require Docker.
+`make formal-smt` discharges the complete-domain arithmetic, encoding, namespace, epoch, route,
+and termination lemmas used by the protocol's inductive proofs. `make verify-security` is the
+heavyweight local gate: it runs the deep invariant profile, runtime gas snapshot check, build-size
+check, clean Slither gate, enforced contract-focused Forge LCOV plus summary coverage, the SMT
+lemmas, and Halmos symbolic tests. `formal-kevm-build` and `formal-kevm` are optional KEVM/Kontrol
+targets and require Docker.
 
 Deploy script:
 
