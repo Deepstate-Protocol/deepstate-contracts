@@ -102,8 +102,7 @@ contract DeepstateV1Test is Test {
         vm.expectRevert(bytes4(keccak256("InvalidToken()")));
         engine.activeBookId(address(token1), address(token0));
 
-        vm.expectRevert(bytes4(keccak256("InvalidToken()")));
-        engine.nextNonce(address(0), address(token1), 0);
+        assertEq(engine.nextNonce(address(0), address(token1), 0), 0);
 
         vm.expectRevert(bytes4(keccak256("InvalidToken()")));
         engine.setPoolHookConfig(address(token1), address(token0), address(this), true, false);

@@ -100,12 +100,40 @@ def bind_model_to_source():
         "if (current < type(int256).min + signedAmount) revert DeltaOverflow();",
         "return bytes32(_FEE_DELTA_DOMAIN | uint256(uint160(token)));",
         "feeAmount = whole * uint256(feeBps) + (remainder * uint256(feeBps)) / _BPS_DENOMINATOR;",
+        "token0Delta = int256(uint256(baseFilled));",
+        "token0Delta = -int256(uint256(baseFilled));",
+        "token0Delta -= int256(uint256(remaining));",
+        "filledQuantity = originalQuantity - remainingQuantity;",
+        "baseAmount = filledQuantity;",
+        "baseAmount = remainingQuantity;",
+        "nextToken0Delta = token0Delta - int256(feeAmount);",
+        "nativeRefund = _nativeRefund(nativeDelta);",
+        "nativeRefund = _nativeRefund(token0 == address(0) ? amount0 : int256(0));",
+        "if (msg.value < required) revert InvalidNativeValue();",
+        "refund = msg.value - required;",
+        "_refundNativeValue(nativeRefund);",
+        "if (amount != 0) _safeTransferOut(address(0), msg.sender, amount);",
+        "_safeTransferOut(params.isBid ? params.token0 : params.token1, feeRecipient, feeAmount);",
+        "if (baseAmount != 0) _safeTransferOut(token0, owner, baseAmount);",
+        "_safeTransferOut(token, msg.sender, uint256(amount));",
+        "_safeTransferOut(token0, msg.sender, uint256(amount0));",
+        "if (amount != 0) _safeTransferOut(token, recipient, amount);",
+        "if iszero(lt(token0, token1)) {",
+        "if (token == address(0)) {",
+        "to.safeTransferETH(amount);",
         "if tload(_REENTRANCY_GUARD_SLOT) {",
         "try IHook(hook).execute{gas: _HOOK_GAS_LIMIT}",
     )
     missing = [fragment for fragment in fragments if fragment not in source]
     if missing:
         raise ProofFailure(f"production/model binding is stale; missing source fragment: {missing[0]}")
+
+    # Every native outflow must pass through the six modelled call sites and the single transfer
+    # helper. A future direct ETH transfer or additional helper call must extend the proof first.
+    if source.count("_safeTransferOut(") != 7:
+        raise ProofFailure("production/model binding is stale; unexpected native-capable outflow site count")
+    if source.count("safeTransferETH(") != 1:
+        raise ProofFailure("production/model binding is stale; unexpected direct native transfer count")
 
 
 def prove_tick_decomposition(p):
@@ -938,6 +966,233 @@ def prove_route_and_signed_accounting(p):
     )
 
 
+def prove_native_eth_solvency(p):
+    """Prove native collateral preservation for every local protocol transition.
+
+    Native liability is the remaining quantity of an active ask plus the filled quantity of an
+    active bid. The induction in docs/INDUCTIVE_PROOFS.md composes these local equations over every
+    finite protocol history and permits arbitrary nonnegative unsolicited ETH credits.
+    """
+
+    empty_balance = Int("native_empty_balance")
+    empty_liability = Int("native_empty_liability")
+    p.prove(
+        "A7.empty-native-state-is-exactly-collateralized",
+        empty_balance == empty_liability,
+        empty_balance == 0,
+        empty_liability == 0,
+    )
+
+    original = Int("native_order_original")
+    remaining = Int("native_order_remaining")
+    ask_order_liability = remaining
+    bid_order_liability = original - remaining
+    order_domain = (
+        original >= 1,
+        original <= UINT160_MAX,
+        remaining >= 0,
+        remaining <= original,
+    )
+    p.prove(
+        "A7.native-maker-liability-partition",
+        And(
+            ask_order_liability >= 0,
+            ask_order_liability <= original,
+            bid_order_liability >= 0,
+            bid_order_liability <= original,
+            ask_order_liability + bid_order_liability == original,
+        ),
+        *order_domain,
+    )
+
+    engine_before = Int("native_engine_before")
+    ask_liability = Int("native_ask_liability")
+    bid_liability = Int("native_bid_liability")
+    matched_asks = Int("native_matched_asks")
+    native_fee = Int("native_bid_fee")
+    liability_before = ask_liability + bid_liability
+    liability_after_bid = ask_liability - matched_asks + bid_liability
+    user_bid_output = matched_asks - native_fee
+    engine_after_bid = engine_before - user_bid_output - native_fee
+    bid_fill_domain = (
+        engine_before >= liability_before,
+        ask_liability >= 0,
+        bid_liability >= 0,
+        matched_asks >= 0,
+        matched_asks <= ask_liability,
+        native_fee >= 0,
+        native_fee <= matched_asks,
+    )
+    p.prove(
+        "A7.incoming-bid-preserves-native-surplus",
+        And(
+            engine_after_bid - liability_after_bid == engine_before - liability_before,
+            engine_after_bid >= liability_after_bid,
+        ),
+        *bid_fill_domain,
+    )
+    p.prove(
+        "A7.incoming-bid-preserves-native-equality",
+        engine_after_bid == liability_after_bid,
+        *bid_fill_domain,
+        engine_before == liability_before,
+    )
+
+    matched_bids = Int("native_matched_bids")
+    resting_ask = Int("native_resting_ask")
+    incoming_ask_debit = matched_bids + resting_ask
+    liability_after_ask = liability_before + incoming_ask_debit
+    engine_after_ask = engine_before + incoming_ask_debit
+    ask_fill_domain = (
+        engine_before >= liability_before,
+        ask_liability >= 0,
+        bid_liability >= 0,
+        matched_bids >= 0,
+        resting_ask >= 0,
+        matched_bids + resting_ask <= UINT160_MAX,
+    )
+    p.prove(
+        "A7.incoming-ask-and-rest-preserve-native-surplus",
+        And(
+            engine_after_ask - liability_after_ask == engine_before - liability_before,
+            engine_after_ask >= liability_after_ask,
+        ),
+        *ask_fill_domain,
+    )
+    p.prove(
+        "A7.incoming-ask-and-rest-preserve-native-equality",
+        engine_after_ask == liability_after_ask,
+        *ask_fill_domain,
+        engine_before == liability_before,
+    )
+
+    ask_remaining = Int("native_cancel_ask_remaining")
+    cancel_ask_domain = (
+        engine_before >= liability_before,
+        liability_before >= ask_remaining,
+        ask_remaining >= 0,
+    )
+    p.prove(
+        "A7.ask-cancel-preserves-native-surplus",
+        And(
+            (engine_before - ask_remaining) - (liability_before - ask_remaining)
+            == engine_before - liability_before,
+            engine_before - ask_remaining >= liability_before - ask_remaining,
+        ),
+        *cancel_ask_domain,
+    )
+
+    bid_original = Int("native_cancel_bid_original")
+    bid_remaining = Int("native_cancel_bid_remaining")
+    bid_filled_claim = bid_original - bid_remaining
+    cancel_bid_domain = (
+        engine_before >= liability_before,
+        bid_original >= 1,
+        bid_original <= UINT160_MAX,
+        bid_remaining >= 0,
+        bid_remaining <= bid_original,
+        liability_before >= bid_filled_claim,
+    )
+    p.prove(
+        "A7.bid-cancel-or-claim-preserves-native-surplus",
+        And(
+            (engine_before - bid_filled_claim) - (liability_before - bid_filled_claim)
+            == engine_before - liability_before,
+            engine_before - bid_filled_claim >= liability_before - bid_filled_claim,
+        ),
+        *cancel_bid_domain,
+    )
+
+    native_delta = Int("native_route_user_delta")
+    accumulated_fee = Int("native_route_fee")
+    required_value = If(native_delta < 0, -native_delta, 0)
+    user_payout = If(native_delta > 0, native_delta, 0)
+    supplied_value = Int("native_supplied_value")
+    native_refund = supplied_value - required_value
+    p.prove(
+        "A7.native-msg-value-refund-and-payout-net-to-negative-delta",
+        supplied_value - native_refund - user_payout == -native_delta,
+        native_delta >= -(1 << 255),
+        native_delta <= INT256_MAX,
+        supplied_value >= required_value,
+    )
+    p.prove(
+        "A7.native-refund-is-nonnegative-excess",
+        And(native_refund >= 0, supplied_value - native_refund == required_value),
+        native_delta >= -(1 << 255),
+        native_delta <= INT256_MAX,
+        supplied_value >= required_value,
+    )
+
+    liability_change = Int("native_route_liability_change")
+    liability_after_route = liability_before + liability_change
+    engine_after_route = engine_before + supplied_value - native_refund - user_payout - accumulated_fee
+    route_domain = (
+        engine_before >= liability_before,
+        liability_before >= 0,
+        liability_after_route >= 0,
+        native_delta >= -(1 << 255),
+        native_delta <= INT256_MAX,
+        accumulated_fee >= 0,
+        supplied_value >= required_value,
+        liability_change == -native_delta - accumulated_fee,
+    )
+    p.prove(
+        "A7.native-route-settlement-preserves-surplus",
+        And(
+            engine_after_route - liability_after_route == engine_before - liability_before,
+            engine_after_route >= liability_after_route,
+        ),
+        *route_domain,
+    )
+    p.prove(
+        "A7.native-route-settlement-preserves-equality",
+        engine_after_route == liability_after_route,
+        *route_domain,
+        engine_before == liability_before,
+    )
+
+    first_delta = Int("native_first_leg_user_delta")
+    second_delta = Int("native_second_leg_user_delta")
+    first_fee = Int("native_first_leg_fee")
+    second_fee = Int("native_second_leg_fee")
+    first_liability_change = Int("native_first_leg_liability_change")
+    second_liability_change = Int("native_second_leg_liability_change")
+    p.prove(
+        "A7.native-route-leg-composition",
+        first_liability_change + second_liability_change
+        == -(first_delta + second_delta) - (first_fee + second_fee),
+        first_fee >= 0,
+        second_fee >= 0,
+        first_liability_change == -first_delta - first_fee,
+        second_liability_change == -second_delta - second_fee,
+    )
+
+    unsolicited_credit = Int("native_unsolicited_credit")
+    p.prove(
+        "A7.unsolicited-native-credit-cannot-create-insolvency",
+        engine_before + unsolicited_credit >= liability_before,
+        engine_before >= liability_before,
+        liability_before >= 0,
+        unsolicited_credit >= 0,
+    )
+    p.prove(
+        "A7.unsolicited-native-credit-is-the-exact-new-surplus",
+        (engine_before + unsolicited_credit) - liability_before
+        == (engine_before - liability_before) + unsolicited_credit,
+        engine_before >= liability_before,
+        liability_before >= 0,
+        unsolicited_credit >= 0,
+    )
+    p.prove(
+        "A7.native-equality-survives-only-zero-unsolicited-credit",
+        ((engine_before + unsolicited_credit == liability_before) == (unsolicited_credit == 0)),
+        engine_before == liability_before,
+        liability_before >= 0,
+        unsolicited_credit >= 0,
+    )
+
+
 def prove_atomicity_and_external_boundaries(p):
     guard_before = Int("guard_before")
     guarded_entry_allowed = guard_before == 0
@@ -1044,6 +1299,7 @@ def main():
         prove_matching_priority_and_accounting(prover)
         prove_hook_top_transitions(prover)
         prove_route_and_signed_accounting(prover)
+        prove_native_eth_solvency(prover)
         prove_atomicity_and_external_boundaries(prover)
         prove_termination_measures(prover)
     except (OSError, ProofFailure) as exc:

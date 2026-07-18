@@ -1,6 +1,7 @@
 # Radix Matching
 
-Foundry prototype for a two-sided ERC20 matching engine backed by a single `mapping(bytes32 => Branch)` radix tree store.
+Foundry prototype for a two-sided native-ETH/ERC20 matching engine backed by a single
+`mapping(bytes32 => Branch)` radix tree store.
 
 ## Order Node Layout
 
@@ -57,7 +58,7 @@ Higher order nonce still means earlier time priority at the same price.
 
 - Builds are pinned to Solidity `0.8.28` with Foundry compiler auto-detection disabled and optimizer enabled. Do not deploy bytecode built with a different compiler/profile without rerunning the full test and invariant suite.
 - `evm_version = "cancun"` is required because the reentrancy guard uses transient storage opcodes.
-- Base and quote tokens must be standard exact-balance ERC20s selected by deployment configuration. Every transfer is assumed to debit the source and credit the recipient by exactly the requested amount. Fee-on-transfer, rebasing, mint-on-transfer, or otherwise inexact tokens are out of scope for this contract and must be excluded before deployment.
+- `address(0)` denotes native ETH and is valid only as sorted token0. Native settlement requires enough `msg.value` to cover the caller's net ETH debit and refunds all excess after outputs and fees. Every nonzero token must be a standard exact-balance ERC20 selected by deployment configuration. Every ERC20 transfer is assumed to debit the source and credit the recipient by exactly the requested amount. Fee-on-transfer, rebasing, mint-on-transfer, or otherwise inexact tokens are out of scope for this contract and must be excluded before deployment.
 - Filled resting orders are claimed through `cancel(token0, token1, epoch, order)`, which also withdraws any unfilled remainder.
 - Pool hooks are best-effort notifications. Calls are gas-capped and failures are swallowed, so hook implementations must tolerate missed notifications and reconcile stale state themselves.
 - Protocol fees are capped at 100 bps and apply only to matched taker output. The fee calculation supports the full signed settlement-delta domain without intermediate multiplication overflow.
@@ -119,14 +120,14 @@ The security job also runs `make tick-reference`, an independent Python `Decimal
 logarithmic settlement constants and thousands of deterministic full-domain tick samples.
 The Halmos gate proves bid- and ask-side accounting for every quantity pair in `[1, 8]`, same-tick
 aggregate settlement states, best-price priority, historical-book no-rest behavior, the complete
-signed-tick exponent/shift domain, representative full-width quote arithmetic, two-limb quotient
-reconstruction, and generic binary rounding-correction bounds. It uses a minimal exact-transfer
-ERC-20 model so the solver analyzes matching state rather than third-party token internals. Broader
-state sequences and multi-pool interactions remain covered by independent models, fuzz tests, and
-stateful invariants as detailed in the assurance map.
+signed-tick exponent/shift domain, native ETH settlement transitions, representative full-width
+quote arithmetic, two-limb quotient reconstruction, and generic binary rounding-correction bounds.
+It uses a minimal exact-transfer ERC-20 model so the solver analyzes matching state rather than
+third-party token internals. Broader state sequences and multi-pool interactions remain covered by
+independent models, fuzz tests, and stateful invariants as detailed in the assurance map.
 `coverage-check` emits `lcov.info` and fails unless the tracked source contracts stay at 100% line, statement, branch, and function coverage after explicit exclusions.
 `make formal-smt` discharges the complete-domain arithmetic, encoding, namespace, epoch, route,
-and termination lemmas used by the protocol's inductive proofs. `make verify-security` is the
+native-solvency, and termination lemmas used by the protocol's inductive proofs. `make verify-security` is the
 heavyweight local gate: it runs the deep invariant profile, runtime gas snapshot check, build-size
 check, clean Slither gate, enforced contract-focused Forge LCOV plus summary coverage, the SMT
 lemmas, and Halmos symbolic tests. `formal-kevm-build` and `formal-kevm` are optional KEVM/Kontrol

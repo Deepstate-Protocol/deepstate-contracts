@@ -34,6 +34,8 @@ independent audit of the exact release bytecode.
 | Best bid priority | Better-priced maker is partially or fully consumed before a worse-priced maker | `testFuzz_FormalAskConsumesBestBidFirst` |
 | Historical ask no-rest | Underfill, exact fill, and overfill after production epoch rotation | `testFuzz_FormalHistoricalAskNeverRestsRemainder` |
 | Historical bid no-rest | Bid-side mirror of the preceding states | `testFuzz_FormalHistoricalBidNeverRestsRemainder` |
+| Native bid settlement | Every fee rate in `[0, 100]` and representative positive quantities; native ask liability is fully consumed and split between taker output and fee | `testFuzz_FormalNativeBidFillPreservesSolvency` |
+| Native ask settlement | Every maker/taker quantity pair in `[1, 8]`, covering underfill, exact fill, overfill, bid claim, and resting-ask cancellation | `testFuzz_FormalNativeAskFillAndRestPreserveSolvency` |
 | Optimized quote assembly | Every `uint160` quantity and both rounding modes at seven fixed exponent/sign boundary ticks: `int32.min`, `int32.min + 1`, `-1_000_000_000`, `0`, `1`, `int32.max - 1`, and `int32.max` | `QuoteArithmeticFormalTest.testFuzz_FormalQuote*` |
 | Tick decomposition bounds | Every `int32` tick | `testFuzz_FormalTickDecompositionBounds` |
 | Quote limb reconstruction | Arbitrary 256-bit high and low product limbs at production shifts 32, 128, and 224; remainder bounds at every shift in `[32, 224]` | `testFuzz_FormalQuoteLimbReconstruction*`, `testFuzz_FormalQuoteRemainderBound` |
@@ -70,9 +72,42 @@ cancels, fee changes, hook changes, and accelerated epoch rotation. Its invarian
 - pool epochs, fee configuration, hook configuration, validated hook calls, and absence of unexpected
   fill, route, or cancel reverts.
 
+The native-asset handler in `test/DeepstateV1NativeETHInvariant.t.sol` maintains an independent
+price-time matching and settlement model for an `ETH / ERC20` pool. Random actions include resting
+bids and asks, no-rest taker fills in both directions, partial and full maker fills, cancels, claims,
+and fee changes. Its invariants jointly check:
+
+- exact equality between the engine's ETH balance and outstanding native maker liabilities throughout
+  the model's protocol-mediated histories;
+- exact equality between ERC20 collateral and outstanding quote claims;
+- per-actor and fee-recipient balances, plus conservation of both assets; and
+- agreement among model quantities, radix leaves, book-scoped owners, order sides, and fee config.
+
 `make invariant-deep-shards` partitions the configured 2,048-run, depth-64 campaign into deterministic
 shards. Stateful invariant results are bounded exploration, not universal proofs over arbitrary-length
 histories.
+
+## Native Solvency Theorem
+
+Native solvency does not rely on the bounded stateful campaign. `make formal-halmos` symbolically
+executes the production native fill, rest, fee, cancel, claim, and payout transitions across their
+control-flow relations. `make formal-smt` proves the complete-width transition equations for native
+bid fills, ask fills, resting asks, native fee splitting, both cancel/claim cases, direct settlement,
+route composition, minimum `msg.value`, exact excess refunds, and unsolicited credits. The source-binding gate also
+enumerates every native-capable production outflow site and fails if another site is introduced
+without extending the proof.
+
+`INDUCTIVE_PROOFS.md` supplies the empty-state base and lifts those local equations over every finite
+reachable history. If `L_ETH` is the sum of remaining native asks and filled native bids across all
+books, the resulting universal safety theorem is
+
+`address(engine).balance >= L_ETH`.
+
+Protocol transitions preserve the difference exactly. ETH forced into the engine can only increase
+that difference, so it cannot create insolvency. The stronger equality
+`address(engine).balance == L_ETH` holds for the complete class of protocol-mediated histories with
+no unsolicited native credits. This distinction is necessary because no Solidity contract can stop
+ETH from being forced into its address.
 
 ## Tick And Quote Oracles
 
@@ -114,6 +149,9 @@ The assurance claims depend on the following conditions:
    matching correctness, and missed hook calls must be reconciled by the hook consumer.
 5. Administrative fee and hook configuration is controlled according to `SECURITY.md`.
 
+No “no forced ETH” assumption is needed for native solvency. It is needed only for exact
+balance-to-liability equality; arbitrary forced credits are included in the `>=` theorem.
+
 ## Proof Scope And Residual Boundaries
 
 `script/prove_protocol.py` discharges the complete numeric, packing, transient-namespace, guarded
@@ -132,6 +170,7 @@ The following stronger claims remain intentionally outside the theorem:
 - collision-free Keccak over an input domain larger than 256 bits;
 - correct balance accounting for a token that lies, rebases, taxes transfers, or otherwise violates
   exact-transfer semantics;
+- unconditional native balance equality in the presence of unsolicited ETH credits;
 - successful delivery of a best-effort hook notification;
 - Solidity compiler, EVM, SMT-solver, or directed-transcendental-library correctness; and
 - successful execution under every possible chain block-gas limit.

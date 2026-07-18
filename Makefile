@@ -4,13 +4,13 @@ INVARIANT_RUNS ?= 2048
 INVARIANT_DEPTH ?= 64
 INVARIANT_SHARDS ?= 8
 INVARIANT_SHARD ?= 1
-INVARIANT_CONTRACTS ?= .*(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest).*
+INVARIANT_CONTRACTS ?= .*(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest|DeepstateV1NativeETHInvariantTest).*
 GAS_CONTRACTS ?= RadixMatchingEngine(Gas|HookGas|FeeGas)Test
 COVERAGE_FILES ?= src/DeepstateV1.sol,src/libraries/TickMath32.sol
 COVERAGE_EXCLUSIONS ?= coverage.exclusions.json
 # Coverage runs every behavioral, routing, boundary, and math test. Formal proofs, stateful
 # invariants, and benchmarks retain dedicated targets because they do not add source coverage.
-COVERAGE_SKIP_ARGS ?= --skip RadixMatchingEngineInvariant.t.sol --skip DeepstateV1Invariant.t.sol --skip RadixMatchingEngineGas.t.sol --skip RadixMatchingEngineAccessList.t.sol --skip RadixMatchingEngineFormal.t.sol
+COVERAGE_SKIP_ARGS ?= --skip RadixMatchingEngineInvariant.t.sol --skip DeepstateV1Invariant.t.sol --skip DeepstateV1NativeETHInvariant.t.sol --skip RadixMatchingEngineGas.t.sol --skip RadixMatchingEngineAccessList.t.sol --skip RadixMatchingEngineFormal.t.sol
 COVERAGE_MIN_LINES ?= 100
 COVERAGE_MIN_STATEMENTS ?= 100
 COVERAGE_MIN_BRANCHES ?= 100

@@ -65,9 +65,9 @@ import {TickMath32} from "./libraries/TickMath32.sol";
 /// fees are taken from matched taker output and settled after user deltas. Top-of-book hooks are
 /// similarly isolated: the matcher records outgoing amount and incoming nonce in transient slots,
 /// then the outer fill/cancel flow invokes the configured pool hook after the book mutation.
-/// Token settlement uses Solady safe transfer helpers and assumes standard, non-fee-on-transfer
-/// ERC20 behavior. Malicious or inexact token behavior is outside the engine's accounting model and
-/// must be excluded by deployment configuration.
+/// Token settlement treats `address(0)` as native ETH and otherwise uses Solady safe transfer
+/// helpers with standard, non-fee-on-transfer ERC20 behavior. Malicious or inexact token behavior
+/// is outside the engine's accounting model and must be excluded by deployment configuration.
 contract DeepstateV1 is Ownable {
     /// @notice Stored child pointers for a branch node.
     /// @dev
@@ -2201,6 +2201,8 @@ contract DeepstateV1 is Ownable {
     error InvalidFeeConfig();
     /// @notice A token delta cannot be represented in the signed settlement accumulator.
     error DeltaOverflow();
+    /// @notice Supplied native ETH is less than the caller's net ETH debit.
+    error InvalidNativeValue();
 
     /// @notice Set deployer as owner.
     constructor() {
@@ -2262,8 +2264,8 @@ contract DeepstateV1 is Ownable {
     /// The routed `epoch` is used for matching. An initialized book with nonce one is exhausted and
     /// historical; its unmatched remainder is automatically no-rest even when `params.noRest` is
     /// false. Callers that want maker liquidity must submit a separate leg against the active epoch.
-    /// Settlement order is taker output, taker input, then protocol fee.
-    function fill(FillParams calldata params) external nonReentrant returns (bytes32 restingOrder) {
+    /// Settlement is output, input, fee, then any `msg.value` above the net ETH input is refunded.
+    function fill(FillParams calldata params) external payable nonReentrant returns (bytes32 restingOrder) {
         int256 token0Delta;
         int256 token1Delta;
         uint256 feeAmount;
@@ -2279,24 +2281,25 @@ contract DeepstateV1 is Ownable {
             (token0Delta, token1Delta, feeAmount) = _applyFillFee(params.isBid, token0Delta, token1Delta, feeBps);
         }
 
-        _settleDeltas(params.token0, token0Delta, params.token1, token1Delta);
+        uint256 nativeRefund = _settleDeltas(params.token0, token0Delta, params.token1, token1Delta);
         if (feeAmount != 0) {
             address feeRecipient;
             /// @solidity memory-safe-assembly
             assembly {
                 feeRecipient := config
             }
-            (params.isBid ? params.token0 : params.token1).safeTransfer(feeRecipient, feeAmount);
+            _safeTransferOut(params.isBid ? params.token0 : params.token1, feeRecipient, feeAmount);
         }
+        _refundNativeValue(nativeRefund);
     }
 
     /// @notice Execute multiple routed fills atomically and settle each touched token once.
     /// @param fills Sequential route legs.
     /// @dev
     /// Each leg may target a different sorted pair and epoch. State changes are applied leg by leg,
-    /// but ERC20 transfers are delayed until all legs complete. This keeps routing atomic and lets
-    /// intermediate token receipts fund later legs through the netted transient balance.
-    function fillRoute(FillParams[] calldata fills) external nonReentrant {
+    /// but transfers are delayed until all legs complete. Native ETH uses `address(0)`, is netted
+    /// across every leg. Any `msg.value` above the caller's net ETH input is refunded after fees.
+    function fillRoute(FillParams[] calldata fills) external payable nonReentrant {
         uint256 length = fills.length;
         RouteState memory route;
         route.touched = new address[](length * 2);
@@ -2310,7 +2313,7 @@ contract DeepstateV1 is Ownable {
             }
         }
 
-        _settleTouched(route.touched, route.touchedCount);
+        uint256 nativeRefund = _settleTouched(route.touched, route.touchedCount);
         if (config != 0) {
             address feeRecipient;
             /// @solidity memory-safe-assembly
@@ -2319,6 +2322,7 @@ contract DeepstateV1 is Ownable {
             }
             _settleFees(feeRecipient, route.feeTouched, route.feeTouchedCount);
         }
+        _refundNativeValue(nativeRefund);
     }
 
     /// @notice Cancel open quantity or claim filled proceeds from one book.
@@ -2344,7 +2348,7 @@ contract DeepstateV1 is Ownable {
         (owner, isBid, baseAmount, quoteAmount) = _cancelBook(id, book, order, msg.sender, hookFlags);
         if (_cancelHookEnabled(hookFlags, isBid)) _executeTopOrderHook(token0, token1, id, isBid);
 
-        if (baseAmount != 0) token0.safeTransfer(owner, baseAmount);
+        if (baseAmount != 0) _safeTransferOut(token0, owner, baseAmount);
         if (quoteAmount != 0) token1.safeTransfer(owner, quoteAmount);
     }
 
@@ -2768,12 +2772,12 @@ contract DeepstateV1 is Ownable {
         book.nonceAndFlags = uint256(type(uint32).max) | flags;
     }
 
-    /// @notice Require canonical sorted nonzero token addresses.
+    /// @notice Require canonical sorted token addresses; `address(0)` is native ETH and can only be token0.
     /// @dev Token code existence is intentionally not checked; deployers decide which ERC20s are supported.
     function _requireSortedTokens(address token0, address token1) internal pure virtual {
         /// @solidity memory-safe-assembly
         assembly {
-            if or(iszero(token0), iszero(lt(token0, token1))) {
+            if iszero(lt(token0, token1)) {
                 mstore(0x00, 0xc1ab6dc1) // `InvalidToken()`.
                 revert(0x1c, 0x04)
             }
@@ -2874,7 +2878,13 @@ contract DeepstateV1 is Ownable {
     /// Positive deltas are paid first, then negative deltas are pulled. Since all route state
     /// mutations already happened and the function is reentrancy-guarded, this keeps user-facing
     /// accounting easy to reason about while still clearing transient slots as each token settles.
-    function _settleTouched(address[] memory touched, uint256 touchedCount) private {
+    function _settleTouched(address[] memory touched, uint256 touchedCount) private returns (uint256 nativeRefund) {
+        int256 nativeDelta;
+        assembly {
+            nativeDelta := tload(0)
+        }
+        nativeRefund = _nativeRefund(nativeDelta);
+
         for (uint256 i; i < touchedCount;) {
             address token = touched[i];
             bytes32 slot = bytes32(uint256(uint160(token)));
@@ -2888,7 +2898,7 @@ contract DeepstateV1 is Ownable {
                     tstore(slot, 0)
                 }
                 // forge-lint: disable-next-line(unsafe-typecast)
-                token.safeTransfer(msg.sender, uint256(amount));
+                _safeTransferOut(token, msg.sender, uint256(amount));
             }
 
             unchecked {
@@ -2908,8 +2918,10 @@ contract DeepstateV1 is Ownable {
                 assembly {
                     tstore(slot, 0)
                 }
-                // forge-lint: disable-next-line(unsafe-typecast)
-                token.safeTransferFrom(msg.sender, address(this), uint256(-amount));
+                if (token != address(0)) {
+                    // forge-lint: disable-next-line(unsafe-typecast)
+                    token.safeTransferFrom(msg.sender, address(this), uint256(-amount));
+                }
             }
 
             unchecked {
@@ -2920,16 +2932,21 @@ contract DeepstateV1 is Ownable {
 
     /// @notice Settle one non-routed fill's signed token deltas.
     /// @dev Same transfer ordering as route settlement: pay outgoing tokens before pulling inputs.
-    function _settleDeltas(address token0, int256 amount0, address token1, int256 amount1) private {
+    function _settleDeltas(address token0, int256 amount0, address token1, int256 amount1)
+        private
+        returns (uint256 nativeRefund)
+    {
+        nativeRefund = _nativeRefund(token0 == address(0) ? amount0 : int256(0));
+
         if (amount0 > 0) {
             // forge-lint: disable-next-line(unsafe-typecast)
-            token0.safeTransfer(msg.sender, uint256(amount0));
+            _safeTransferOut(token0, msg.sender, uint256(amount0));
         }
         if (amount1 > 0) {
             // forge-lint: disable-next-line(unsafe-typecast)
             token1.safeTransfer(msg.sender, uint256(amount1));
         }
-        if (amount0 < 0) {
+        if (amount0 < 0 && token0 != address(0)) {
             // forge-lint: disable-next-line(unsafe-typecast)
             token0.safeTransferFrom(msg.sender, address(this), uint256(-amount0));
         }
@@ -2951,7 +2968,7 @@ contract DeepstateV1 is Ownable {
                 tstore(slot, 0)
             }
 
-            if (amount != 0) token.safeTransfer(recipient, amount);
+            if (amount != 0) _safeTransferOut(token, recipient, amount);
 
             unchecked {
                 ++i;
@@ -3006,5 +3023,35 @@ contract DeepstateV1 is Ownable {
     /// @notice Transient storage slot for protocol fees in one token.
     function _feeSlot(address token) private pure returns (bytes32) {
         return bytes32(_FEE_DELTA_DOMAIN | uint256(uint160(token)));
+    }
+
+    /// @notice Validate the caller's net native ETH debit and return any excess value.
+    /// @dev A positive or zero caller-relative delta requires no ETH, so all `msg.value` is excess.
+    function _nativeRefund(int256 nativeDelta) private view returns (uint256 refund) {
+        uint256 required;
+        if (nativeDelta < 0) {
+            /// @solidity memory-safe-assembly
+            assembly {
+                required := sub(0, nativeDelta)
+            }
+        }
+        if (msg.value < required) revert InvalidNativeValue();
+        unchecked {
+            refund = msg.value - required;
+        }
+    }
+
+    /// @notice Return native ETH supplied above the caller's net debit.
+    function _refundNativeValue(uint256 amount) private {
+        if (amount != 0) _safeTransferOut(address(0), msg.sender, amount);
+    }
+
+    /// @notice Pay either native ETH (`token == address(0)`) or an ERC20.
+    function _safeTransferOut(address token, address to, uint256 amount) private {
+        if (token == address(0)) {
+            to.safeTransferETH(amount);
+        } else {
+            token.safeTransfer(to, amount);
+        }
     }
 }
