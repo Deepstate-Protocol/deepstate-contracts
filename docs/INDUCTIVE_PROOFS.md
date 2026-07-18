@@ -68,7 +68,25 @@ For each book:
 3. every ownership record identifies at most one live leaf with the same tick and nonce;
 4. assigned nonces are unique across both sides and strictly decrease;
 5. the two sides are uncrossed after every completed fill; and
-6. exact-transfer collateral equals the sum of all cancelable and claimable liabilities.
+6. exact-transfer ERC20 collateral equals the sum of all cancelable and claimable ERC20
+   liabilities, while native ETH collateral satisfies Section 1.4.
+
+### 1.4 Native liability and surplus
+
+For an active maker order in any book with native ETH as token0, let `q0` be its original quantity
+and let `q` be its live remaining quantity, taking `q = 0` when its leaf has fully filled. Define
+
+`L_ask = q` and `L_bid = q0 - q`.
+
+The first term is unfilled ask collateral owed back to the maker. The second is filled base owed to
+a bid maker at claim time. Let `L_ETH` be the sum over every native pair, book, and active order.
+For engine balance `E`, define native surplus `S = E - L_ETH`.
+
+An unsolicited native credit is ETH delivered outside the settlement amount required by the current
+protocol call, including ETH forced by `SELFDESTRUCT`, a withdrawal credit, or ETH returned by a
+recipient callback. Such a credit can increase `E` without creating an order liability. The native
+solvency invariant is `S >= 0`. Exact equality `S = 0` is the stronger invariant for histories with
+no unsolicited native credits.
 
 ## 2. Arithmetic Preservation
 
@@ -229,7 +247,66 @@ cancelable, but `_executeFill` forces its unmatched remainder to `noRest`. An em
 only when its requested epoch equals the current pool epoch. These cases prevent stale-book rests
 and crossed liquidity between epochs.
 
-## 8. Routes, Fees, And Multiple Pools
+## 8. Native ETH Solvency
+
+The empty-state base has `E = L_ETH = S = 0`. Assume before one transition that `S >= 0`.
+
+### 8.1 Incoming bid
+
+If an incoming bid consumes `f` native-denominated ask quantity, existing ask liabilities decrease
+by `f`. A resting bid remainder creates no native liability because its collateral is quote. Before
+fees the caller's native output is `f`; for native fee `g`, A6 gives `0 <= g <= f`, the caller
+receives `f - g`, and the fee recipient receives `g`. Therefore
+
+`Delta(E) = -(f - g) - g = -f = Delta(L_ETH)`.
+
+This covers underfill, exact fill, aggregate fill, a partially retained ask, and any bid remainder.
+
+### 8.2 Incoming ask
+
+If an incoming ask fills `f` bid quantity, bid-maker native liabilities increase by `f`. If
+unmatched quantity `r` rests as a new ask, that order creates another native liability `r`. The
+production delta is `-(f + r)`. For supplied value `V >= f + r`, `_nativeRefund` computes
+`R = V - (f + r)` and the outer entrypoint returns `R` after settlement and fees. An ask's outgoing
+asset is token1, so its fill fee is not native. Hence
+
+`Delta(E) = V - R = f + r = Delta(L_ETH)`.
+
+Setting `r = 0` covers `noRest`, full matching, and historical-book fills.
+
+### 8.3 Cancel and claim
+
+Canceling an ask with remaining quantity `q` removes liability `q` and pays exactly `q` native.
+Canceling or claiming a bid with original quantity `q0` and remaining quantity `q` removes liability
+`q0 - q` and pays exactly that amount. Fully filled and wholly unfilled orders are the endpoint
+cases `q = 0` and `q = q0`. Thus both transitions preserve `S`.
+
+### 8.4 Routes and external credits
+
+For each route leg `i`, Sections 8.1-8.2 prove
+
+`Delta(L_i) = -Delta(user_i) - fee_i`.
+
+Summing over a finite route gives
+
+`Delta(L_ETH) = -D_ETH - F_ETH`,
+
+where `D_ETH` is the net caller-relative native delta and `F_ETH` is the accumulated native fee.
+Let `V >= max(-D_ETH, 0)` be supplied `msg.value` and
+`R = V - max(-D_ETH, 0)` its refund. Settlement receives `V`, pays `max(D_ETH, 0)`, then pays
+`F_ETH`, and finally returns `R`. The identity
+`V - R - max(D, 0) = -D` proves `Delta(E) = Delta(L_ETH)`.
+
+Tree restructuring, nonce/epoch changes, fee configuration, and hook configuration do not themselves
+move ETH or change native order quantities. A failed operation preserves both values by atomic
+rollback. A successful recipient or hook callback may force an unsolicited credit `c >= 0`; this
+changes `S` to `S + c` and therefore cannot violate solvency.
+
+These cases exhaust every public transition. Induction on history length proves `E >= L_ETH` for
+every finite reachable history, including arbitrary unsolicited credits. In the restricted history
+class with no such credits, the same induction proves the stronger equality `E = L_ETH`.
+
+## 9. Routes, Fees, And Multiple Pools
 
 For token `x`, let `Delta_i(x)` be leg `i`'s caller-relative delta. `_addDelta` implements the
 induction
@@ -255,7 +332,7 @@ resistance, updates to distinct ids modify disjoint persistent slots. Operations
 therefore commute except for intentionally shared token delta/fee accumulators inside one route and
 owner-controlled global fee configuration.
 
-## 9. Hooks And Reentrancy
+## 10. Hooks And Reentrancy
 
 The modifier checks the single transient guard, sets it before the body, and clears it only after the
 body. Every token transfer and hook callback occurs while it is set. A callback to `fill`,
@@ -275,7 +352,7 @@ hook frame and is caught, leaving book and settlement state unchanged. This is a
 a delivery theorem: insufficient outer gas can still revert the transaction, and a failed hook may
 miss a notification.
 
-## 10. Termination And Liveness Boundary
+## 11. Termination And Liveness Boundary
 
 Every radix recursion increases depth and has at most 64 key bits. Every subtree quote recursion
 enters a strict child with fewer nodes. Every route loop increases its index toward a finite calldata
@@ -288,9 +365,9 @@ route tokens. Thus for each concrete successful call there exists finite require
 supplying less gas or constructing work above a chain's block limit reverts atomically. No stronger
 unconditional EVM liveness claim is possible.
 
-## 11. History Theorem
+## 12. History Theorem
 
-The empty protocol state satisfies `B`. Sections 2 through 9 prove that every successful primitive
+The empty protocol state satisfies `B`. Sections 2 through 10 prove that every successful primitive
 transition preserves `B`; failed transitions preserve it by EVM atomic rollback. Induction on history
 length therefore proves `B` for every finite valid history within the guarded epoch namespace.
 

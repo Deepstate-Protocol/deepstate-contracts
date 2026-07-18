@@ -83,6 +83,38 @@ an input or an unmatched resting remainder.
 
 **Evidence:** `SMT`, `INDUCTION` for route accumulation, and production behavioral tests.
 
+### A7. Native ETH solvency
+
+For every active maker order in a book whose token0 is native ETH, define
+
+`L_ask(order) = remainingQuantity` and
+`L_bid(order) = originalQuantity - remainingQuantity`.
+
+Let `L_ETH` be the sum of those liabilities over every native pair and epoch, and let `E` be the
+engine's ETH balance. Starting from empty state, every finite history of successful protocol calls,
+failed calls, and arbitrary nonnegative unsolicited ETH credits satisfies
+
+`E >= L_ETH`.
+
+More precisely, protocol transitions preserve the surplus `S = E - L_ETH`, while an unsolicited
+credit of `c >= 0` changes it to `S + c`. Therefore `E = L_ETH` for every protocol-mediated history
+with no unsolicited credits, and `E = L_ETH + sum(c_i)` when credits are forced into the contract.
+
+An incoming bid that fills `f` ask quantity reduces native liabilities by `f` and pays exactly `f`
+split between taker output and native fee. An incoming ask that fills `f` bid quantity and rests `r`
+increases native liabilities by `f + r`. Settlement requires at least that much `msg.value` and
+refunds the complete excess, so the amount retained is exactly `f + r`. Ask cancellation pays its
+remaining quantity; bid cancellation or claim pays its filled quantity. Route accumulation preserves
+the same identity because each leg satisfies
+
+`liabilityChange = -userNativeDelta - nativeFee`.
+
+**Evidence:** production `BYTECODE` symbolic transitions, complete-domain source-bound `SMT` lemmas,
+`INDUCTION` over arbitrary finite histories, EVM atomic rollback for failed calls, and an independent
+native stateful model as additional `TESTED` evidence. The theorem is conditional on the
+compiler/EVM trusted base stated below, but not on ERC20 exact-transfer behavior for the native side
+itself.
+
 ## Radix Structure
 
 ### R1. Key injectivity and priority
@@ -227,6 +259,10 @@ state changes are outside this theorem.
 **Evidence:** `CONDITIONAL` on exact-transfer semantics, production safe-transfer behavior, and token
 failure/reentrancy tests. Correct accounting against an arbitrarily malicious external contract is not
 an implementable unconditional property.
+
+Native ETH accounting is governed separately by A7. Forced ETH cannot make the engine insolvent, but
+it can create an unclaimable surplus, so unconditional exact balance equality is intentionally not
+claimed.
 
 ### E4. Termination and gas-bounded liveness
 

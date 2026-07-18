@@ -13,17 +13,20 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
-  verify:
-    name: Verify
+  quality:
+    name: Static and Build Checks
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     env:
       FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
-      RUN_DEEP: ${{ github.event_name == 'workflow_dispatch' && inputs.deep }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,16 +46,141 @@ jobs:
       - name: Install Slither
         run: python -m pip install slither-analyzer
 
-      - name: Verify
-        run: |
-          if [[ "$RUN_DEEP" == "true" ]]; then
-            make verify-deep SLITHER=slither
-          else
-            make verify SLITHER=slither
-          fi
+      - name: Formatting
+        run: make fmt
 
-  security:
-    name: Coverage and Formal
+      - name: Lint
+        run: make lint
+
+      - name: Independent Tick Reference
+        run: make tick-reference
+
+      - name: Build Size
+        run: make build-size
+
+      - name: Slither
+        run: make slither SLITHER=slither
+
+  tests:
+    name: Behavioral Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
+
+      - name: Forge Tests
+        run: make test
+
+  invariants:
+    name: Invariants (shard ${{ matrix.shard }}/8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    env:
+      FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
+      RUN_DEEP: ${{ github.event_name == 'workflow_dispatch' && inputs.deep }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Stateful Invariants
+        env:
+          INVARIANT_SHARD: ${{ matrix.shard }}
+        run: |
+          runs=256
+          if [[ "$RUN_DEEP" == "true" ]]; then
+            runs=2048
+          fi
+          make invariant-deep-shard \
+            INVARIANT_RUNS="$runs" \
+            INVARIANT_DEPTH=64 \
+            INVARIANT_SHARDS=8 \
+            INVARIANT_SHARD="$INVARIANT_SHARD"
+
+  snapshots:
+    name: Runtime Snapshot (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: base
+            contract: RadixMatchingEngineGasTest
+          - label: hooks
+            contract: RadixMatchingEngineHookGasTest
+          - label: fees
+            contract: RadixMatchingEngineFeeGasTest
+    env:
+      FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
+
+      - name: Check Runtime Snapshot
+        env:
+          GAS_CONTRACT: ${{ matrix.contract }}
+        run: make snapshot-runtime-check GAS_CONTRACTS="$GAS_CONTRACT"
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Forge Coverage
+        run: make coverage-check
+
+  formal:
+    name: Halmos Formal
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -76,11 +204,52 @@ jobs:
       - name: Install uv
         run: python -m pip install uv
 
-      - name: Independent Tick Reference
-        run: make tick-reference
-
-      - name: Forge Coverage
-        run: make coverage-check
-
       - name: Halmos Formal
         run: make formal-halmos
+
+  verify:
+    name: Verify
+    if: ${{ always() }}
+    needs:
+      - quality
+      - tests
+      - invariants
+      - snapshots
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require Successful Verification Jobs
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          TESTS_RESULT: ${{ needs.tests.result }}
+          INVARIANTS_RESULT: ${{ needs.invariants.result }}
+          SNAPSHOTS_RESULT: ${{ needs.snapshots.result }}
+        run: |
+          printf 'quality=%s tests=%s invariants=%s snapshots=%s\n' \
+            "$QUALITY_RESULT" "$TESTS_RESULT" "$INVARIANTS_RESULT" "$SNAPSHOTS_RESULT"
+          [[ "$QUALITY_RESULT" == "success" ]]
+          [[ "$TESTS_RESULT" == "success" ]]
+          [[ "$INVARIANTS_RESULT" == "success" ]]
+          [[ "$SNAPSHOTS_RESULT" == "success" ]]
+
+  security:
+    name: Coverage and Formal
+    if: ${{ always() }}
+    needs:
+      - quality
+      - coverage
+      - formal
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require Successful Security Jobs
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+          FORMAL_RESULT: ${{ needs.formal.result }}
+        run: |
+          printf 'quality=%s coverage=%s formal=%s\n' \
+            "$QUALITY_RESULT" "$COVERAGE_RESULT" "$FORMAL_RESULT"
+          [[ "$QUALITY_RESULT" == "success" ]]
+          [[ "$COVERAGE_RESULT" == "success" ]]
+          [[ "$FORMAL_RESULT" == "success" ]]

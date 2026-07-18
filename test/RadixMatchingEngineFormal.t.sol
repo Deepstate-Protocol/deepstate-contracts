@@ -678,6 +678,122 @@ contract DeepstateV1EpochFormalTest is Test {
     }
 }
 
+/// @dev Production-bytecode transition proofs for native ETH settlement. Complete-width arithmetic
+/// and arbitrary-history composition are proved independently by `script/prove_protocol.py`.
+contract NativeAccountingFormalTest is Test {
+    uint256 private constant INITIAL_BALANCE = 1_000_000_000;
+    address private constant ALICE = address(0xA11CE);
+    address private constant BOB = address(0xB0B);
+    address private constant FEE_RECIPIENT = address(0xFEE);
+
+    FormalERC20 private quote;
+    DeepstateV1 private engine;
+
+    function setUp() public {
+        quote = new FormalERC20();
+        engine = new DeepstateV1();
+
+        vm.deal(ALICE, INITIAL_BALANCE);
+        vm.deal(BOB, INITIAL_BALANCE);
+        quote.mint(ALICE, INITIAL_BALANCE);
+        quote.mint(BOB, INITIAL_BALANCE);
+        vm.prank(ALICE);
+        quote.approve(address(engine), type(uint256).max);
+        vm.prank(BOB);
+        quote.approve(address(engine), type(uint256).max);
+    }
+
+    /// @dev Proves every fee rate and representative positive quantity while a native ask moves
+    /// from fully collateralized to fully filled. Taker output plus fee always equals liability removed.
+    function testFuzz_FormalNativeBidFillPreservesSolvency(uint8 quantityRaw, uint8 feeBpsRaw) public {
+        vm.assume(quantityRaw >= 1 && quantityRaw <= 8);
+        vm.assume(feeBpsRaw <= 100);
+        uint160 quantity = uint160(quantityRaw) * 10_000;
+        uint16 feeBps = uint16(feeBpsRaw);
+        uint256 fee = uint256(quantityRaw) * uint256(feeBps);
+
+        engine.setFeeConfig(FEE_RECIPIENT, feeBps);
+        uint256 aliceBefore = ALICE.balance;
+        vm.prank(ALICE);
+        bytes32 ask = engine.fill{value: quantity + uint256(quantityRaw)}(_params(_order(0, quantity, 0), false, false));
+        assertEq(address(engine).balance, quantity);
+        assertEq(ALICE.balance, aliceBefore - quantity);
+
+        uint256 bobBefore = BOB.balance;
+        vm.prank(BOB);
+        assertEq(engine.fill(_params(_order(0, quantity, 0), true, true)), bytes32(0));
+        assertEq(address(engine).balance, 0);
+        assertEq(BOB.balance, bobBefore + quantity - fee);
+        assertEq(FEE_RECIPIENT.balance, fee);
+
+        vm.prank(ALICE);
+        (uint256 nativeClaim, uint256 quoteClaim) = engine.cancel(address(0), address(quote), 0, ask);
+        assertEq(nativeClaim, 0);
+        assertEq(quoteClaim, quantity);
+        assertEq(address(engine).balance, 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    /// @dev Proves underfill, exact fill, and overfill when a native ask fills a bid and may rest.
+    /// Native received always equals the filled-bid claim plus any new resting-ask liability.
+    function testFuzz_FormalNativeAskFillAndRestPreserveSolvency(uint8 bidQuantityRaw, uint8 askQuantityRaw) public {
+        vm.assume(bidQuantityRaw >= 1 && bidQuantityRaw <= 8);
+        vm.assume(askQuantityRaw >= 1 && askQuantityRaw <= 8);
+        uint160 bidQuantity = uint160(bidQuantityRaw);
+        uint160 askQuantity = uint160(askQuantityRaw);
+        uint160 matched = bidQuantity < askQuantity ? bidQuantity : askQuantity;
+        uint160 askRemaining = askQuantity - matched;
+
+        vm.prank(ALICE);
+        bytes32 bid = engine.fill(_params(_order(0, bidQuantity, 0), true, false));
+
+        uint256 bobBefore = BOB.balance;
+        vm.prank(BOB);
+        bytes32 ask = engine.fill{value: uint256(askQuantity) + uint256(askQuantityRaw)}(
+            _params(_order(0, askQuantity, 0), false, false)
+        );
+        assertEq(address(engine).balance, askQuantity);
+        assertEq(BOB.balance, bobBefore - askQuantity);
+
+        vm.prank(ALICE);
+        (uint256 bidNativeClaim,) = engine.cancel(address(0), address(quote), 0, bid);
+        assertEq(bidNativeClaim, matched);
+        assertEq(address(engine).balance, askRemaining);
+
+        if (askRemaining != 0) {
+            vm.prank(BOB);
+            (uint256 askNativeClaim,) = engine.cancel(address(0), address(quote), 0, ask);
+            assertEq(askNativeClaim, askRemaining);
+        } else {
+            assertEq(ask, bytes32(0));
+        }
+
+        assertEq(address(engine).balance, 0);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    function _params(bytes32 order, bool isBid, bool noRest)
+        private
+        view
+        returns (DeepstateV1.FillParams memory params)
+    {
+        params = DeepstateV1.FillParams({
+            token0: address(0),
+            token1: address(quote),
+            epoch: 0,
+            order: order,
+            isBid: isBid,
+            noRest: noRest,
+            fillOrKill: false
+        });
+    }
+
+    function _order(int32 price, uint160 quantity, uint32 nonce) private pure returns (bytes32) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return bytes32((uint256(uint32(price)) << 224) | (uint256(quantity) << 64) | uint256(nonce));
+    }
+}
+
 /// @dev Differential symbolic proof between production's optimized quote assembly and the test
 /// oracle that always reconstructs the complete 512-bit quantity-factor product.
 contract QuoteArithmeticFormalTest is DeepstateV1 {

@@ -25,6 +25,10 @@ data. Include the affected commit, reproduction steps, impact, and any proposed 
 - The engine does not validate token code or balance deltas. Deployment policy must restrict pools to
   exact-transfer ERC20s. Fee-on-transfer, rebasing, callback-dependent, mint-on-transfer, and other
   nonstandard balance semantics are unsupported.
+- `address(0)` denotes native ETH and is accepted only as sorted token0. Native fills and routes
+  require `msg.value` at least equal to the net debit; excess is refunded after outputs and fees,
+  while insufficient value reverts. ETH forced into the engine outside a call is not attributable
+  to a sender and remains surplus, but cannot reduce collateral available to makers.
 - Traders and routers choose token pairs, epochs, limits, `noRest`, and `fillOrKill`. Integrators must
   validate those values and should use `fillOrKill` when later route legs depend on earlier execution.
 
@@ -43,8 +47,8 @@ data. Include the affected commit, reproduction steps, impact, and any proposed 
    Verify `owner()`, runtime bytecode, constructor transaction, and source metadata on the explorer.
 7. Configure fees and hooks only after verifying recipient and hook bytecode. Confirm emitted
    configuration events and read the configuration back on-chain.
-8. Exercise small bid, ask, partial fill, full fill, cancel, claim, and multi-pool route transactions
-   before enabling meaningful value.
+8. Exercise small bid, ask, partial fill, full fill, cancel, claim, native ETH, and multi-pool route
+   transactions before enabling meaningful value.
 9. Monitor configuration events, failed hook calls off-chain, book rotations, token upgrades, and
    collateral balances. Maintain a public incident-response and migration plan.
 

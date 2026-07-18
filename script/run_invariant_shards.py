@@ -11,8 +11,11 @@ from pathlib import Path
 INVARIANT_FILES = (
     Path("test/RadixMatchingEngineInvariant.t.sol"),
     Path("test/DeepstateV1Invariant.t.sol"),
+    Path("test/DeepstateV1NativeETHInvariant.t.sol"),
 )
-INVARIANT_CONTRACT = ".*(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest).*"
+INVARIANT_CONTRACT = (
+    ".*(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest|DeepstateV1NativeETHInvariantTest).*"
+)
 
 
 def parse_args():
