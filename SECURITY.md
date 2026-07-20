@@ -35,7 +35,7 @@ data. Include the affected commit, reproduction steps, impact, and any proposed 
 ## Deployment Checklist
 
 1. Check out the exact release commit with recursive submodules and use the Foundry/Solidity versions
-   pinned by CI and `foundry.toml`.
+   pinned by CI and `foundry.toml`. Do not regenerate `uv.lock` during release verification.
 2. Run `make verify-security`. Review any gas-snapshot change instead of regenerating the baseline
    automatically.
 3. Confirm the target chain supports Cancun transient-storage opcodes (`TLOAD` and `TSTORE`).
@@ -57,3 +57,6 @@ data. Include the affected commit, reproduction steps, impact, and any proposed 
 The supported profile is Solidity `0.8.28`, optimizer enabled with 200 runs, `via_ir = true`, and
 `evm_version = "cancun"`. A different compiler, optimizer, EVM target, dependency revision, or source
 commit is a different security artifact and requires the complete verification and audit process.
+Static and formal Python dependencies are transitively locked in `uv.lock`; CI additionally pins its
+runner family, Python patch release, uv release, GitHub Actions, and Foundry installer by immutable
+revision.

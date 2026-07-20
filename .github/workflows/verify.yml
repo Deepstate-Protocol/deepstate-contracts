@@ -23,28 +23,31 @@ permissions:
 jobs:
   quality:
     name: Static and Build Checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           submodules: recursive
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
         with:
           version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
 
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
 
-      - name: Install Slither
-        run: python -m pip install slither-analyzer
+      - name: Install uv
+        run: python -m pip install --disable-pip-version-check uv==0.11.29
+
+      - name: Verification Toolchain Lock
+        run: make toolchain-lock-check
 
       - name: Formatting
         run: make fmt
@@ -59,22 +62,22 @@ jobs:
         run: make build-size
 
       - name: Slither
-        run: make slither SLITHER=slither
+        run: make slither
 
   tests:
     name: Behavioral Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           submodules: recursive
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
         with:
           version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
 
@@ -83,7 +86,7 @@ jobs:
 
   invariants:
     name: Invariants (shard ${{ matrix.shard }}/8)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -94,19 +97,19 @@ jobs:
       RUN_DEEP: ${{ github.event_name == 'workflow_dispatch' && inputs.deep }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           submodules: recursive
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
         with:
           version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
 
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
 
       - name: Stateful Invariants
         env:
@@ -124,7 +127,7 @@ jobs:
 
   snapshots:
     name: Runtime Snapshot (${{ matrix.label }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -140,12 +143,12 @@ jobs:
       FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           submodules: recursive
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
         with:
           version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
 
@@ -156,56 +159,75 @@ jobs:
 
   coverage:
     name: Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           submodules: recursive
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
         with:
           version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
 
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
 
       - name: Forge Coverage
         run: make coverage-check
 
   formal:
     name: Halmos Formal
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           submodules: recursive
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
         with:
           version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
 
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: "3.12"
+          python-version: "3.12.13"
 
       - name: Install uv
-        run: python -m pip install uv
+        run: python -m pip install --disable-pip-version-check uv==0.11.29
 
       - name: Halmos Formal
         run: make formal-halmos
+
+  smt:
+    name: SMT Formal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Install Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12.13"
+
+      - name: Install uv
+        run: python -m pip install --disable-pip-version-check uv==0.11.29
+
+      - name: SMT Formal
+        run: make formal-smt
 
   verify:
     name: Verify
@@ -215,7 +237,7 @@ jobs:
       - tests
       - invariants
       - snapshots
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require Successful Verification Jobs
@@ -239,7 +261,8 @@ jobs:
       - quality
       - coverage
       - formal
-    runs-on: ubuntu-latest
+      - smt
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require Successful Security Jobs
@@ -247,9 +270,11 @@ jobs:
           QUALITY_RESULT: ${{ needs.quality.result }}
           COVERAGE_RESULT: ${{ needs.coverage.result }}
           FORMAL_RESULT: ${{ needs.formal.result }}
+          SMT_RESULT: ${{ needs.smt.result }}
         run: |
-          printf 'quality=%s coverage=%s formal=%s\n' \
-            "$QUALITY_RESULT" "$COVERAGE_RESULT" "$FORMAL_RESULT"
+          printf 'quality=%s coverage=%s formal=%s smt=%s\n' \
+            "$QUALITY_RESULT" "$COVERAGE_RESULT" "$FORMAL_RESULT" "$SMT_RESULT"
           [[ "$QUALITY_RESULT" == "success" ]]
           [[ "$COVERAGE_RESULT" == "success" ]]
           [[ "$FORMAL_RESULT" == "success" ]]
+          [[ "$SMT_RESULT" == "success" ]]

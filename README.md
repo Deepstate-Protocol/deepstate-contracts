@@ -71,6 +71,12 @@ See [docs/PROOF_OBLIGATIONS.md](docs/PROOF_OBLIGATIONS.md) for the exact theorem
 
 ## Commands
 
+Install the pinned Python tool runner before invoking verification targets:
+
+```sh
+python3 -m pip install uv==0.11.29
+```
+
 ```sh
 make verify
 make verify-deep
@@ -83,6 +89,7 @@ make snapshot-runtime-check
 make tick-reference
 make coverage
 make coverage-check
+make toolchain-lock-check
 make formal-smt
 make formal-halmos
 make formal-kevm-build
@@ -104,7 +111,7 @@ forge snapshot --isolate --force --match-contract 'RadixMatchingEngine(Gas|HookG
 forge snapshot --isolate --force --match-contract 'RadixMatchingEngine(Gas|HookGas|FeeGas)Test' --check .gas-snapshot.runtime
 forge build --sizes
 python3 script/check_tick_math.py --check test/TickMath32.t.sol
-uv tool run --from slither-analyzer slither src/DeepstateV1.sol --config-file slither.config.json --exclude-informational
+uv run --locked --only-group static slither src/DeepstateV1.sol --config-file slither.config.json --exclude-informational
 forge coverage --ir-minimum --skip RadixMatchingEngineInvariant.t.sol --skip RadixMatchingEngineGas.t.sol --skip RadixMatchingEngineAccessList.t.sol --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract 'RadixMatchingEngineInvariantTest'
 make coverage-check
 make formal-halmos
@@ -114,8 +121,11 @@ make formal-halmos
 `make verify` runs the invariant contract through its dedicated `invariant` target, so the regular `test` target excludes that contract to avoid duplicate invariant execution.
 `invariant-deep-shard` and `invariant-deep-shards` split the deep invariant suite into deterministic batches with `INVARIANT_SHARDS` and `INVARIANT_SHARD`, which makes long 2048-run profiles easier to audit and retry.
 `make verify` and `make verify-deep` include `snapshot-runtime-check` so runtime gas drift is reviewed instead of silently accepted.
-Pull requests run both `make verify` and the additional security job for the coverage, SMT, and Halmos
-formal gates included by `make verify-security`.
+Pull requests run the components of `make verify` as parallel jobs, plus coverage, SMT, and Halmos
+formal jobs corresponding to the additional gates in `make verify-security`.
+The Python verification environment is resolved by `uv.lock`; CI uses Python `3.12.13`, uv
+`0.11.29`, immutable GitHub Action revisions, and the explicit `ubuntu-24.04` runner family.
+`make toolchain-lock-check` rejects a stale lock before static or formal analysis runs.
 The security job also runs `make tick-reference`, an independent Python `Decimal` check of the
 logarithmic settlement constants and thousands of deterministic full-domain tick samples.
 The Halmos gate proves bid- and ask-side accounting for every quantity pair in `[1, 8]`, same-tick

@@ -1,4 +1,4 @@
-.PHONY: fmt lint test invariant invariant-deep invariant-deep-shard invariant-deep-shards gas-runtime gas-access-list snapshot-runtime snapshot-runtime-check build-size tick-reference coverage coverage-check slither formal-smt formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
+.PHONY: fmt lint test invariant invariant-deep invariant-deep-shard invariant-deep-shards gas-runtime gas-access-list snapshot-runtime snapshot-runtime-check build-size tick-reference coverage coverage-check toolchain-lock-check slither formal-smt formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
 
 INVARIANT_RUNS ?= 2048
 INVARIANT_DEPTH ?= 64
@@ -15,9 +15,10 @@ COVERAGE_MIN_LINES ?= 100
 COVERAGE_MIN_STATEMENTS ?= 100
 COVERAGE_MIN_BRANCHES ?= 100
 COVERAGE_MIN_FUNCS ?= 100
-SLITHER ?= uv tool run --from slither-analyzer slither
-HALMOS ?= uv tool run --python 3.12 --from halmos halmos
-SMT ?= uv run --with z3-solver python
+UV ?= uv
+SLITHER ?= $(UV) run --locked --only-group static slither
+HALMOS ?= $(UV) run --locked --only-group formal halmos
+SMT ?= $(UV) run --locked --only-group formal python
 HALMOS_BUILD_OUT ?= out-halmos
 HALMOS_ARGS ?= --forge-build-out $(HALMOS_BUILD_OUT) --match-contract '.*FormalTest' --match-test '^testFuzz_Formal' --solver yices --solver-timeout-assertion 30s --no-status
 KONTROL_IMAGE ?= runtimeverificationinc/kontrol:ubuntu-jammy-1.0.255
@@ -87,6 +88,9 @@ coverage-check:
 		--min-funcs "$(COVERAGE_MIN_FUNCS)"; \
 	rm -f "$$tmp"
 
+toolchain-lock-check:
+	$(UV) lock --check
+
 slither:
 	$(SLITHER) src/DeepstateV1.sol --config-file slither.config.json --exclude-informational
 
@@ -103,8 +107,8 @@ formal-kevm-build:
 formal-kevm:
 	$(KONTROL) prove $(KONTROL_PROVE_ARGS)
 
-verify: fmt lint tick-reference test invariant snapshot-runtime-check build-size slither
+verify: toolchain-lock-check fmt lint tick-reference test invariant snapshot-runtime-check build-size slither
 
-verify-deep: fmt lint tick-reference test invariant-deep-shards snapshot-runtime-check build-size slither
+verify-deep: toolchain-lock-check fmt lint tick-reference test invariant-deep-shards snapshot-runtime-check build-size slither
 
-verify-security: fmt lint test invariant-deep-shards snapshot-runtime-check build-size slither tick-reference coverage-check formal-smt formal-halmos
+verify-security: toolchain-lock-check fmt lint test invariant-deep-shards snapshot-runtime-check build-size slither tick-reference coverage-check formal-smt formal-halmos
