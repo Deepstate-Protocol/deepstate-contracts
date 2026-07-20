@@ -1,0 +1,21 @@
+[project]
+name = "deepstate-verification"
+version = "0.0.0"
+description = "Locked static-analysis and formal-verification toolchain for Deepstate V1"
+requires-python = "==3.12.13"
+dependencies = []
+
+[dependency-groups]
+formal = [
+    "halmos==0.3.3",
+    # The protocol theorem registry imports Z3 directly.
+    "z3-solver==4.12.6.0",
+]
+static = [
+    "slither-analyzer==0.11.5",
+]
+
+[tool.uv]
+default-groups = []
+package = false
+required-version = "==0.11.29"
