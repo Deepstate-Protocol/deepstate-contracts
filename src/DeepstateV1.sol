@@ -4,8 +4,14 @@ pragma solidity 0.8.28;
 import {LibBit} from "solady/utils/LibBit.sol";
 import {Ownable} from "solady/auth/Ownable.sol";
 import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {SafeCast} from "v4-core/libraries/SafeCast.sol";
+import {BalanceDelta, toBalanceDelta} from "v4-core/types/BalanceDelta.sol";
+import {Currency} from "v4-core/types/Currency.sol";
+import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {IHook} from "./interfaces/IHook.sol";
 import {TickMath32} from "./libraries/TickMath32.sol";
+import {V4SwapManagerModule} from "./V4SwapManagerModule.sol";
 
 /// @title Deepstate V1
 /// @notice Multi-pool, fully on-chain limit-order matching engine backed by radix trees.
@@ -69,6 +75,9 @@ import {TickMath32} from "./libraries/TickMath32.sol";
 /// helpers with standard, non-fee-on-transfer ERC20 behavior. Malicious or inexact token behavior
 /// is outside the engine's accounting model and must be excluded by deployment configuration.
 contract DeepstateV1 is Ownable {
+    using SafeCast for int256;
+    using SafeCast for uint256;
+
     /// @notice Stored child pointers for a branch node.
     /// @dev
     /// `leftNode` and `rightNode` are both `bytes32` nodes. They can be leaves or further branches.
@@ -248,6 +257,21 @@ contract DeepstateV1 is Ownable {
         assembly {
             tstore(_REENTRANCY_GUARD_SLOT, 0)
         }
+    }
+
+    /// @dev Restrict V4 lifecycle operations to the contract currently receiving `unlockCallback`.
+    /// Standard V4 routers perform every manager call from that callback contract. The additional
+    /// caller check preserves the engine's stronger hook and token-callback reentrancy boundary.
+    modifier onlyV4Locker() {
+        bool unlocked;
+        address locker;
+        /// @solidity memory-safe-assembly
+        assembly {
+            unlocked := tload(_V4_UNLOCKED_SLOT)
+            locker := tload(_V4_LOCKER_SLOT)
+        }
+        if (!unlocked || msg.sender != locker) revert IPoolManager.ManagerLocked();
+        _;
     }
 
     /// @notice Return the maker that owns an order id, or zero if the order has been claimed/canceled.
@@ -2144,6 +2168,17 @@ contract DeepstateV1 is Ownable {
         uint256 feeTouchedCount;
     }
 
+    /// @notice Derived execution limits for one Uniswap V4-shaped no-rest swap.
+    /// @dev The compatibility path always targets the active epoch and never creates maker state.
+    struct V4SwapPlan {
+        address token0;
+        address token1;
+        uint256 epoch;
+        uint160 baseQuantity;
+        int32 limitTick;
+        bool isBid;
+    }
+
     /// @dev Low 254 bits of `_poolEpochAndHookFlags`; high bits are hook activation flags.
     uint256 private constant _POOL_EPOCH_MASK = (uint256(1) << 254) - 1;
     /// @dev Pool flag enabling hooks when token0 buyers change, i.e. bid-side top changes.
@@ -2166,6 +2201,27 @@ contract DeepstateV1 is Ownable {
     uint256 private constant _HOOK_GAS_LIMIT = 200_000;
     /// @dev High-bit domain separator for transient protocol fee slots.
     uint256 private constant _FEE_DELTA_DOMAIN = uint256(1) << 255;
+    /// @dev Canonical V4 key fee. Deepstate's protocol fee remains independently configured.
+    uint24 private constant _V4_KEY_FEE = 0;
+    /// @dev Canonical V4 key spacing. Deepstate prices use the full signed 32-bit tick domain.
+    int24 private constant _V4_KEY_TICK_SPACING = 1;
+    /// @dev Canonical V4 transient unlock slot: `bytes32(uint256(keccak256("Unlocked")) - 1)`.
+    bytes32 private constant _V4_UNLOCKED_SLOT = 0xc090fc4683624cfc3884e9d8de5eca132f2d0ec062aff75d43c0465d5ceeab23;
+    /// @dev Canonical V4 transient count of address/currency deltas that are not zero.
+    bytes32 private constant _V4_NONZERO_DELTA_COUNT_SLOT =
+        0x7d4b3164c6e45b97e7d87b7125a44c5828d005af88f9d751cfd78729c5d99a0b;
+    /// @dev Transient address authorized to operate the V4 lifecycle during one unlock callback.
+    bytes32 private constant _V4_LOCKER_SLOT = 0x198ec2e3efda97c2a9180e31e13439f0e12f61966939866853ea078807be2ced;
+    /// @dev Transient guard that prevents a configured hook from recursively entering V4 swap.
+    bytes32 private constant _V4_SWAP_ACTIVE_SLOT = 0x22b5d1cf1e451b4556115284f9c7dc717380244369334d110f86998977ddaf60;
+    /// @dev Packed protocol fee configuration cached for the duration of one V4 unlock.
+    bytes32 private constant _V4_FEE_CONFIG_SLOT = 0xd798799899323e18f949ed5c8519366873a3e4d42f62efbb6ca28650ee8ca5ad;
+    /// @dev Number of distinct V4 fee currencies accumulated during the current unlock.
+    bytes32 private constant _V4_FEE_TOKEN_COUNT_SLOT =
+        0xd3980f34eaac5a0e07116dff32f6bc4a745c58b07f50e21f605765a5ef62b1df;
+    /// @dev Domain for indexed transient entries holding V4 fee-token addresses.
+    bytes32 private constant _V4_FEE_TOKEN_LIST_DOMAIN =
+        0x68efe0db05419b00987a4709a78b0a491ad2695832724764f375020bcc45228d;
     /// @notice Latest restable epoch for each sorted token pair.
     mapping(bytes32 poolId => uint256 epochAndHookFlags) private _poolEpochAndHookFlags;
 
@@ -2176,6 +2232,11 @@ contract DeepstateV1 is Ownable {
     /// The owner may set a nonzero recipient with zero bps; this leaves fee logic enabled but
     /// produces no fee amounts.
     uint256 private _feeConfig;
+
+    /// @dev Immutable compatibility module for stateless price math and V4 lifecycle selectors.
+    /// The module contains no persistent storage writes; `swap` and every radix mutation remain in
+    /// this contract. Separating lifecycle bytecode preserves EIP-170 runtime-size headroom.
+    V4SwapManagerModule private immutable _V4_MODULE;
 
     /// @notice Emitted when a book is initialized.
     /// @param poolId Canonical sorted-token pool id.
@@ -2203,10 +2264,29 @@ contract DeepstateV1 is Ownable {
     error DeltaOverflow();
     /// @notice Supplied native ETH is less than the caller's net ETH debit.
     error InvalidNativeValue();
+    /// @notice V4 square-root limit is outside the representable Deepstate price domain.
+    /// @dev Matches the Uniswap V4 `Pool.PriceLimitOutOfBounds(uint160)` error selector.
+    error PriceLimitOutOfBounds(uint160 sqrtPriceLimitX96);
 
     /// @notice Set deployer as owner.
     constructor() {
         _initializeOwner(msg.sender);
+        _V4_MODULE = new V4SwapManagerModule();
+    }
+
+    /// @dev Forward canonical V4 lifecycle selectors to the immutable module in this contract's
+    /// execution context. Unknown selectors revert in the module. Delegate execution makes the
+    /// canonical transient slots and token balances belong to the engine address routers use.
+    fallback() external payable {
+        address module = address(_V4_MODULE);
+        /// @solidity memory-safe-assembly
+        assembly {
+            calldatacopy(0, 0, calldatasize())
+            let success := delegatecall(gas(), module, 0, calldatasize(), 0, 0)
+            returndatacopy(0, 0, returndatasize())
+            if iszero(success) { revert(0, returndatasize()) }
+            return(0, returndatasize())
+        }
     }
 
     /// @notice Configure protocol fees taken from taker output on matched quantity.
@@ -2229,6 +2309,64 @@ contract DeepstateV1 is Ownable {
         recipient = address(uint160(config));
         // forge-lint: disable-next-line(unsafe-typecast)
         bps = uint16(config >> 160);
+    }
+
+    /// @notice Execute a V4-shaped swap against the active Deepstate book without resting remainder.
+    /// @param key Canonical key `(currency0, currency1, 0, 1, address(0))`.
+    /// @param params V4 direction, signed exact-input/exact-output amount, and Q64.96 price limit.
+    /// @param hookData Unused because the canonical compatibility key requires `hooks == address(0)`.
+    /// @return swapDelta Caller-relative token deltas using canonical V4 sign and packing rules.
+    /// @dev
+    /// Negative `amountSpecified` means exact input and positive means exact output. Low liquidity or
+    /// the explicit price limit may cause a partial swap, matching V4 swap behavior. The function
+    /// records deltas but makes no token transfer; the unlock callback must use `take` and `settle`.
+    function swap(PoolKey memory key, IPoolManager.SwapParams memory params, bytes calldata hookData)
+        external
+        onlyV4Locker
+        returns (BalanceDelta swapDelta)
+    {
+        bool swapActive;
+        /// @solidity memory-safe-assembly
+        assembly {
+            swapActive := tload(_V4_SWAP_ACTIVE_SLOT)
+        }
+        if (swapActive) revert ReentrantCall();
+
+        uint256 config;
+        /// @solidity memory-safe-assembly
+        assembly {
+            config := tload(_V4_FEE_CONFIG_SLOT)
+        }
+        V4SwapPlan memory plan = _planV4Swap(key, params, config);
+        if (plan.baseQuantity == 0) return toBalanceDelta(0, 0);
+
+        /// @solidity memory-safe-assembly
+        assembly {
+            tstore(_V4_SWAP_ACTIVE_SLOT, 1)
+        }
+        (int256 token0Delta, int256 token1Delta) = _executeV4NoRest(plan);
+        /// @solidity memory-safe-assembly
+        assembly {
+            tstore(_V4_SWAP_ACTIVE_SLOT, 0)
+        }
+
+        uint256 feeAmount;
+        if (config != 0) {
+            // The packed value is validated by `setFeeConfig` before storage.
+            // forge-lint: disable-next-line(unsafe-typecast)
+            uint16 feeBps = uint16(config >> 160);
+            (token0Delta, token1Delta, feeAmount) = _applyFillFee(plan.isBid, token0Delta, token1Delta, feeBps);
+            _addV4Fee(plan.isBid ? plan.token0 : plan.token1, feeAmount);
+        }
+
+        int128 amount0 = token0Delta.toInt128();
+        int128 amount1 = token1Delta.toInt128();
+        _accountV4Delta(plan.token0, amount0, msg.sender);
+        _accountV4Delta(plan.token1, amount1, msg.sender);
+        swapDelta = toBalanceDelta(amount0, amount1);
+
+        // The compatibility key rejects V4 hooks, so there is no consumer for this payload.
+        hookData;
     }
 
     /// @notice Configure optional canonical top-of-book hooks for a sorted token pair.
@@ -2526,6 +2664,188 @@ contract DeepstateV1 is Ownable {
                 token0Delta -= int256(uint256(remaining));
             }
         }
+    }
+
+    /// @dev Validate a V4 request and derive one active-book no-rest execution plan.
+    function _planV4Swap(PoolKey memory key, IPoolManager.SwapParams memory params, uint256 config)
+        private
+        view
+        returns (V4SwapPlan memory plan)
+    {
+        plan.token0 = Currency.unwrap(key.currency0);
+        plan.token1 = Currency.unwrap(key.currency1);
+        if (plan.token0 >= plan.token1) {
+            revert IPoolManager.CurrenciesOutOfOrderOrEqual(plan.token0, plan.token1);
+        }
+        if (key.fee != _V4_KEY_FEE || key.tickSpacing != _V4_KEY_TICK_SPACING || address(key.hooks) != address(0)) {
+            revert IPoolManager.PoolNotInitialized();
+        }
+        // The packed value is validated by `setFeeConfig` before storage.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint16 feeBps = uint16(config >> 160);
+        uint160 baseLimit;
+        uint256 quoteLimit;
+        (plan.limitTick, baseLimit, quoteLimit) =
+            _V4_MODULE.swapLimits(params.amountSpecified, params.sqrtPriceLimitX96, params.zeroForOne, feeBps);
+
+        plan.epoch = _poolEpoch(_poolEpochAndHookFlags[poolId(plan.token0, plan.token1)]);
+        if (_nextNonce(books[bookId(plan.token0, plan.token1, plan.epoch)]) == 0) {
+            revert IPoolManager.PoolNotInitialized();
+        }
+
+        (plan.baseQuantity,) = _previewNoRest(
+            plan.token0, plan.token1, plan.epoch, plan.limitTick, baseLimit, quoteLimit, params.zeroForOne
+        );
+
+        plan.isBid = !params.zeroForOne;
+    }
+
+    /// @dev Mutate the active book for a precomputed V4 plan and return unsettled taker deltas.
+    function _executeV4NoRest(V4SwapPlan memory plan) private returns (int256 token0Delta, int256 token1Delta) {
+        bytes32 id = bookId(plan.token0, plan.token1, plan.epoch);
+        Book storage book = books[id];
+        uint256 nonceAndFlags = book.nonceAndFlags;
+        // The nonce occupies the low 32 bits by construction.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        if (uint32(nonceAndFlags) == 0) revert IPoolManager.PoolNotInitialized();
+
+        bool hookEnabled = _bookHookEnabled(nonceAndFlags, !plan.isBid);
+        uint160 baseFilled;
+        uint256 quoteAmount;
+        (,, baseFilled, quoteAmount) =
+            _matchBook(id, book, _pack(plan.limitTick, plan.baseQuantity, 0), plan.isBid, hookEnabled);
+        if (hookEnabled) _executeTopOrderHook(plan.token0, plan.token1, id, !plan.isBid);
+
+        if (plan.isBid) {
+            token0Delta = int256(uint256(baseFilled));
+            token1Delta = _debitDelta(0, quoteAmount);
+        } else {
+            token0Delta = -int256(uint256(baseFilled));
+            token1Delta = _creditDelta(quoteAmount);
+        }
+    }
+
+    /// @dev Preview an executable price-priority prefix without mutating the active book.
+    /// The traversal uses the matcher's exact dirty-spine reconstruction and telescoping rounding.
+    function _previewNoRest(
+        address token0,
+        address token1,
+        uint256 epoch,
+        int32 limitTick,
+        uint160 baseLimit,
+        uint256 quoteLimit,
+        bool restingIsBid
+    ) private view returns (uint160 baseQuantity, uint256 quoteAmount) {
+        Book storage book = books[bookId(token0, token1, epoch)];
+        bytes32 root = restingIsBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
+        (baseQuantity, quoteAmount,) = _previewBound(
+            book, root, restingIsBid, limitTick, baseLimit, quoteLimit, _rightSpineDirty(book, restingIsBid)
+        );
+    }
+
+    /// @dev Preview the price-priority prefix bounded by exact base and quote limits.
+    /// `terminal` means the next priority leaf does not cross or neither limit permits its next base
+    /// unit, so lower-priority liquidity cannot be skipped.
+    function _previewBound(
+        Book storage book,
+        bytes32 node,
+        bool restingIsBid,
+        int32 limitTick,
+        uint160 baseLimit,
+        uint256 quoteLimit,
+        bool dirty
+    ) private view returns (uint160 baseQuantity, uint256 quoteAmount, bool terminal) {
+        if (node == bytes32(0) || baseLimit == 0) return (0, 0, false);
+
+        bytes32 leftNode = book.tree[node].leftNode;
+        if (leftNode == bytes32(0)) {
+            return _previewLeafBound(node, restingIsBid, limitTick, baseLimit, quoteLimit);
+        }
+
+        if (dirty) {
+            (bool uniform, int32 tick, uint160 quantity, uint256 fullQuote,) =
+                _dirtyRightSpineData(book, node, restingIsBid);
+            if (uniform) {
+                if (!_crossesLimit(tick, limitTick, restingIsBid)) return (0, 0, true);
+                if (quantity <= baseLimit && fullQuote <= quoteLimit) return (quantity, fullQuote, false);
+            }
+        } else if (_crossesLimit(_leftmostLeafPrice(book, node), limitTick, restingIsBid)) {
+            uint256 fullQuote = _correctionCode(node) == 0
+                ? _subtreeQuote(book, node, restingIsBid)
+                : _uniformBranchQuote(node, restingIsBid);
+            uint160 quantity = _quantity(node);
+            if (quantity <= baseLimit && fullQuote <= quoteLimit) return (quantity, fullQuote, false);
+        }
+
+        bytes32 rightNode = book.tree[node].rightNode;
+        (baseQuantity, quoteAmount, terminal) =
+            _previewBound(book, rightNode, restingIsBid, limitTick, baseLimit, quoteLimit, dirty);
+        if (terminal) return (baseQuantity, quoteAmount, true);
+
+        uint160 leftQuantity;
+        uint256 leftQuote;
+        (leftQuantity, leftQuote, terminal) = _previewBound(
+            book, leftNode, restingIsBid, limitTick, baseLimit - baseQuantity, quoteLimit - quoteAmount, false
+        );
+        unchecked {
+            baseQuantity += leftQuantity;
+            quoteAmount += leftQuote;
+        }
+    }
+
+    /// @dev Preview one crossing leaf, including a partial fill with the matcher's telescoping rounding.
+    function _previewLeafBound(bytes32 leaf, bool restingIsBid, int32 limitTick, uint160 baseLimit, uint256 quoteLimit)
+        private
+        pure
+        returns (uint160 baseQuantity, uint256 quoteAmount, bool terminal)
+    {
+        int32 tick = _price(leaf);
+        if (!_crossesLimit(tick, limitTick, restingIsBid)) return (0, 0, true);
+
+        uint160 liveQuantity = _quantity(leaf);
+        uint160 candidate = liveQuantity < baseLimit ? liveQuantity : baseLimit;
+        uint256 candidateQuote = _quoteDifference(tick, liveQuantity, liveQuantity - candidate, restingIsBid);
+        if (candidateQuote <= quoteLimit) return (candidate, candidateQuote, candidate == baseLimit);
+
+        baseQuantity = _partialLeafQuantity(tick, liveQuantity, candidate, restingIsBid, quoteLimit);
+        quoteAmount = _quoteDifference(tick, liveQuantity, liveQuantity - baseQuantity, restingIsBid);
+        terminal = true;
+    }
+
+    /// @dev Return the greatest prefix quantity from one leaf whose exact rounded quote fits.
+    function _partialLeafQuantity(
+        int32 tick,
+        uint160 liveQuantity,
+        uint160 maximumFill,
+        bool roundUp,
+        uint256 quoteLimit
+    ) private pure returns (uint160 fillQuantity) {
+        // This branch is reached only when quoteLimit is smaller than the candidate fill quote.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        if (tick == 0) return uint160(quoteLimit);
+
+        (uint256 factor, uint16 shift) = TickMath32.getPriceFactorAtTick(tick);
+        uint256 low = 0;
+        uint256 high = maximumFill;
+        while (low < high) {
+            uint256 mid = (low + high + 1) >> 1;
+            // `mid <= high == maximumFill`, which is uint160.
+            // forge-lint: disable-next-line(unsafe-typecast)
+            uint256 quote = _quoteDifferenceAtFactor(factor, shift, liveQuantity, liveQuantity - uint160(mid), roundUp);
+            if (quote <= quoteLimit) {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+        // `low <= maximumFill`, which is uint160.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        fillQuantity = uint160(low);
+    }
+
+    /// @dev Return whether a resting price is executable at the incoming limit.
+    function _crossesLimit(int32 restingTick, int32 limitTick, bool restingIsBid) private pure returns (bool) {
+        return restingIsBid ? restingTick >= limitTick : restingTick <= limitTick;
     }
 
     /// @notice Execute one `fillRoute` leg and merge its deltas into route transient storage.
@@ -2871,6 +3191,94 @@ contract DeepstateV1 is Ownable {
         int256 signedAmount = int256(amount);
         if (current < type(int256).min + signedAmount) revert DeltaOverflow();
         return current - signedAmount;
+    }
+
+    /// @dev Apply one canonical V4 address/currency delta and maintain the global nonzero count.
+    function _accountV4Delta(address token, int128 amount, address target) private {
+        if (amount == 0) return;
+
+        bytes32 slot = _v4CurrencyDeltaSlot(target, token);
+        int256 previous;
+        /// @solidity memory-safe-assembly
+        assembly {
+            previous := tload(slot)
+        }
+        int256 next = previous + amount;
+        uint256 count;
+        /// @solidity memory-safe-assembly
+        assembly {
+            tstore(slot, next)
+            count := tload(_V4_NONZERO_DELTA_COUNT_SLOT)
+        }
+
+        if (next == 0) {
+            unchecked {
+                --count;
+            }
+            /// @solidity memory-safe-assembly
+            assembly {
+                tstore(_V4_NONZERO_DELTA_COUNT_SLOT, count)
+            }
+        } else if (previous == 0) {
+            unchecked {
+                ++count;
+            }
+            /// @solidity memory-safe-assembly
+            assembly {
+                tstore(_V4_NONZERO_DELTA_COUNT_SLOT, count)
+            }
+        }
+    }
+
+    /// @dev Compute `keccak256(abi.encode(target, currency))`, matching V4 `CurrencyDelta` exactly.
+    function _v4CurrencyDeltaSlot(address target, address token) private pure returns (bytes32 slot) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            mstore(0x00, and(target, 0xffffffffffffffffffffffffffffffffffffffff))
+            mstore(0x20, and(token, 0xffffffffffffffffffffffffffffffffffffffff))
+            slot := keccak256(0x00, 0x40)
+        }
+    }
+
+    /// @dev Accumulate one V4 swap fee and append its currency only on the first nonzero amount.
+    function _addV4Fee(address token, uint256 amount) private {
+        if (amount == 0) return;
+
+        bytes32 feeSlot = _feeSlot(token);
+        uint256 current;
+        /// @solidity memory-safe-assembly
+        assembly {
+            current := tload(feeSlot)
+        }
+        if (current == 0) {
+            uint256 count;
+            /// @solidity memory-safe-assembly
+            assembly {
+                count := tload(_V4_FEE_TOKEN_COUNT_SLOT)
+            }
+            bytes32 tokenSlot = _v4FeeTokenSlot(count);
+            /// @solidity memory-safe-assembly
+            assembly {
+                tstore(tokenSlot, token)
+                tstore(_V4_FEE_TOKEN_COUNT_SLOT, add(count, 1))
+            }
+        }
+
+        uint256 next = current + amount;
+        /// @solidity memory-safe-assembly
+        assembly {
+            tstore(feeSlot, next)
+        }
+    }
+
+    /// @dev Compute the transient indexed list slot for one distinct V4 fee currency.
+    function _v4FeeTokenSlot(uint256 index) private pure returns (bytes32 slot) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            mstore(0x00, _V4_FEE_TOKEN_LIST_DOMAIN)
+            mstore(0x20, index)
+            slot := keccak256(0x00, 0x40)
+        }
     }
 
     /// @notice Settle route user deltas after all route legs have completed.

@@ -740,6 +740,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         selectors[9] = RadixMatchingEngineHandler.invalidReducedLeafCancel.selector;
 
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
+        targetContract(address(handler));
     }
 
     function test_ReplayIndirectBranchReuseKeepsLeavesBacked() public {

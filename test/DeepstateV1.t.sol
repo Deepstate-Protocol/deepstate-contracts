@@ -3,7 +3,17 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
+import {IHooks} from "v4-core/interfaces/IHooks.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {SafeCast} from "v4-core/libraries/SafeCast.sol";
+import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
+import {Currency} from "v4-core/types/Currency.sol";
+import {PoolKey} from "v4-core/types/PoolKey.sol";
+import {SwapRouterNoChecks} from "v4-core/test/SwapRouterNoChecks.sol";
 import {DeepstateV1} from "../src/DeepstateV1.sol";
+import {V4SwapManagerModule} from "../src/V4SwapManagerModule.sol";
+import {DeepstateV4LifecycleProbe} from "./helpers/DeepstateV4LifecycleProbe.sol";
+import {DeepstateV4Router} from "./helpers/DeepstateV4Router.sol";
 import {QuoteMath} from "./QuoteMath.sol";
 
 contract RoutingTestERC20 is ERC20 {
@@ -28,11 +38,54 @@ contract RoutingTestERC20 is ERC20 {
     }
 }
 
+contract V4ReentrantERC20 is RoutingTestERC20 {
+    address private _target;
+    bytes private _payload;
+    bool private _armed;
+
+    bytes4 public reentrySelector;
+
+    constructor(string memory name_, string memory symbol_) RoutingTestERC20(name_, symbol_) {}
+
+    function arm(address target, bytes calldata payload) external {
+        _target = target;
+        _payload = payload;
+        _armed = true;
+    }
+
+    function _afterTokenTransfer(address from, address to, uint256) internal override {
+        if (!_armed || (from != _target && to != _target)) return;
+        _armed = false;
+        (bool success, bytes memory reason) = _target.call(_payload);
+        if (!success && reason.length >= 4) {
+            bytes4 selector;
+            assembly ("memory-safe") {
+                selector := mload(add(reason, 0x20))
+            }
+            reentrySelector = selector;
+        }
+    }
+}
+
 contract GasBurningHook {
     function execute(bytes32, bytes32, address, uint160, uint32) external pure {
         assembly ("memory-safe") {
             for {} 1 {} {}
         }
+    }
+}
+
+contract RecordingHook {
+    uint256 public calls;
+    bytes32 public lastPoolId;
+    bytes32 public lastBookId;
+    address public lastToken;
+
+    function execute(bytes32 poolId, bytes32 bookId, address token, uint160, uint32) external {
+        ++calls;
+        lastPoolId = poolId;
+        lastBookId = bookId;
+        lastToken = token;
     }
 }
 
@@ -57,6 +110,10 @@ contract DeepstateV1Test is Test {
     uint32 internal constant MAX_ORDER_NONCE = type(uint32).max;
 
     DeepstateV1Harness internal engine;
+    DeepstateV4LifecycleProbe internal v4Probe;
+    DeepstateV4Router internal v4Router;
+    SwapRouterNoChecks internal officialV4Router;
+    V4SwapManagerModule internal v4Module;
     RoutingTestERC20 internal token0;
     RoutingTestERC20 internal token1;
 
@@ -76,6 +133,10 @@ contract DeepstateV1Test is Test {
         }
 
         engine = new DeepstateV1Harness();
+        v4Probe = new DeepstateV4LifecycleProbe(IPoolManager(address(engine)));
+        v4Router = new DeepstateV4Router(IPoolManager(address(engine)));
+        officialV4Router = new SwapRouterNoChecks(IPoolManager(address(engine)));
+        v4Module = new V4SwapManagerModule();
 
         _fundAndApprove(alice);
         _fundAndApprove(bob);
@@ -221,6 +282,634 @@ contract DeepstateV1Test is Test {
         assertEq(baseAmount, 10_000);
         assertEq(token0.balanceOf(feeRecipient), 0);
         assertEq(token1.balanceOf(feeRecipient), fee);
+    }
+
+    function test_V4SwapSelectorAndTupleLayoutMatchCore() public pure {
+        assertEq(DeepstateV1.swap.selector, IPoolManager.swap.selector);
+    }
+
+    function test_V4InternalModuleSelectorsAreNotExposedByEngineFallback() public {
+        (bool success,) = address(engine).call(abi.encodeCall(V4SwapManagerModule.limitTick, (uint160(1) << 96, false)));
+        assertFalse(success);
+    }
+
+    function test_V4ModuleLifecycleCannotBeCalledDirectly() public {
+        vm.expectRevert(IPoolManager.ManagerLocked.selector);
+        v4Module.unlock("");
+
+        vm.expectRevert(IPoolManager.ManagerLocked.selector);
+        v4Module.sync(Currency.wrap(address(token0)));
+    }
+
+    function testFuzz_V4LimitTickMatchesExhaustiveBinarySearch(uint160 rawSqrtPriceX96, bool zeroForOne) public view {
+        uint160 sqrtPriceLimitX96 = uint160(bound(rawSqrtPriceX96, _minSqrtLimit(), _maxSqrtLimit()));
+        assertEq(
+            v4Module.limitTick(sqrtPriceLimitX96, zeroForOne), _v4LimitTickReference(sqrtPriceLimitX96, zeroForOne)
+        );
+    }
+
+    function test_UnmodifiedV4CoreSwapRouterSettlesAgainstEngine() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 10, 0), false, false, false));
+
+        uint256 bobBaseBefore = token0.balanceOf(bob);
+        uint256 bobQuoteBefore = token1.balanceOf(bob);
+        vm.prank(bob);
+        officialV4Router.swap(_v4Key(), _v4Params(false, -6, _maxSqrtLimit()));
+
+        assertEq(token0.balanceOf(bob), bobBaseBefore + 6);
+        assertEq(token1.balanceOf(bob), bobQuoteBefore - 6);
+    }
+
+    function test_V4UnlockRouteCrossesPoolsAndNetsIntermediateToken() public {
+        RoutingTestERC20 a = new RoutingTestERC20("V4 Route A", "V4A");
+        RoutingTestERC20 b = new RoutingTestERC20("V4 Route B", "V4B");
+        RoutingTestERC20 c = new RoutingTestERC20("V4 Route C", "V4C");
+        RoutingTestERC20[3] memory sorted = _sortTokens(a, b, c);
+        address makerAb = address(0xAB02);
+        address makerBc = address(0xBC02);
+        address taker = address(0xC0FFEF);
+        uint160 quantity = 100_000;
+
+        sorted[1].mint(makerAb, quantity);
+        sorted[2].mint(makerBc, quantity);
+        sorted[0].mint(taker, quantity);
+        _approveRouteTokens(sorted, makerAb);
+        _approveRouteTokens(sorted, makerBc);
+
+        vm.prank(makerAb);
+        engine.fill(_fillFor(sorted[0], sorted[1], _order(0, quantity, 0), true, false, false));
+        vm.prank(makerBc);
+        engine.fill(_fillFor(sorted[1], sorted[2], _order(0, quantity, 0), true, false, false));
+
+        vm.startPrank(taker);
+        sorted[0].approve(address(v4Router), type(uint256).max);
+        DeepstateV4Router.SwapCall[] memory route = new DeepstateV4Router.SwapCall[](2);
+        route[0] = DeepstateV4Router.SwapCall({
+            key: _v4KeyFor(sorted[0], sorted[1]),
+            params: _v4Params(true, -int256(uint256(quantity)), _minSqrtLimit()),
+            hookData: ""
+        });
+        route[1] = DeepstateV4Router.SwapCall({
+            key: _v4KeyFor(sorted[1], sorted[2]),
+            params: _v4Params(true, -int256(uint256(quantity)), _minSqrtLimit()),
+            hookData: ""
+        });
+        BalanceDelta[] memory deltas = v4Router.swapRoute(route);
+        vm.stopPrank();
+
+        assertEq(deltas.length, 2);
+        _assertDelta(deltas[0], -100_000, 100_000);
+        _assertDelta(deltas[1], -100_000, 100_000);
+        assertEq(sorted[0].balanceOf(taker), 0);
+        assertEq(sorted[1].balanceOf(taker), 0);
+        assertEq(sorted[2].balanceOf(taker), quantity);
+        assertEq(sorted[1].balanceOf(address(v4Router)), 0);
+    }
+
+    function test_V4LifecycleSettleForAndBatchTransientRead() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 10, 0), false, false, false));
+
+        uint256 bobBaseBefore = token0.balanceOf(bob);
+        uint256 bobQuoteBefore = token1.balanceOf(bob);
+        bytes memory result = v4Probe.run(
+            DeepstateV4LifecycleProbe.Action.SettleForAndTake, bob, _v4Key(), _v4Params(false, -6, _maxSqrtLimit())
+        );
+        (BalanceDelta delta, bytes32[] memory transientDeltas) = abi.decode(result, (BalanceDelta, bytes32[]));
+
+        _assertDelta(delta, 6, -6);
+        assertEq(transientDeltas.length, 2);
+        assertEq(transientDeltas[0], bytes32(uint256(6)));
+        assertEq(transientDeltas[1], bytes32(type(uint256).max - 5));
+        assertEq(token0.balanceOf(bob), bobBaseBefore + 6);
+        assertEq(token1.balanceOf(bob), bobQuoteBefore - 6);
+    }
+
+    function test_V4LifecycleClearForgoesExactPositiveDelta() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 10, 0), false, false, false));
+
+        uint256 bobBaseBefore = token0.balanceOf(bob);
+        uint256 bobQuoteBefore = token1.balanceOf(bob);
+        v4Probe.run(DeepstateV4LifecycleProbe.Action.ClearOutput, bob, _v4Key(), _v4Params(false, -6, _maxSqrtLimit()));
+
+        assertEq(token0.balanceOf(bob), bobBaseBefore);
+        assertEq(token1.balanceOf(bob), bobQuoteBefore - 6);
+    }
+
+    function test_V4LifecycleRejectsWrongClearAmount() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 10, 0), false, false, false));
+
+        vm.expectRevert(IPoolManager.MustClearExactPositiveDelta.selector);
+        v4Probe.run(
+            DeepstateV4LifecycleProbe.Action.ClearWrongAmount, bob, _v4Key(), _v4Params(false, -6, _maxSqrtLimit())
+        );
+    }
+
+    function test_V4LifecycleRejectsNestedUnlockAndUnsettledCallback() public {
+        vm.expectRevert(IPoolManager.AlreadyUnlocked.selector);
+        v4Probe.run(DeepstateV4LifecycleProbe.Action.NestedUnlock, bob, _v4Key(), _v4Params(false, -1, _maxSqrtLimit()));
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 10, 0), false, false, false));
+        vm.expectRevert(IPoolManager.CurrencyNotSettled.selector);
+        v4Probe.run(
+            DeepstateV4LifecycleProbe.Action.LeaveUnsettled, bob, _v4Key(), _v4Params(false, -6, _maxSqrtLimit())
+        );
+    }
+
+    function test_V4LifecycleRejectsUnauthorizedLockerDuringUnlock() public {
+        vm.expectRevert(IPoolManager.ManagerLocked.selector);
+        v4Probe.run(
+            DeepstateV4LifecycleProbe.Action.UnauthorizedLocker, bob, _v4Key(), _v4Params(false, -1, _maxSqrtLimit())
+        );
+    }
+
+    function test_V4LifecycleCoversNativeSyncZeroDeltaAndInvalidNativeSettlement() public {
+        v4Probe.run(DeepstateV4LifecycleProbe.Action.SyncNative, bob, _v4Key(), _v4Params(false, -1, _maxSqrtLimit()));
+        v4Probe.run(DeepstateV4LifecycleProbe.Action.ZeroDelta, bob, _v4Key(), _v4Params(false, -1, _maxSqrtLimit()));
+        v4Probe.run{value: 1}(
+            DeepstateV4LifecycleProbe.Action.RoundTripPositiveDelta,
+            bob,
+            _v4Key(),
+            _v4Params(false, -1, _maxSqrtLimit())
+        );
+
+        vm.expectRevert(IPoolManager.NonzeroNativeValue.selector);
+        v4Probe.run{value: 1}(
+            DeepstateV4LifecycleProbe.Action.NonzeroNativeValue, bob, _v4Key(), _v4Params(false, -1, _maxSqrtLimit())
+        );
+    }
+
+    function test_V4LifecycleBlocksLockerReentryWhileSwapIsActive() public {
+        engine.setPoolHookConfig(address(token0), address(token1), address(v4Probe), false, true);
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 10, 0), false, false, false));
+
+        v4Probe.armSwapReentry(_v4Key(), _v4Params(false, -1, _maxSqrtLimit()));
+        v4Probe.run(
+            DeepstateV4LifecycleProbe.Action.SettleForAndTake, bob, _v4Key(), _v4Params(false, -6, _maxSqrtLimit())
+        );
+
+        assertEq(v4Probe.reentrySelector(), DeepstateV1.ReentrantCall.selector);
+    }
+
+    function test_V4UnlockCannotReenterOrdinaryFill() public {
+        V4ReentrantERC20 a = new V4ReentrantERC20("Reentrant A", "RA");
+        V4ReentrantERC20 b = new V4ReentrantERC20("Reentrant B", "RB");
+        V4ReentrantERC20 lower = address(a) < address(b) ? a : b;
+        V4ReentrantERC20 upper = address(a) < address(b) ? b : a;
+        DeepstateV1 localEngine = new DeepstateV1();
+
+        lower.mint(alice, 5);
+        vm.prank(alice);
+        lower.approve(address(localEngine), type(uint256).max);
+        lower.arm(address(localEngine), abi.encodeCall(IPoolManager.unlock, (bytes(""))));
+
+        vm.prank(alice);
+        localEngine.fill(_fillFor(lower, upper, _order(0, 5, 0), false, false, false));
+
+        assertEq(lower.reentrySelector(), DeepstateV1.ReentrantCall.selector);
+    }
+
+    function test_V4SwapRequiresUnlockCallback() public {
+        vm.expectRevert(IPoolManager.ManagerLocked.selector);
+        engine.swap(_v4Key(), _v4Params(false, -1, _maxSqrtLimit()), "");
+    }
+
+    function test_V4SwapBlocksTokenCallbackReentrancy() public {
+        V4ReentrantERC20 a = new V4ReentrantERC20("Reentrant A", "RA");
+        V4ReentrantERC20 b = new V4ReentrantERC20("Reentrant B", "RB");
+        RoutingTestERC20 lower = address(a) < address(b) ? a : b;
+        RoutingTestERC20 upper = address(a) < address(b) ? b : a;
+        V4ReentrantERC20 output = V4ReentrantERC20(address(lower));
+        DeepstateV1 localEngine = new DeepstateV1();
+        DeepstateV4Router localV4Router = new DeepstateV4Router(IPoolManager(address(localEngine)));
+
+        lower.mint(alice, 5);
+        upper.mint(bob, 5);
+        vm.prank(alice);
+        lower.approve(address(localEngine), type(uint256).max);
+        vm.prank(bob);
+        upper.approve(address(localV4Router), type(uint256).max);
+
+        vm.prank(alice);
+        localEngine.fill(_fillFor(lower, upper, _order(0, 5, 0), false, false, false));
+
+        PoolKey memory key = PoolKey({
+            currency0: Currency.wrap(address(lower)),
+            currency1: Currency.wrap(address(upper)),
+            fee: 0,
+            tickSpacing: 1,
+            hooks: IHooks(address(0))
+        });
+        IPoolManager.SwapParams memory params = _v4Params(false, -5, _maxSqrtLimit());
+        output.arm(address(localEngine), abi.encodeCall(DeepstateV1.swap, (key, params, bytes(""))));
+
+        vm.prank(bob);
+        BalanceDelta delta = localV4Router.swap(key, params, "");
+
+        _assertDelta(delta, 5, -5);
+        assertEq(output.reentrySelector(), IPoolManager.ManagerLocked.selector);
+    }
+
+    function test_V4SwapExactInputZeroForOne() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 10, 0), true, false, false));
+
+        uint256 bobBaseBefore = token0.balanceOf(bob);
+        uint256 bobQuoteBefore = token1.balanceOf(bob);
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(true, -6, _minSqrtLimit()), hex"1234");
+
+        _assertDelta(delta, -6, 6);
+        assertEq(token0.balanceOf(bob), bobBaseBefore - 6);
+        assertEq(token1.balanceOf(bob), bobQuoteBefore + 6);
+    }
+
+    function test_V4SwapExactOutputZeroForOne() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 10, 0), true, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(true, 6, _minSqrtLimit()), "");
+
+        _assertDelta(delta, -6, 6);
+    }
+
+    function test_V4SwapExactInputOneForZero() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 10, 0), false, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, -6, _maxSqrtLimit()), "");
+
+        _assertDelta(delta, 6, -6);
+    }
+
+    function test_V4SwapExactOutputOneForZero() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 10, 0), false, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, 6, _maxSqrtLimit()), "");
+
+        _assertDelta(delta, 6, -6);
+    }
+
+    function test_V4SwapPriceLimitStopsAtTickWithoutRestingRemainder() public {
+        vm.startPrank(alice);
+        engine.fill(_fill(0, _order(0, 5, 0), false, false, false));
+        engine.fill(_fill(0, _order(1, 5, 0), false, false, false));
+        vm.stopPrank();
+
+        uint32 nonceBefore = engine.nextNonce(address(token0), address(token1), 0);
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, -10, uint160(1) << 96), "");
+
+        _assertDelta(delta, 5, -5);
+        assertEq(engine.nextNonce(address(token0), address(token1), 0), nonceBefore);
+        (bytes32 askRoot,) = engine.roots(address(token0), address(token1), 0);
+        assertNotEq(askRoot, bytes32(0));
+    }
+
+    function test_V4SwapZeroForOnePriceLimitIncludesBoundaryTickOnly() public {
+        vm.startPrank(alice);
+        engine.fill(_fill(0, _order(0, 5, 0), true, false, false));
+        engine.fill(_fill(0, _order(-1, 5, 0), true, false, false));
+        vm.stopPrank();
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(true, -10, uint160(1) << 96), "");
+
+        _assertDelta(delta, -5, 5);
+        (, bytes32 bidRoot) = engine.roots(address(token0), address(token1), 0);
+        assertNotEq(bidRoot, bytes32(0));
+    }
+
+    function test_V4SwapQuoteExactInputPartiallyFillsNonzeroTick() public {
+        int32 tick = 100_000_000;
+        uint160 quantity = 1_000;
+        uint160 expectedFill = 400;
+        uint256 quoteBudget = _quoteValue(tick, quantity, false) - _quoteValue(tick, quantity - expectedFill, false);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(tick, quantity, 0), false, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, -int256(quoteBudget), _maxSqrtLimit()), "");
+
+        _assertDelta(delta, int128(uint128(expectedFill)), -int128(int256(quoteBudget)));
+    }
+
+    function test_V4SwapQuoteExactOutputPartiallyFillsNonzeroTick() public {
+        int32 tick = 100_000_000;
+        uint160 quantity = 1_000;
+        uint160 expectedFill = 400;
+        uint256 quoteTarget = _quoteValue(tick, quantity, true) - _quoteValue(tick, quantity - expectedFill, true);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(tick, quantity, 0), true, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(true, int256(quoteTarget), _minSqrtLimit()), "");
+
+        _assertDelta(delta, -int128(uint128(expectedFill)), int128(int256(quoteTarget)));
+    }
+
+    function test_V4SwapQuoteBudgetPreservesMixedPricePriority() public {
+        int32 bestTick = -100_000_000;
+        int32 nextTick = 100_000_000;
+        uint160 bestQuantity = 1_000;
+        uint160 nextQuantity = 1_000;
+        uint160 nextFill = 10;
+        uint256 bestQuote = _quoteValue(bestTick, bestQuantity, false);
+        uint256 nextQuote =
+            _quoteValue(nextTick, nextQuantity, false) - _quoteValue(nextTick, nextQuantity - nextFill, false);
+
+        vm.startPrank(alice);
+        engine.fill(_fill(0, _order(nextTick, nextQuantity, 0), false, false, false));
+        engine.fill(_fill(0, _order(bestTick, bestQuantity, 0), false, false, false));
+        vm.stopPrank();
+
+        vm.prank(bob);
+        BalanceDelta delta =
+            v4Router.swap(_v4Key(), _v4Params(false, -int256(bestQuote + nextQuote), _maxSqrtLimit()), "");
+
+        _assertDelta(delta, int128(uint128(bestQuantity + nextFill)), -int128(int256(bestQuote + nextQuote)));
+    }
+
+    function test_V4SwapQuoteBudgetConsumesDirtySameTickSpine() public {
+        int32 tick = 100_000_000;
+        vm.startPrank(alice);
+        engine.fill(_fill(0, _order(tick, 20, 0), false, false, false));
+        engine.fill(_fill(0, _order(tick, 30, 0), false, false, false));
+        vm.stopPrank();
+
+        vm.prank(bob);
+        v4Router.swap(_v4Key(), _v4Params(false, 10, _maxSqrtLimit()), "");
+
+        uint256 quoteBudget = _quoteValue(tick, 10, false) + _quoteValue(tick, 30, false);
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, -int256(quoteBudget), _maxSqrtLimit()), "");
+
+        _assertDelta(delta, 40, -int128(int256(quoteBudget)));
+    }
+
+    function test_V4SwapQuoteBudgetConsumesDirtyMixedTickSpine() public {
+        int32 bestTick = 100_000_000;
+        int32 nextTick = 100_000_001;
+        vm.startPrank(alice);
+        engine.fill(_fill(0, _order(bestTick, 20, 0), false, false, false));
+        engine.fill(_fill(0, _order(nextTick, 30, 0), false, false, false));
+        vm.stopPrank();
+
+        vm.prank(bob);
+        v4Router.swap(_v4Key(), _v4Params(false, 10, _maxSqrtLimit()), "");
+
+        uint256 quoteBudget = _quoteValue(bestTick, 10, false) + _quoteValue(nextTick, 30, false);
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, -int256(quoteBudget), _maxSqrtLimit()), "");
+
+        _assertDelta(delta, 40, -int128(int256(quoteBudget)));
+    }
+
+    function test_V4SwapQuoteBudgetConsumesWholeCleanBranch() public {
+        vm.startPrank(alice);
+        engine.fill(_fill(0, _order(0, 5, 0), false, false, false));
+        engine.fill(_fill(0, _order(0, 5, 0), false, false, false));
+        vm.stopPrank();
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, -11, _maxSqrtLimit()), "");
+
+        _assertDelta(delta, 10, -10);
+    }
+
+    function test_V4SwapQuoteBudgetStopsAfterPartiallyFillingBestBranchLeaf() public {
+        vm.startPrank(alice);
+        engine.fill(_fill(0, _order(1, 10, 0), false, false, false));
+        engine.fill(_fill(0, _order(0, 10, 0), false, false, false));
+        vm.stopPrank();
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, -5, _maxSqrtLimit()), "");
+
+        _assertDelta(delta, 5, -5);
+        (bytes32 askRoot,) = engine.roots(address(token0), address(token1), 0);
+        assertNotEq(askRoot, bytes32(0));
+    }
+
+    function test_V4SwapDirtyUniformBranchOutsidePriceLimitReturnsZero() public {
+        vm.startPrank(alice);
+        engine.fill(_fill(0, _order(1, 20, 0), false, false, false));
+        engine.fill(_fill(0, _order(1, 30, 0), false, false, false));
+        vm.stopPrank();
+
+        vm.prank(bob);
+        v4Router.swap(_v4Key(), _v4Params(false, 10, _maxSqrtLimit()), "");
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, -10, uint160(1) << 96), "");
+
+        _assertDelta(delta, 0, 0);
+    }
+
+    function test_V4SwapExecutesConfiguredTopOrderHook() public {
+        RecordingHook hook = new RecordingHook();
+        engine.setPoolHookConfig(address(token0), address(token1), address(hook), false, true);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 10, 0), false, false, false));
+        uint256 callsBefore = hook.calls();
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, 5, _maxSqrtLimit()), "");
+
+        _assertDelta(delta, 5, -5);
+        assertEq(hook.calls(), callsBefore + 1);
+        assertEq(hook.lastPoolId(), engine.poolId(address(token0), address(token1)));
+        assertEq(hook.lastBookId(), engine.bookId(address(token0), address(token1), 0));
+        assertEq(hook.lastToken(), address(token1));
+    }
+
+    function test_V4SwapPartialLiquidityReturnsActualDelta() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 5, 0), false, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, 10, _maxSqrtLimit()), "");
+
+        _assertDelta(delta, 5, -5);
+    }
+
+    function test_V4SwapExactOutputUsesPostFeeAmount() public {
+        engine.setFeeConfig(feeRecipient, 100);
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 200, 0), false, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, 100, _maxSqrtLimit()), "");
+
+        _assertDelta(delta, 100, -101);
+        assertEq(token0.balanceOf(feeRecipient), 1);
+    }
+
+    function test_V4SwapExactOutputUsesMinimumGrossAmount() public {
+        engine.setFeeConfig(feeRecipient, 3);
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 4_000, 0), false, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, 3_333, _maxSqrtLimit()), "");
+
+        _assertDelta(delta, 3_333, -3_333);
+        assertEq(token0.balanceOf(feeRecipient), 0);
+    }
+
+    function test_V4SwapExactQuoteOutputUsesPostFeeAmount() public {
+        engine.setFeeConfig(feeRecipient, 100);
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 200, 0), true, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(true, 100, _minSqrtLimit()), "");
+
+        _assertDelta(delta, -101, 100);
+        assertEq(token1.balanceOf(feeRecipient), 1);
+    }
+
+    function test_V4SwapValidatesCanonicalKeyAmountLimitAndInitialization() public {
+        PoolKey memory key = _v4Key();
+        IPoolManager.SwapParams memory params = _v4Params(false, 1, _maxSqrtLimit());
+
+        PoolKey memory reversed = PoolKey({
+            currency0: key.currency1,
+            currency1: key.currency0,
+            fee: key.fee,
+            tickSpacing: key.tickSpacing,
+            hooks: key.hooks
+        });
+        vm.expectRevert(
+            abi.encodeWithSelector(IPoolManager.CurrenciesOutOfOrderOrEqual.selector, address(token1), address(token0))
+        );
+        v4Router.swap(reversed, params, "");
+
+        key.fee = 1;
+        vm.expectRevert(IPoolManager.PoolNotInitialized.selector);
+        v4Router.swap(key, params, "");
+        key.fee = 0;
+        key.tickSpacing = 2;
+        vm.expectRevert(IPoolManager.PoolNotInitialized.selector);
+        v4Router.swap(key, params, "");
+        key.tickSpacing = 1;
+        key.hooks = IHooks(address(1));
+        vm.expectRevert(IPoolManager.PoolNotInitialized.selector);
+        v4Router.swap(key, params, "");
+
+        key.hooks = IHooks(address(0));
+        params.amountSpecified = 0;
+        vm.expectRevert(IPoolManager.SwapAmountCannotBeZero.selector);
+        v4Router.swap(key, params, "");
+
+        params.amountSpecified = 1;
+        params.sqrtPriceLimitX96 = uint160(1) << 48;
+        vm.expectRevert(abi.encodeWithSelector(DeepstateV1.PriceLimitOutOfBounds.selector, params.sqrtPriceLimitX96));
+        v4Router.swap(key, params, "");
+        params.sqrtPriceLimitX96 = uint160(1) << 144;
+        vm.expectRevert(abi.encodeWithSelector(DeepstateV1.PriceLimitOutOfBounds.selector, params.sqrtPriceLimitX96));
+        v4Router.swap(key, params, "");
+
+        params.sqrtPriceLimitX96 = _maxSqrtLimit();
+        vm.expectRevert(IPoolManager.PoolNotInitialized.selector);
+        v4Router.swap(key, params, "");
+    }
+
+    function test_V4SwapInitializedBookWithoutOppositeLiquidityReturnsZero() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 5, 0), true, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, -5, _maxSqrtLimit()), "");
+        _assertDelta(delta, 0, 0);
+    }
+
+    function test_V4SwapHandlesInt256MinExactInputAsPartial() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 5, 0), true, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(true, type(int256).min, _minSqrtLimit()), "");
+        _assertDelta(delta, -5, 5);
+    }
+
+    function test_V4SwapHandlesInt256MaxExactOutputWithFeeAsPartial() public {
+        engine.setFeeConfig(feeRecipient, 100);
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 5, 0), false, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, type(int256).max, _maxSqrtLimit()), "");
+
+        _assertDelta(delta, 5, -5);
+    }
+
+    function test_V4SwapRevertsWhenActualDeltaExceedsInt128() public {
+        uint160 quantity = uint160(uint256(uint128(type(int128).max)) + 1);
+        token0.mint(alice, quantity);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, quantity, 0), false, false, false));
+
+        vm.prank(bob);
+        vm.expectRevert(SafeCast.SafeCastOverflow.selector);
+        v4Router.swap(_v4Key(), _v4Params(false, -int256(uint256(quantity)), _maxSqrtLimit()), "");
+
+        (bytes32 askRoot,) = engine.roots(address(token0), address(token1), 0);
+        assertNotEq(askRoot, bytes32(0));
+    }
+
+    function testFuzz_V4SwapQuoteExactInputInvertsLeafRounding(uint32 rawTick, uint160 rawQuantity, uint160 rawFill)
+        public
+    {
+        int32 tick = int32(int256(uint256(bound(rawTick, 1, 500_000_000))));
+        uint160 quantity = uint160(bound(rawQuantity, 1, 1_000_000));
+        uint160 expectedFill = uint160(bound(rawFill, 1, quantity));
+        uint256 quoteBudget = _quoteValue(tick, quantity, false) - _quoteValue(tick, quantity - expectedFill, false);
+        token1.mint(bob, quoteBudget);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(tick, quantity, 0), false, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, -int256(quoteBudget), _maxSqrtLimit()), "");
+
+        _assertDelta(delta, int128(uint128(expectedFill)), -int128(int256(quoteBudget)));
+    }
+
+    function testFuzz_V4SwapExactOutputFeeGrossUpIsMinimal(uint16 rawFeeBps, uint160 rawTarget) public {
+        uint16 feeBps = uint16(bound(rawFeeBps, 1, 100));
+        uint160 target = uint160(bound(rawTarget, 1, 10_000));
+        uint160 gross = target;
+        while (uint256(gross) - uint256(gross) * feeBps / 10_000 < target) {
+            ++gross;
+        }
+
+        engine.setFeeConfig(feeRecipient, feeBps);
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, gross, 0), false, false, false));
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap(_v4Key(), _v4Params(false, int256(uint256(target)), _maxSqrtLimit()), "");
+
+        _assertDelta(delta, int128(uint128(target)), -int128(uint128(gross)));
+        assertEq(token0.balanceOf(feeRecipient), uint256(gross) - target);
+        if (gross != target) {
+            uint256 prior = uint256(gross) - 1;
+            assertLt(prior - prior * feeBps / 10_000, target);
+        }
     }
 
     function test_MaxSignedAskOutputFeeDoesNotOverflow() public {
@@ -710,6 +1399,106 @@ contract DeepstateV1Test is Test {
         });
     }
 
+    function _v4Key() internal view returns (PoolKey memory key) {
+        return _v4KeyFor(token0, token1);
+    }
+
+    function _v4KeyFor(RoutingTestERC20 lower, RoutingTestERC20 upper) internal pure returns (PoolKey memory key) {
+        key = PoolKey({
+            currency0: Currency.wrap(address(lower)),
+            currency1: Currency.wrap(address(upper)),
+            fee: 0,
+            tickSpacing: 1,
+            hooks: IHooks(address(0))
+        });
+    }
+
+    function _v4Params(bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96)
+        internal
+        pure
+        returns (IPoolManager.SwapParams memory params)
+    {
+        params = IPoolManager.SwapParams({
+            zeroForOne: zeroForOne, amountSpecified: amountSpecified, sqrtPriceLimitX96: sqrtPriceLimitX96
+        });
+    }
+
+    function _minSqrtLimit() internal pure returns (uint160) {
+        return (uint160(1) << 48) + 1;
+    }
+
+    function _maxSqrtLimit() internal pure returns (uint160) {
+        return (uint160(1) << 144) - 1;
+    }
+
+    function _v4LimitTickReference(uint160 sqrtPriceLimitX96, bool zeroForOne) internal pure returns (int32 tick) {
+        uint256 limitQuote = _sqrtPriceQuoteAtMaxQuantity(sqrtPriceLimitX96);
+        uint64 low;
+        uint64 high = type(uint32).max;
+        while (low < high) {
+            uint64 mid = (low + high + 1) >> 1;
+            // Search bounds prove `mid` fits in 32 bits.
+            // forge-lint: disable-next-line(unsafe-typecast)
+            int32 candidate = _tickFromOrderedKey(uint32(mid));
+            if (_quoteValue(candidate, type(uint160).max, false) <= limitQuote) {
+                low = mid;
+            } else {
+                high = mid - 1;
+            }
+        }
+
+        // Search bounds prove `low` fits in 32 bits.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        tick = _tickFromOrderedKey(uint32(low));
+        if (zeroForOne && tick != type(int32).max && _quoteValue(tick, type(uint160).max, false) < limitQuote) {
+            unchecked {
+                ++tick;
+            }
+        }
+    }
+
+    function _tickFromOrderedKey(uint32 key) internal pure returns (int32 tick) {
+        uint32 raw = key ^ 0x80000000;
+        assembly ("memory-safe") {
+            tick := signextend(3, raw)
+        }
+    }
+
+    function _sqrtPriceQuoteAtMaxQuantity(uint160 sqrtPriceX96) internal pure returns (uint256 quoteAmount) {
+        uint256 sqrtPrice = uint256(sqrtPriceX96);
+        uint256 squareLow;
+        uint256 squareHigh;
+        uint256 productLow;
+        uint256 productHigh;
+        uint256 quantity = type(uint160).max;
+        assembly ("memory-safe") {
+            squareLow := mul(sqrtPrice, sqrtPrice)
+            let mm := mulmod(sqrtPrice, sqrtPrice, not(0))
+            squareHigh := sub(mm, add(squareLow, lt(mm, squareLow)))
+
+            productLow := mul(squareLow, quantity)
+            mm := mulmod(squareLow, quantity, not(0))
+            productHigh := sub(mm, add(productLow, lt(mm, productLow)))
+        }
+
+        unchecked {
+            uint256 upper = productHigh + squareHigh * quantity;
+            quoteAmount = (upper << 64) | (productLow >> 192);
+        }
+    }
+
+    function _assertDelta(BalanceDelta delta, int128 expected0, int128 expected1) internal pure {
+        int256 packed = BalanceDelta.unwrap(delta);
+        int128 amount0;
+        int128 amount1;
+        assembly ("memory-safe") {
+            amount0 := sar(128, packed)
+            amount1 := signextend(15, packed)
+        }
+        assertEq(amount0, expected0);
+        assertEq(amount1, expected1);
+    }
+
     function _sortTokens(RoutingTestERC20 a, RoutingTestERC20 b, RoutingTestERC20 c)
         internal
         pure
@@ -736,6 +1525,12 @@ contract DeepstateV1Test is Test {
         vm.startPrank(user);
         token0.approve(address(engine), type(uint256).max);
         token1.approve(address(engine), type(uint256).max);
+        token0.approve(address(v4Probe), type(uint256).max);
+        token1.approve(address(v4Probe), type(uint256).max);
+        token0.approve(address(v4Router), type(uint256).max);
+        token1.approve(address(v4Router), type(uint256).max);
+        token0.approve(address(officialV4Router), type(uint256).max);
+        token1.approve(address(officialV4Router), type(uint256).max);
         vm.stopPrank();
     }
 

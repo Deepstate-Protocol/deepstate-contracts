@@ -32,6 +32,35 @@ the bid/ask side, and `noRest` / `fillOrKill` controls. Incoming orders must lea
 bits empty. Any permitted unmatched remainder receives the next decrementing nonce and rests in the
 appropriate active book.
 
+`DeepstateV1` also implements the Uniswap V4 swap-manager lifecycle used by swap routers: `unlock`,
+`swap`, `sync`, `settle`, `settleFor`, `take`, `clear`, and both `exttload` overloads. Currency deltas,
+the unlock state, the synced currency, and the nonzero-delta count use V4's canonical transient
+storage layout. Existing V4 swap routers can therefore open an unlock callback, execute one or more
+swaps, net intermediate currencies, and settle only their final deltas. `PoolKey.currency0` and
+`currency1` must be strictly address-sorted; the compatibility key uses `fee = 0`,
+`tickSpacing = 1`, and `hooks = address(0)` because protocol fees and top-of-book hooks are
+configured independently. Every compatibility swap targets the pair's active epoch and is no-rest.
+
+To remain below the EIP-170 runtime-size limit, the constructor deploys one immutable
+`V4SwapManagerModule`. `DeepstateV1` handles `swap`, previews, radix mutations, fee calculation, and
+delta recording itself. Its fallback forwards only the remaining V4 lifecycle selectors into the
+module's fixed code using the engine's execution context, which is required for canonical transient
+slots and engine-held balances. The module contains no persistent-storage writes and cannot be
+reconfigured or replaced.
+
+`SwapParams.amountSpecified < 0` requests exact input and `amountSpecified > 0` requests exact
+output. Both `zeroForOne` directions and all four specified-currency modes are supported.
+`sqrtPriceLimitX96` is converted conservatively to the nearest executable logarithmic tick.
+Execution never rests an unmatched remainder and returns the actual partial result when the amount,
+price limit, or available liquidity stops execution.
+
+The returned `BalanceDelta` uses V4's packed caller-relative `int128` currency deltas. `swap` records
+those deltas without transferring tokens; the unlock callback pays negative deltas and withdraws
+positive deltas before returning. Native ETH remains currency address zero. A canonical key has no
+V4 hook, so `hookData` is accepted for ABI compatibility but has no consumer. See
+[docs/UNISWAP_V4_COMPATIBILITY.md](docs/UNISWAP_V4_COMPATIBILITY.md) for the precise compatibility
+boundary and test provenance.
+
 ## Branch Encoding
 
 The node layout remains one `bytes32`. Branch nodes do not use nonce tags, probes, or a separate namespace.
@@ -87,6 +116,7 @@ make gas-runtime
 make snapshot-runtime
 make snapshot-runtime-check
 make tick-reference
+make uniswap-v4
 make coverage
 make coverage-check
 make toolchain-lock-check

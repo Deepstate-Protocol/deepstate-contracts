@@ -84,6 +84,34 @@ jobs:
       - name: Forge Tests
         run: make test
 
+  uniswap-v4:
+    name: Uniswap V4 Compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
+        with:
+          version: nightly-d3167db683c001c196126c912027437a9cb0bfb9
+
+      - name: Swap Manager Conformance
+        run: make uniswap-v4-conformance
+
+      - name: Install Upstream V4 Foundry
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
+        with:
+          version: v0.3.0
+
+      - name: Untouched Upstream Suite
+        run: make uniswap-v4-upstream
+
   invariants:
     name: Invariants (shard ${{ matrix.shard }}/8)
     runs-on: ubuntu-24.04
@@ -235,6 +263,7 @@ jobs:
     needs:
       - quality
       - tests
+      - uniswap-v4
       - invariants
       - snapshots
     runs-on: ubuntu-24.04
@@ -244,13 +273,15 @@ jobs:
         env:
           QUALITY_RESULT: ${{ needs.quality.result }}
           TESTS_RESULT: ${{ needs.tests.result }}
+          UNISWAP_V4_RESULT: ${{ needs.uniswap-v4.result }}
           INVARIANTS_RESULT: ${{ needs.invariants.result }}
           SNAPSHOTS_RESULT: ${{ needs.snapshots.result }}
         run: |
-          printf 'quality=%s tests=%s invariants=%s snapshots=%s\n' \
-            "$QUALITY_RESULT" "$TESTS_RESULT" "$INVARIANTS_RESULT" "$SNAPSHOTS_RESULT"
+          printf 'quality=%s tests=%s uniswap-v4=%s invariants=%s snapshots=%s\n' \
+            "$QUALITY_RESULT" "$TESTS_RESULT" "$UNISWAP_V4_RESULT" "$INVARIANTS_RESULT" "$SNAPSHOTS_RESULT"
           [[ "$QUALITY_RESULT" == "success" ]]
           [[ "$TESTS_RESULT" == "success" ]]
+          [[ "$UNISWAP_V4_RESULT" == "success" ]]
           [[ "$INVARIANTS_RESULT" == "success" ]]
           [[ "$SNAPSHOTS_RESULT" == "success" ]]
 

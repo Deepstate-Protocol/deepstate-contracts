@@ -459,6 +459,7 @@ contract DeepstateV1NativeETHInvariantTest is StdInvariant, Test {
         selectors[4] = DeepstateV1NativeETHHandler.cancel.selector;
         selectors[5] = DeepstateV1NativeETHHandler.configureFee.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
+        targetContract(address(handler));
     }
 
     /// @notice In modeled protocol-only histories, engine ETH exactly equals native maker claims.

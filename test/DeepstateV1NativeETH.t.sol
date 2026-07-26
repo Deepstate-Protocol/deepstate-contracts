@@ -3,7 +3,13 @@ pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
+import {IHooks} from "v4-core/interfaces/IHooks.sol";
+import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {BalanceDelta} from "v4-core/types/BalanceDelta.sol";
+import {Currency} from "v4-core/types/Currency.sol";
+import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {DeepstateV1} from "../src/DeepstateV1.sol";
+import {DeepstateV4Router} from "./helpers/DeepstateV4Router.sol";
 
 contract NativeTestERC20 is ERC20 {
     function name() public pure override returns (string memory) {
@@ -72,6 +78,7 @@ contract DeepstateV1NativeETHTest is Test {
     uint32 internal constant MAX_ORDER_NONCE = type(uint32).max;
 
     DeepstateV1 internal engine;
+    DeepstateV4Router internal v4Router;
     NativeTestERC20 internal quoteA;
     NativeTestERC20 internal quoteB;
 
@@ -82,6 +89,7 @@ contract DeepstateV1NativeETHTest is Test {
 
     function setUp() public {
         engine = new DeepstateV1();
+        v4Router = new DeepstateV4Router(IPoolManager(address(engine)));
         quoteA = new NativeTestERC20();
         quoteB = new NativeTestERC20();
 
@@ -171,6 +179,66 @@ contract DeepstateV1NativeETHTest is Test {
         assertEq(baseAmount, 0);
         assertEq(quoteAmount, quantity);
         assertEq(quoteA.balanceOf(alice), aliceQuoteBefore + quantity);
+    }
+
+    function test_V4SwapAcceptsNativeInputAndRefundsExcess() public {
+        uint160 quantity = 2 ether;
+        uint256 excess = 0.25 ether;
+
+        vm.prank(bob);
+        engine.fill(_fill(quoteA, _order(0, quantity), true, false, false));
+
+        uint256 aliceEthBefore = alice.balance;
+        uint256 aliceQuoteBefore = quoteA.balanceOf(alice);
+
+        vm.prank(alice);
+        BalanceDelta delta = v4Router.swap{value: quantity + excess}(
+            _v4Key(quoteA), _v4Params(true, -int256(uint256(quantity)), _minSqrtLimit()), ""
+        );
+
+        _assertDelta(delta, -int128(int256(uint256(quantity))), int128(int256(uint256(quantity))));
+        assertEq(alice.balance, aliceEthBefore - quantity);
+        assertEq(quoteA.balanceOf(alice), aliceQuoteBefore + quantity);
+        assertEq(address(engine).balance, quantity);
+    }
+
+    function test_V4SwapRejectsInsufficientNativeInputBeforeMutation() public {
+        uint160 quantity = 2 ether;
+
+        vm.prank(bob);
+        engine.fill(_fill(quoteA, _order(0, quantity), true, false, false));
+        (bytes32 askRootBefore, bytes32 bidRootBefore) = engine.roots(address(0), address(quoteA), 0);
+
+        vm.prank(alice);
+        vm.expectRevert();
+        v4Router.swap{value: quantity - 1}(
+            _v4Key(quoteA), _v4Params(true, -int256(uint256(quantity)), _minSqrtLimit()), ""
+        );
+
+        (bytes32 askRootAfter, bytes32 bidRootAfter) = engine.roots(address(0), address(quoteA), 0);
+        assertEq(askRootAfter, askRootBefore);
+        assertEq(bidRootAfter, bidRootBefore);
+    }
+
+    function test_V4SwapPaysNativeOutputAndRefundsUnexpectedValue() public {
+        uint160 quantity = 3 ether;
+        uint256 excess = 0.25 ether;
+
+        vm.prank(alice);
+        engine.fill{value: quantity}(_fill(quoteA, _order(0, quantity), false, false, false));
+
+        uint256 bobEthBefore = bob.balance;
+        uint256 bobQuoteBefore = quoteA.balanceOf(bob);
+
+        vm.prank(bob);
+        BalanceDelta delta = v4Router.swap{value: excess}(
+            _v4Key(quoteA), _v4Params(false, int256(uint256(quantity)), _maxSqrtLimit()), ""
+        );
+
+        _assertDelta(delta, int128(int256(uint256(quantity))), -int128(int256(uint256(quantity))));
+        assertEq(bob.balance, bobEthBefore + quantity);
+        assertEq(quoteA.balanceOf(bob), bobQuoteBefore - quantity);
+        assertEq(address(engine).balance, 0);
     }
 
     function test_NativeValueMustCoverNetDebitAndRefundsExcess() public {
@@ -371,10 +439,52 @@ contract DeepstateV1NativeETHTest is Test {
         });
     }
 
+    function _v4Key(NativeTestERC20 quote) internal pure returns (PoolKey memory key) {
+        key = PoolKey({
+            currency0: Currency.wrap(address(0)),
+            currency1: Currency.wrap(address(quote)),
+            fee: 0,
+            tickSpacing: 1,
+            hooks: IHooks(address(0))
+        });
+    }
+
+    function _v4Params(bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96)
+        internal
+        pure
+        returns (IPoolManager.SwapParams memory params)
+    {
+        params = IPoolManager.SwapParams({
+            zeroForOne: zeroForOne, amountSpecified: amountSpecified, sqrtPriceLimitX96: sqrtPriceLimitX96
+        });
+    }
+
+    function _minSqrtLimit() internal pure returns (uint160) {
+        return (uint160(1) << 48) + 1;
+    }
+
+    function _maxSqrtLimit() internal pure returns (uint160) {
+        return (uint160(1) << 144) - 1;
+    }
+
+    function _assertDelta(BalanceDelta delta, int128 expected0, int128 expected1) internal pure {
+        int256 packed = BalanceDelta.unwrap(delta);
+        int128 amount0;
+        int128 amount1;
+        assembly ("memory-safe") {
+            amount0 := sar(128, packed)
+            amount1 := signextend(15, packed)
+        }
+        assertEq(amount0, expected0);
+        assertEq(amount1, expected1);
+    }
+
     function _fundAndApprove(NativeTestERC20 token, address user) internal {
         token.mint(user, 1_000_000 ether);
         vm.prank(user);
         token.approve(address(engine), type(uint256).max);
+        vm.prank(user);
+        token.approve(address(v4Router), type(uint256).max);
     }
 
     function _order(int32 tick, uint160 quantity) internal pure returns (bytes32) {

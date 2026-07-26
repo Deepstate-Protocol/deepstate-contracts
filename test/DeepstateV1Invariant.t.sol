@@ -1001,6 +1001,7 @@ contract DeepstateV1MultiPoolInvariantTest is StdInvariant, Test {
         selectors[6] = DeepstateV1MultiPoolHandler.configureHook.selector;
         selectors[7] = DeepstateV1MultiPoolHandler.rotatePool.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
+        targetContract(address(handler));
     }
 
     function invariant_MultiPoolAccountingAndConservation() public view {

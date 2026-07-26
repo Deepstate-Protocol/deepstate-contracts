@@ -1,4 +1,4 @@
-.PHONY: fmt lint test invariant invariant-deep invariant-deep-shard invariant-deep-shards gas-runtime gas-access-list snapshot-runtime snapshot-runtime-check build-size tick-reference coverage coverage-check toolchain-lock-check slither formal-smt formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
+.PHONY: fmt lint test invariant invariant-deep invariant-deep-shard invariant-deep-shards gas-runtime gas-access-list snapshot-runtime snapshot-runtime-check build-size tick-reference uniswap-v4 uniswap-v4-conformance uniswap-v4-upstream coverage coverage-check toolchain-lock-check slither formal-smt formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
 
 INVARIANT_RUNS ?= 2048
 INVARIANT_DEPTH ?= 64
@@ -6,7 +6,7 @@ INVARIANT_SHARDS ?= 8
 INVARIANT_SHARD ?= 1
 INVARIANT_CONTRACTS ?= .*(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest|DeepstateV1NativeETHInvariantTest).*
 GAS_CONTRACTS ?= RadixMatchingEngine(Gas|HookGas|FeeGas)Test
-COVERAGE_FILES ?= src/DeepstateV1.sol,src/libraries/TickMath32.sol
+COVERAGE_FILES ?= src/DeepstateV1.sol,src/V4SwapManagerModule.sol,src/libraries/TickMath32.sol
 COVERAGE_EXCLUSIONS ?= coverage.exclusions.json
 # Coverage runs every behavioral, routing, boundary, and math test. Formal proofs, stateful
 # invariants, and benchmarks retain dedicated targets because they do not add source coverage.
@@ -26,6 +26,9 @@ KONTROL ?= docker run --rm --platform linux/amd64 -v "$(CURDIR):/workspace" -w /
 KONTROL_BUILD_ARGS ?= --foundry-project-root /workspace --no-metadata --no-O2 --no-keccak-lemmas
 KONTROL_PROVE_ARGS ?= --foundry-project-root /workspace --match-test $(KONTROL_TEST) --schedule CANCUN --no-gas
 KONTROL_TEST ?= 'RadixMatchingEngineFormalTest.testFuzz_FormalBidAgainstAskConservesAndClaims(uint8,uint8)'
+V4_CORE_DIR ?= lib/v4-core
+V4_CORE_COMMIT ?= e50237c43811bd9b526eff40f26772152a42daba
+V4_FORGE ?= forge
 
 fmt:
 	forge fmt --check
@@ -61,10 +64,21 @@ snapshot-runtime-check:
 	forge snapshot --isolate --force --match-contract '$(GAS_CONTRACTS)' --check .gas-snapshot.runtime
 
 build-size:
-	forge build --sizes
+	forge build --sizes src/DeepstateV1.sol src/V4SwapManagerModule.sol
 
 tick-reference:
 	python3 script/check_tick_math.py --check test/TickMath32.t.sol
+
+uniswap-v4: uniswap-v4-conformance uniswap-v4-upstream
+
+uniswap-v4-conformance:
+	forge test --force --match-contract 'DeepstateV1(Test|NativeETHTest)' --match-test 'test.*V4' -vv
+
+uniswap-v4-upstream:
+	@test "$$(git -C $(V4_CORE_DIR) rev-parse HEAD)" = "$(V4_CORE_COMMIT)"
+	@git -C $(V4_CORE_DIR) diff --quiet
+	@git -C $(V4_CORE_DIR) diff --cached --quiet
+	cd $(V4_CORE_DIR) && $(V4_FORGE) test --isolate --force
 
 coverage:
 	forge coverage --ir-minimum $(COVERAGE_SKIP_ARGS) --report lcov --report summary --no-match-coverage 'test|script' --no-match-contract '$(INVARIANT_CONTRACTS)'
@@ -93,6 +107,7 @@ toolchain-lock-check:
 
 slither:
 	$(SLITHER) src/DeepstateV1.sol --config-file slither.config.json --exclude-informational
+	$(SLITHER) src/V4SwapManagerModule.sol --config-file slither.config.json --exclude-informational
 
 formal-halmos:
 	forge build --force --build-info --out $(HALMOS_BUILD_OUT) test/RadixMatchingEngineFormal.t.sol
