@@ -129,6 +129,15 @@ contract DeepstateV1MultiPoolHandler is Test {
         uint256 hookCount;
     }
 
+    struct MatchedLeg {
+        bytes32 routedBook;
+        uint256 quoteAmount;
+        uint160 remaining;
+        uint160 baseFilled;
+        uint8 poolIndex;
+        bool restAllowed;
+    }
+
     DeepstateV1MultiPoolHarness internal immutable ENGINE;
     MultiPoolInvariantERC20 internal immutable TOKEN0;
     MultiPoolInvariantERC20 internal immutable TOKEN1;
@@ -142,11 +151,13 @@ contract DeepstateV1MultiPoolHandler is Test {
     int32 internal constant MIN_FUZZ_TICK = -100_000_000;
     int32 internal constant MAX_FUZZ_TICK = 100_000_000;
     address internal constant FEE_RECIPIENT = address(0xFEE);
+    address internal constant INTEGRATOR_RECIPIENT = address(0x1A7E);
     bytes32 internal constant ORDER_RESTED_TOPIC = keccak256("OrderRested(bytes32,bytes32,address,bool)");
 
     address[6] internal actors;
     uint256[3][6] internal expectedActorBalances;
     uint256[3] internal expectedFeeBalances;
+    uint256[3] internal expectedIntegratorBalances;
     uint256[3] internal expectedEpochs;
     uint8[3] internal poolHookMasks;
     uint8[3] internal poolHookKinds;
@@ -226,6 +237,30 @@ contract DeepstateV1MultiPoolHandler is Test {
         _place(poolSeed, actorSeed, tickSeed, quantitySeed, epochSeed, false, noRest);
     }
 
+    function placeBidWithIntegrator(
+        uint256 poolSeed,
+        uint256 actorSeed,
+        int32 tickSeed,
+        uint256 quantitySeed,
+        uint256 epochSeed,
+        bool noRest,
+        uint16 bpsSeed
+    ) external {
+        _placeWithIntegrator(poolSeed, actorSeed, tickSeed, quantitySeed, epochSeed, true, noRest, bpsSeed);
+    }
+
+    function placeAskWithIntegrator(
+        uint256 poolSeed,
+        uint256 actorSeed,
+        int32 tickSeed,
+        uint256 quantitySeed,
+        uint256 epochSeed,
+        bool noRest,
+        uint16 bpsSeed
+    ) external {
+        _placeWithIntegrator(poolSeed, actorSeed, tickSeed, quantitySeed, epochSeed, false, noRest, bpsSeed);
+    }
+
     function routeForward(
         uint256 actorSeed,
         int32 firstTickSeed,
@@ -252,6 +287,36 @@ contract DeepstateV1MultiPoolHandler is Test {
         fills[0] = _routeParam(0, firstTickSeed, firstQuantitySeed, false, flags & 1 != 0, flags >> 2);
         fills[1] = _routeParam(1, secondTickSeed, secondQuantitySeed, false, flags & 2 != 0, flags >> 3);
         _performRoute(uint8(bound(actorSeed, 0, actors.length - 1)), fills);
+    }
+
+    function routeForwardWithIntegrator(
+        uint256 actorSeed,
+        int32 firstTickSeed,
+        int32 secondTickSeed,
+        uint256 firstQuantitySeed,
+        uint256 secondQuantitySeed,
+        uint256 flags,
+        uint16 bpsSeed
+    ) external {
+        DeepstateV1.FillParams[] memory fills = new DeepstateV1.FillParams[](2);
+        fills[0] = _routeParam(0, firstTickSeed, firstQuantitySeed, true, flags & 1 != 0, flags >> 2);
+        fills[1] = _routeParam(1, secondTickSeed, secondQuantitySeed, true, flags & 2 != 0, flags >> 3);
+        _performIntegratorRoute(uint8(bound(actorSeed, 0, actors.length - 1)), fills, uint16(bound(bpsSeed, 1, 100)));
+    }
+
+    function routeReverseWithIntegrator(
+        uint256 actorSeed,
+        int32 firstTickSeed,
+        int32 secondTickSeed,
+        uint256 firstQuantitySeed,
+        uint256 secondQuantitySeed,
+        uint256 flags,
+        uint16 bpsSeed
+    ) external {
+        DeepstateV1.FillParams[] memory fills = new DeepstateV1.FillParams[](2);
+        fills[0] = _routeParam(0, firstTickSeed, firstQuantitySeed, false, flags & 1 != 0, flags >> 2);
+        fills[1] = _routeParam(1, secondTickSeed, secondQuantitySeed, false, flags & 2 != 0, flags >> 3);
+        _performIntegratorRoute(uint8(bound(actorSeed, 0, actors.length - 1)), fills, uint16(bound(bpsSeed, 1, 100)));
     }
 
     function cancel(uint256 orderSeed) external {
@@ -349,6 +414,10 @@ contract DeepstateV1MultiPoolHandler is Test {
 
     function expectedFeeBalance(uint256 tokenIndex) external view returns (uint256) {
         return expectedFeeBalances[tokenIndex];
+    }
+
+    function expectedIntegratorBalance(uint256 tokenIndex) external view returns (uint256) {
+        return expectedIntegratorBalances[tokenIndex];
     }
 
     function expectedEngineBalance(uint256 tokenIndex) external view returns (uint256 amount) {
@@ -471,6 +540,32 @@ contract DeepstateV1MultiPoolHandler is Test {
         _performSingle(actorIndex, _fillParams(poolIndex, epoch, tick, quantity, isBid, noRest));
     }
 
+    function _placeWithIntegrator(
+        uint256 poolSeed,
+        uint256 actorSeed,
+        int32 tickSeed,
+        uint256 quantitySeed,
+        uint256 epochSeed,
+        bool isBid,
+        bool noRest,
+        uint16 bpsSeed
+    ) private {
+        uint8 poolIndex = uint8(bound(poolSeed, 0, 2));
+        uint8 actorIndex = uint8(bound(actorSeed, 0, actors.length - 1));
+        uint256 epoch = _selectedEpoch(poolIndex, epochSeed);
+        int32 tick = int32(bound(tickSeed, MIN_FUZZ_TICK, MAX_FUZZ_TICK));
+        uint160 quantity = uint160(bound(quantitySeed, 1, uint256(MAX_ORDER_QUANTITY)));
+
+        (address lower, address upper,,) = _pair(poolIndex);
+        if (ENGINE.nextNonce(lower, upper, epoch) == 0) noRest = false;
+        if (trackedOrders.length >= MAX_TRACKED_ORDERS) noRest = true;
+        if (noRest && ENGINE.nextNonce(lower, upper, epoch) == 0) return;
+
+        _performIntegratorSingle(
+            actorIndex, _fillParams(poolIndex, epoch, tick, quantity, isBid, noRest), uint16(bound(bpsSeed, 1, 100))
+        );
+    }
+
     function _routeParam(
         uint8 poolIndex,
         int32 tickSeed,
@@ -496,11 +591,43 @@ contract DeepstateV1MultiPoolHandler is Test {
             Vm.Log[] memory entries = vm.getRecordedLogs();
             (RestLog[] memory rests, uint256 restCount) = _restLogs(entries, actors[actorIndex]);
             ExpectedHook[] memory expectedHooks = new ExpectedHook[](3);
-            AppliedLeg memory applied = _applyLeg(params, actorIndex, rests, 0, expectedHooks, 0);
+            AppliedLeg memory applied = _applyLeg(params, actorIndex, rests, 0, expectedHooks, 0, 0);
 
             assertEq(applied.restCursor, restCount, "single rest log count");
             if (restCount == 0) assertEq(restingOrder, bytes32(0), "single unexpected return");
             else assertEq(restingOrder, rests[0].order, "single resting return");
+
+            (,, uint8 lowerIndex, uint8 upperIndex) = _pair(_poolIndex(params.token0, params.token1));
+            _applyActorDelta(actorIndex, lowerIndex, applied.amount0);
+            _applyActorDelta(actorIndex, upperIndex, applied.amount1);
+            _assertHookCalls(hookStart, expectedHooks, applied.hookCount);
+            ++singleFillCalls;
+        } catch (bytes memory reason) {
+            vm.getRecordedLogs();
+            ++unexpectedFillReverts;
+            _recordUnexpected(reason);
+        }
+    }
+
+    function _performIntegratorSingle(uint8 actorIndex, DeepstateV1.FillParams memory params, uint16 integratorBps)
+        private
+    {
+        uint256 hookStart = RECORDING_HOOK.callCount();
+        vm.recordLogs();
+        vm.prank(actors[actorIndex]);
+        try ENGINE.fillWithIntegratorFee(
+            params, DeepstateV1.IntegratorFee({recipient: INTEGRATOR_RECIPIENT, bps: integratorBps})
+        ) returns (
+            bytes32 restingOrder
+        ) {
+            Vm.Log[] memory entries = vm.getRecordedLogs();
+            (RestLog[] memory rests, uint256 restCount) = _restLogs(entries, actors[actorIndex]);
+            ExpectedHook[] memory expectedHooks = new ExpectedHook[](3);
+            AppliedLeg memory applied = _applyLeg(params, actorIndex, rests, 0, expectedHooks, 0, integratorBps);
+
+            assertEq(applied.restCursor, restCount, "integrator single rest log count");
+            if (restCount == 0) assertEq(restingOrder, bytes32(0), "integrator single unexpected return");
+            else assertEq(restingOrder, rests[0].order, "integrator single resting return");
 
             (,, uint8 lowerIndex, uint8 upperIndex) = _pair(_poolIndex(params.token0, params.token1));
             _applyActorDelta(actorIndex, lowerIndex, applied.amount0);
@@ -527,7 +654,8 @@ contract DeepstateV1MultiPoolHandler is Test {
             uint256 hookCount;
 
             for (uint256 i; i < fills.length; ++i) {
-                AppliedLeg memory applied = _applyLeg(fills[i], actorIndex, rests, restCursor, expectedHooks, hookCount);
+                AppliedLeg memory applied =
+                    _applyLeg(fills[i], actorIndex, rests, restCursor, expectedHooks, hookCount, 0);
                 restCursor = applied.restCursor;
                 hookCount = applied.hookCount;
                 (,, uint8 lowerIndex, uint8 upperIndex) = _pair(_poolIndex(fills[i].token0, fills[i].token1));
@@ -548,79 +676,140 @@ contract DeepstateV1MultiPoolHandler is Test {
         }
     }
 
+    function _performIntegratorRoute(uint8 actorIndex, DeepstateV1.FillParams[] memory fills, uint16 integratorBps)
+        private
+    {
+        uint256 hookStart = RECORDING_HOOK.callCount();
+        vm.recordLogs();
+        vm.prank(actors[actorIndex]);
+        try ENGINE.fillRouteWithIntegratorFee(
+            fills, DeepstateV1.IntegratorFee({recipient: INTEGRATOR_RECIPIENT, bps: integratorBps})
+        ) {
+            Vm.Log[] memory entries = vm.getRecordedLogs();
+            (RestLog[] memory rests, uint256 restCount) = _restLogs(entries, actors[actorIndex]);
+            ExpectedHook[] memory expectedHooks = new ExpectedHook[](fills.length * 3);
+            int256[3] memory deltas;
+            uint256 restCursor;
+            uint256 hookCount;
+
+            for (uint256 i; i < fills.length; ++i) {
+                AppliedLeg memory applied =
+                    _applyLeg(fills[i], actorIndex, rests, restCursor, expectedHooks, hookCount, integratorBps);
+                restCursor = applied.restCursor;
+                hookCount = applied.hookCount;
+                (,, uint8 lowerIndex, uint8 upperIndex) = _pair(_poolIndex(fills[i].token0, fills[i].token1));
+                deltas[lowerIndex] += applied.amount0;
+                deltas[upperIndex] += applied.amount1;
+            }
+
+            assertEq(restCursor, restCount, "integrator route rest log count");
+            for (uint8 tokenIndex; tokenIndex < 3; ++tokenIndex) {
+                _applyActorDelta(actorIndex, tokenIndex, deltas[tokenIndex]);
+            }
+            _assertHookCalls(hookStart, expectedHooks, hookCount);
+            ++routeCalls;
+        } catch (bytes memory reason) {
+            vm.getRecordedLogs();
+            ++unexpectedRouteReverts;
+            _recordUnexpected(reason);
+        }
+    }
+
     function _applyLeg(
         DeepstateV1.FillParams memory params,
         uint8 actorIndex,
         RestLog[] memory rests,
         uint256 restCursor,
         ExpectedHook[] memory expectedHooks,
-        uint256 hookCount
+        uint256 hookCount,
+        uint16 integratorBps
     ) private returns (AppliedLeg memory applied) {
-        uint8 poolIndex = _poolIndex(params.token0, params.token1);
-        bytes32 routedBook = ENGINE.bookId(params.token0, params.token1, params.epoch);
-        TopOrder memory beforeMatched = _top(routedBook, !params.isBid);
-        (uint160 remaining, uint160 baseFilled, uint256 quoteAmount) =
-            _matchModel(routedBook, params.isBid, _tick(params.order), _quantity(params.order));
-        TopOrder memory afterMatched = _top(routedBook, !params.isBid);
+        MatchedLeg memory matched;
+        matched.poolIndex = _poolIndex(params.token0, params.token1);
+        matched.routedBook = ENGINE.bookId(params.token0, params.token1, params.epoch);
+        TopOrder memory beforeMatched = _top(matched.routedBook, !params.isBid);
+        (matched.remaining, matched.baseFilled, matched.quoteAmount) =
+            _matchModel(matched.routedBook, params.isBid, _tick(params.order), _quantity(params.order));
+        TopOrder memory afterMatched = _top(matched.routedBook, !params.isBid);
         hookCount = _appendHookIfNeeded(
-            expectedHooks, hookCount, poolIndex, routedBook, !params.isBid, beforeMatched, afterMatched
+            expectedHooks, hookCount, matched.poolIndex, matched.routedBook, !params.isBid, beforeMatched, afterMatched
         );
 
-        bool restAllowed = !params.noRest && params.epoch >= expectedEpochs[poolIndex];
+        matched.restAllowed = !params.noRest && params.epoch >= expectedEpochs[matched.poolIndex];
 
-        if (remaining != 0 && restAllowed) {
+        if (matched.remaining != 0 && matched.restAllowed) {
             assertLt(restCursor, rests.length, "missing rest log");
             RestLog memory rested = rests[restCursor++];
             assertEq(rested.owner, actors[actorIndex], "rest owner");
             assertEq(rested.isBid, params.isBid, "rest side");
             assertEq(_tick(rested.order), _tick(params.order), "rest tick");
-            assertEq(_quantity(rested.order), remaining, "rest quantity");
+            assertEq(_quantity(rested.order), matched.remaining, "rest quantity");
             assertEq(uint32(uint256(rested.order) >> 32), 0, "rest correction");
             assertTrue(
-                rested.bookId == routedBook || rested.bookId == ENGINE.activeBookId(params.token0, params.token1),
+                rested.bookId == matched.routedBook
+                    || rested.bookId == ENGINE.activeBookId(params.token0, params.token1),
                 "rest book scope"
             );
 
             TopOrder memory beforeRest = _top(rested.bookId, params.isBid);
-            _trackRest(poolIndex, params.epoch, actorIndex, rested);
+            _trackRest(matched.poolIndex, params.epoch, actorIndex, rested);
             TopOrder memory afterRest = _top(rested.bookId, params.isBid);
             hookCount = _appendHookIfNeeded(
-                expectedHooks, hookCount, poolIndex, rested.bookId, params.isBid, beforeRest, afterRest
+                expectedHooks, hookCount, matched.poolIndex, rested.bookId, params.isBid, beforeRest, afterRest
             );
         }
 
-        uint256 feeAmount;
-        if (params.isBid) {
-            applied.amount0 = int256(uint256(baseFilled));
-            // Model bounds keep every quote below `int256.max`, matching production validation.
-            // forge-lint: disable-next-line(unsafe-typecast)
-            applied.amount1 = -int256(quoteAmount);
-            if (remaining != 0 && restAllowed) {
-                applied.amount1 -= int256(_quoteValue(_tick(params.order), remaining, true));
-            }
-            if (expectedFeeRecipient != address(0) && expectedFeeBps != 0) {
-                feeAmount = _feeAmount(baseFilled, expectedFeeBps);
-                // forge-lint: disable-next-line(unsafe-typecast)
-                applied.amount0 -= int256(feeAmount);
-                (,, uint8 lowerIndex,) = _pair(poolIndex);
-                expectedFeeBalances[lowerIndex] += feeAmount;
-            }
-        } else {
-            applied.amount0 = -int256(uint256(baseFilled));
-            // forge-lint: disable-next-line(unsafe-typecast)
-            applied.amount1 = int256(quoteAmount);
-            if (remaining != 0 && restAllowed) applied.amount0 -= int256(uint256(remaining));
-            if (expectedFeeRecipient != address(0) && expectedFeeBps != 0) {
-                feeAmount = _feeAmount(quoteAmount, expectedFeeBps);
-                // forge-lint: disable-next-line(unsafe-typecast)
-                applied.amount1 -= int256(feeAmount);
-                (,,, uint8 upperIndex) = _pair(poolIndex);
-                expectedFeeBalances[upperIndex] += feeAmount;
-            }
-        }
-
+        (applied.amount0, applied.amount1) = _applyLegAmounts(params, matched, integratorBps);
         applied.restCursor = restCursor;
         applied.hookCount = hookCount;
+    }
+
+    function _applyLegAmounts(DeepstateV1.FillParams memory params, MatchedLeg memory matched, uint16 integratorBps)
+        private
+        returns (int256 amount0, int256 amount1)
+    {
+        if (params.isBid) {
+            amount0 = int256(uint256(matched.baseFilled));
+            // Model bounds keep every quote below `int256.max`, matching production validation.
+            // forge-lint: disable-next-line(unsafe-typecast)
+            amount1 = -int256(matched.quoteAmount);
+            if (matched.remaining != 0 && matched.restAllowed) {
+                amount1 -= int256(_quoteValue(_tick(params.order), matched.remaining, true));
+            }
+            if (expectedFeeRecipient != address(0) && expectedFeeBps != 0) {
+                uint256 feeAmount = _feeAmount(matched.baseFilled, expectedFeeBps);
+                // forge-lint: disable-next-line(unsafe-typecast)
+                amount0 -= int256(feeAmount);
+                (,, uint8 lowerIndex,) = _pair(matched.poolIndex);
+                expectedFeeBalances[lowerIndex] += feeAmount;
+            }
+            if (integratorBps != 0) {
+                uint256 integratorAmount = _feeAmount(matched.baseFilled, integratorBps);
+                // forge-lint: disable-next-line(unsafe-typecast)
+                amount0 -= int256(integratorAmount);
+                (,, uint8 lowerIndex,) = _pair(matched.poolIndex);
+                expectedIntegratorBalances[lowerIndex] += integratorAmount;
+            }
+        } else {
+            amount0 = -int256(uint256(matched.baseFilled));
+            // forge-lint: disable-next-line(unsafe-typecast)
+            amount1 = int256(matched.quoteAmount);
+            if (matched.remaining != 0 && matched.restAllowed) amount0 -= int256(uint256(matched.remaining));
+            if (expectedFeeRecipient != address(0) && expectedFeeBps != 0) {
+                uint256 feeAmount = _feeAmount(matched.quoteAmount, expectedFeeBps);
+                // forge-lint: disable-next-line(unsafe-typecast)
+                amount1 -= int256(feeAmount);
+                (,,, uint8 upperIndex) = _pair(matched.poolIndex);
+                expectedFeeBalances[upperIndex] += feeAmount;
+            }
+            if (integratorBps != 0) {
+                uint256 integratorAmount = _feeAmount(matched.quoteAmount, integratorBps);
+                // forge-lint: disable-next-line(unsafe-typecast)
+                amount1 -= int256(integratorAmount);
+                (,,, uint8 upperIndex) = _pair(matched.poolIndex);
+                expectedIntegratorBalances[upperIndex] += integratorAmount;
+            }
+        }
     }
 
     function _cancel(uint256 index) private {
@@ -991,15 +1180,19 @@ contract DeepstateV1MultiPoolInvariantTest is StdInvariant, Test {
         excludeContract(address(recordingHook));
         excludeContract(address(revertingHook));
 
-        bytes4[] memory selectors = new bytes4[](8);
+        bytes4[] memory selectors = new bytes4[](12);
         selectors[0] = DeepstateV1MultiPoolHandler.placeBid.selector;
         selectors[1] = DeepstateV1MultiPoolHandler.placeAsk.selector;
-        selectors[2] = DeepstateV1MultiPoolHandler.routeForward.selector;
-        selectors[3] = DeepstateV1MultiPoolHandler.routeReverse.selector;
-        selectors[4] = DeepstateV1MultiPoolHandler.cancel.selector;
-        selectors[5] = DeepstateV1MultiPoolHandler.configureFee.selector;
-        selectors[6] = DeepstateV1MultiPoolHandler.configureHook.selector;
-        selectors[7] = DeepstateV1MultiPoolHandler.rotatePool.selector;
+        selectors[2] = DeepstateV1MultiPoolHandler.placeBidWithIntegrator.selector;
+        selectors[3] = DeepstateV1MultiPoolHandler.placeAskWithIntegrator.selector;
+        selectors[4] = DeepstateV1MultiPoolHandler.routeForward.selector;
+        selectors[5] = DeepstateV1MultiPoolHandler.routeReverse.selector;
+        selectors[6] = DeepstateV1MultiPoolHandler.routeForwardWithIntegrator.selector;
+        selectors[7] = DeepstateV1MultiPoolHandler.routeReverseWithIntegrator.selector;
+        selectors[8] = DeepstateV1MultiPoolHandler.cancel.selector;
+        selectors[9] = DeepstateV1MultiPoolHandler.configureFee.selector;
+        selectors[10] = DeepstateV1MultiPoolHandler.configureHook.selector;
+        selectors[11] = DeepstateV1MultiPoolHandler.rotatePool.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
 
@@ -1018,6 +1211,9 @@ contract DeepstateV1MultiPoolInvariantTest is StdInvariant, Test {
             MultiPoolInvariantERC20 token = MultiPoolInvariantERC20(handler.tokenAt(tokenIndex));
             assertEq(token.balanceOf(address(engine)), handler.expectedEngineBalance(tokenIndex), "engine collateral");
             assertEq(token.balanceOf(address(0xFEE)), handler.expectedFeeBalance(tokenIndex), "fee balance");
+            assertEq(
+                token.balanceOf(address(0x1A7E)), handler.expectedIntegratorBalance(tokenIndex), "integrator balance"
+            );
             assertEq(token.totalSupply(), handler.expectedSupply(tokenIndex), "token supply");
             assertEq(_trackedBalanceSum(token), token.totalSupply(), "tracked supply");
         }
@@ -1091,6 +1287,7 @@ contract DeepstateV1MultiPoolInvariantTest is StdInvariant, Test {
         }
         total += token.balanceOf(address(engine));
         total += token.balanceOf(address(0xFEE));
+        total += token.balanceOf(address(0x1A7E));
     }
 
     function _assertTop(bytes32 id, bytes32 root, bool isBid) private view {

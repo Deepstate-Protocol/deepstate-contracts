@@ -685,6 +685,7 @@ contract NativeAccountingFormalTest is Test {
     address private constant ALICE = address(0xA11CE);
     address private constant BOB = address(0xB0B);
     address private constant FEE_RECIPIENT = address(0xFEE);
+    address private constant INTEGRATOR_RECIPIENT = address(0x1A7E);
 
     FormalERC20 private quote;
     DeepstateV1 private engine;
@@ -732,6 +733,91 @@ contract NativeAccountingFormalTest is Test {
         assertEq(quoteClaim, quantity);
         assertEq(address(engine).balance, 0);
         assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    /// @dev Proves protocol and integrator fees are independently rounded from gross native output.
+    /// Their sum plus taker output exactly equals the native maker liability removed by the fill.
+    function testFuzz_FormalNativeBidWithBothFeesPreservesSolvency(
+        uint8 quantityRaw,
+        uint8 protocolBpsRaw,
+        uint8 integratorBpsRaw
+    ) public {
+        vm.assume(quantityRaw >= 1 && quantityRaw <= 8);
+        vm.assume(protocolBpsRaw <= 100);
+        vm.assume(integratorBpsRaw <= 100);
+        uint160 quantity = uint160(quantityRaw) * 10_000;
+        uint16 protocolBps = uint16(protocolBpsRaw);
+        uint16 integratorBps = uint16(integratorBpsRaw);
+        uint256 protocolFee = uint256(quantityRaw) * uint256(protocolBps);
+        uint256 integratorFee = uint256(quantityRaw) * uint256(integratorBps);
+
+        engine.setFeeConfig(FEE_RECIPIENT, protocolBps);
+        vm.prank(ALICE);
+        bytes32 ask = engine.fill{value: quantity}(_params(_order(0, quantity, 0), false, false));
+
+        uint256 bobBefore = BOB.balance;
+        vm.prank(BOB);
+        assertEq(
+            engine.fillWithIntegratorFee(
+                _params(_order(0, quantity, 0), true, true),
+                DeepstateV1.IntegratorFee({
+                    recipient: integratorBps == 0 ? address(0) : INTEGRATOR_RECIPIENT, bps: integratorBps
+                })
+            ),
+            bytes32(0)
+        );
+
+        assertEq(BOB.balance, bobBefore + quantity - protocolFee - integratorFee);
+        assertEq(FEE_RECIPIENT.balance, protocolFee);
+        assertEq(INTEGRATOR_RECIPIENT.balance, integratorFee);
+        assertEq(address(engine).balance, 0);
+
+        vm.prank(ALICE);
+        (, uint256 quoteClaim) = engine.cancel(address(0), address(quote), 0, ask);
+        assertEq(quoteClaim, quantity);
+        assertEq(quote.balanceOf(address(engine)), 0);
+    }
+
+    /// @dev Proves the same conservation identity when quote token is the ask taker's output.
+    function testFuzz_FormalNativeAskWithBothFeesPreservesSolvency(
+        uint8 quantityRaw,
+        uint8 protocolBpsRaw,
+        uint8 integratorBpsRaw
+    ) public {
+        vm.assume(quantityRaw >= 1 && quantityRaw <= 8);
+        vm.assume(protocolBpsRaw <= 100);
+        vm.assume(integratorBpsRaw <= 100);
+        uint160 quantity = uint160(quantityRaw) * 10_000;
+        uint16 protocolBps = uint16(protocolBpsRaw);
+        uint16 integratorBps = uint16(integratorBpsRaw);
+        uint256 protocolFee = uint256(quantityRaw) * uint256(protocolBps);
+        uint256 integratorFee = uint256(quantityRaw) * uint256(integratorBps);
+
+        engine.setFeeConfig(FEE_RECIPIENT, protocolBps);
+        vm.prank(ALICE);
+        bytes32 bid = engine.fill(_params(_order(0, quantity, 0), true, false));
+
+        uint256 bobQuoteBefore = quote.balanceOf(BOB);
+        vm.prank(BOB);
+        assertEq(
+            engine.fillWithIntegratorFee{value: quantity}(
+                _params(_order(0, quantity, 0), false, true),
+                DeepstateV1.IntegratorFee({
+                    recipient: integratorBps == 0 ? address(0) : INTEGRATOR_RECIPIENT, bps: integratorBps
+                })
+            ),
+            bytes32(0)
+        );
+
+        assertEq(quote.balanceOf(BOB), bobQuoteBefore + quantity - protocolFee - integratorFee);
+        assertEq(quote.balanceOf(FEE_RECIPIENT), protocolFee);
+        assertEq(quote.balanceOf(INTEGRATOR_RECIPIENT), integratorFee);
+        assertEq(address(engine).balance, quantity);
+
+        vm.prank(ALICE);
+        (uint256 nativeClaim,) = engine.cancel(address(0), address(quote), 0, bid);
+        assertEq(nativeClaim, quantity);
+        assertEq(address(engine).balance, 0);
     }
 
     /// @dev Proves underfill, exact fill, and overfill when a native ask fills a bid and may rest.

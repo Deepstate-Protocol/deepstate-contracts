@@ -5,7 +5,7 @@ INVARIANT_DEPTH ?= 64
 INVARIANT_SHARDS ?= 8
 INVARIANT_SHARD ?= 1
 INVARIANT_CONTRACTS ?= .*(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest|DeepstateV1NativeETHInvariantTest).*
-GAS_CONTRACTS ?= RadixMatchingEngine(Gas|HookGas|FeeGas)Test
+GAS_CONTRACTS ?= (RadixMatchingEngine(Gas|HookGas|FeeGas)Test|DeepstateV1IntegratorFeeGasTest)
 COVERAGE_FILES ?= src/DeepstateV1.sol,src/libraries/TickMath32.sol
 COVERAGE_EXCLUSIONS ?= coverage.exclusions.json
 # Coverage runs every behavioral, routing, boundary, and math test. Formal proofs, stateful

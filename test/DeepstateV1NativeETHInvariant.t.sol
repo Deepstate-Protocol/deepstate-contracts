@@ -32,6 +32,15 @@ contract DeepstateV1NativeETHHandler is Test {
         bool active;
     }
 
+    struct MatchedFill {
+        bytes32 restingOrder;
+        uint256 quoteAmount;
+        uint160 remaining;
+        uint160 baseFilled;
+        uint32 nonceBefore;
+        bool didRest;
+    }
+
     DeepstateV1 internal immutable ENGINE;
     NativeInvariantERC20 internal immutable QUOTE;
     bytes32 internal immutable BOOK_ID;
@@ -45,6 +54,7 @@ contract DeepstateV1NativeETHHandler is Test {
     int32 internal constant MAX_FUZZ_TICK = 100_000_000;
     uint32 internal constant MAX_ORDER_NONCE = type(uint32).max;
     address internal constant FEE_RECIPIENT = address(0xFEE);
+    address internal constant INTEGRATOR_RECIPIENT = address(0x1A7E);
 
     address[6] internal actors;
     uint256[6] internal expectedNativeBalances;
@@ -53,6 +63,8 @@ contract DeepstateV1NativeETHHandler is Test {
 
     uint256 internal expectedNativeFees;
     uint256 internal expectedQuoteFees;
+    uint256 internal expectedNativeIntegratorFees;
+    uint256 internal expectedQuoteIntegratorFees;
     address internal expectedFeeRecipient;
     uint16 internal expectedFeeBps;
 
@@ -68,6 +80,7 @@ contract DeepstateV1NativeETHHandler is Test {
 
         actors = [address(0xA11CE), address(0xB0B), address(0xCA201), address(0xD00D), address(0xE1EE), address(0xF00D)];
         vm.deal(FEE_RECIPIENT, 0);
+        vm.deal(INTEGRATOR_RECIPIENT, 0);
 
         for (uint256 i; i < actors.length; ++i) {
             address actor = actors[i];
@@ -89,7 +102,8 @@ contract DeepstateV1NativeETHHandler is Test {
             int32(bound(tickSeed, MIN_FUZZ_TICK, MAX_FUZZ_TICK)),
             uint160(bound(quantitySeed, 1, uint256(MAX_ORDER_QUANTITY))),
             true,
-            false
+            false,
+            0
         );
         ++restingFillCalls;
     }
@@ -102,7 +116,8 @@ contract DeepstateV1NativeETHHandler is Test {
             int32(bound(tickSeed, MIN_FUZZ_TICK, MAX_FUZZ_TICK)),
             uint160(bound(quantitySeed, 1, uint256(MAX_ORDER_QUANTITY))),
             false,
-            false
+            false,
+            0
         );
         ++restingFillCalls;
     }
@@ -118,7 +133,8 @@ contract DeepstateV1NativeETHHandler is Test {
             type(int32).max,
             uint160(bound(quantitySeed, 1, maximum)),
             true,
-            true
+            true,
+            0
         );
         ++noRestFillCalls;
     }
@@ -134,7 +150,64 @@ contract DeepstateV1NativeETHHandler is Test {
             type(int32).min,
             uint160(bound(quantitySeed, 1, maximum)),
             false,
-            true
+            true,
+            0
+        );
+        ++noRestFillCalls;
+    }
+
+    function placeBidWithIntegrator(uint256 actorSeed, int32 tickSeed, uint256 quantitySeed, uint16 bpsSeed) external {
+        if (trackedOrders.length >= MAX_TRACKED_ORDERS) return;
+        _performFill(
+            uint8(bound(actorSeed, 0, actors.length - 1)),
+            int32(bound(tickSeed, MIN_FUZZ_TICK, MAX_FUZZ_TICK)),
+            uint160(bound(quantitySeed, 1, uint256(MAX_ORDER_QUANTITY))),
+            true,
+            false,
+            uint16(bound(bpsSeed, 1, 100))
+        );
+        ++restingFillCalls;
+    }
+
+    function placeAskWithIntegrator(uint256 actorSeed, int32 tickSeed, uint256 quantitySeed, uint16 bpsSeed) external {
+        if (trackedOrders.length >= MAX_TRACKED_ORDERS) return;
+        _performFill(
+            uint8(bound(actorSeed, 0, actors.length - 1)),
+            int32(bound(tickSeed, MIN_FUZZ_TICK, MAX_FUZZ_TICK)),
+            uint160(bound(quantitySeed, 1, uint256(MAX_ORDER_QUANTITY))),
+            false,
+            false,
+            uint16(bound(bpsSeed, 1, 100))
+        );
+        ++restingFillCalls;
+    }
+
+    function takeAsBidWithIntegrator(uint256 actorSeed, uint256 quantitySeed, uint16 bpsSeed) external {
+        uint256 available = _totalRemaining(false);
+        if (available == 0) return;
+        uint256 maximum = available < MAX_ORDER_QUANTITY ? available : MAX_ORDER_QUANTITY;
+        _performFill(
+            uint8(bound(actorSeed, 0, actors.length - 1)),
+            type(int32).max,
+            uint160(bound(quantitySeed, 1, maximum)),
+            true,
+            true,
+            uint16(bound(bpsSeed, 1, 100))
+        );
+        ++noRestFillCalls;
+    }
+
+    function takeAsAskWithIntegrator(uint256 actorSeed, uint256 quantitySeed, uint16 bpsSeed) external {
+        uint256 available = _totalRemaining(true);
+        if (available == 0) return;
+        uint256 maximum = available < MAX_ORDER_QUANTITY ? available : MAX_ORDER_QUANTITY;
+        _performFill(
+            uint8(bound(actorSeed, 0, actors.length - 1)),
+            type(int32).min,
+            uint160(bound(quantitySeed, 1, maximum)),
+            false,
+            true,
+            uint16(bound(bpsSeed, 1, 100))
         );
         ++noRestFillCalls;
     }
@@ -193,6 +266,14 @@ contract DeepstateV1NativeETHHandler is Test {
         return expectedQuoteFees;
     }
 
+    function expectedNativeIntegratorFeeBalance() external view returns (uint256) {
+        return expectedNativeIntegratorFees;
+    }
+
+    function expectedQuoteIntegratorFeeBalance() external view returns (uint256) {
+        return expectedQuoteIntegratorFees;
+    }
+
     function initialNativeSupply() external pure returns (uint256) {
         return INITIAL_NATIVE_BALANCE * 6;
     }
@@ -247,45 +328,70 @@ contract DeepstateV1NativeETHHandler is Test {
         return (expectedFeeRecipient, expectedFeeBps);
     }
 
-    function _performFill(uint8 actorIndex, int32 tick, uint160 quantity, bool isBid, bool noRest) private {
+    function _performFill(uint8 actorIndex, int32 tick, uint160 quantity, bool isBid, bool noRest, uint16 integratorBps)
+        private
+    {
         address actor = actors[actorIndex];
-        uint32 nonceBefore = ENGINE.nextNonce(address(0), address(QUOTE), 0);
+        MatchedFill memory matched;
+        matched.nonceBefore = ENGINE.nextNonce(address(0), address(QUOTE), 0);
         uint256 nativeValue = (isBid ? 0 : quantity) + NATIVE_OVERPAYMENT;
 
         vm.prank(actor);
-        bytes32 restingOrder = ENGINE.fill{value: nativeValue}(_fillParams(tick, quantity, isBid, noRest));
+        if (integratorBps == 0) {
+            matched.restingOrder = ENGINE.fill{value: nativeValue}(_fillParams(tick, quantity, isBid, noRest));
+        } else {
+            matched.restingOrder = ENGINE.fillWithIntegratorFee{value: nativeValue}(
+                _fillParams(tick, quantity, isBid, noRest),
+                DeepstateV1.IntegratorFee({recipient: INTEGRATOR_RECIPIENT, bps: integratorBps})
+            );
+        }
 
-        (uint160 remaining, uint160 baseFilled, uint256 quoteAmount) = _matchModel(isBid, tick, quantity);
+        (matched.remaining, matched.baseFilled, matched.quoteAmount) = _matchModel(isBid, tick, quantity);
         uint32 nonceAfter = ENGINE.nextNonce(address(0), address(QUOTE), 0);
 
-        bool didRest = remaining != 0 && !noRest;
-        if (didRest) {
-            uint32 assignedNonce = nonceBefore == 0 ? MAX_ORDER_NONCE : nonceBefore;
-            assertEq(_tick(restingOrder), tick, "rest tick");
-            assertEq(_quantity(restingOrder), remaining, "rest quantity");
-            assertEq(_nonce(restingOrder), assignedNonce, "rest nonce");
+        matched.didRest = matched.remaining != 0 && !noRest;
+        if (matched.didRest) {
+            uint32 assignedNonce = matched.nonceBefore == 0 ? MAX_ORDER_NONCE : matched.nonceBefore;
+            assertEq(_tick(matched.restingOrder), tick, "rest tick");
+            assertEq(_quantity(matched.restingOrder), matched.remaining, "rest quantity");
+            assertEq(_nonce(matched.restingOrder), assignedNonce, "rest nonce");
             assertEq(nonceAfter, assignedNonce - 1, "next nonce after rest");
-            _trackRest(restingOrder, actor, actorIndex, isBid);
+            _trackRest(matched.restingOrder, actor, actorIndex, isBid);
         } else {
-            assertEq(restingOrder, bytes32(0), "unexpected rest");
-            assertEq(nonceAfter, nonceBefore, "nonce changed without rest");
-            if (noRest) assertEq(remaining, 0, "no-rest taker not fully matched");
+            assertEq(matched.restingOrder, bytes32(0), "unexpected rest");
+            assertEq(nonceAfter, matched.nonceBefore, "nonce changed without rest");
+            if (noRest) assertEq(matched.remaining, 0, "no-rest taker not fully matched");
         }
 
-        uint256 feeAmount;
-        if (expectedFeeRecipient != address(0) && expectedFeeBps != 0) {
-            feeAmount = _feeAmount(isBid ? baseFilled : quoteAmount, expectedFeeBps);
-        }
+        _applyFillAccounting(actorIndex, tick, isBid, integratorBps, matched);
+    }
+
+    function _applyFillAccounting(
+        uint8 actorIndex,
+        int32 tick,
+        bool isBid,
+        uint16 integratorBps,
+        MatchedFill memory matched
+    ) private {
+        uint256 grossOutput = isBid ? matched.baseFilled : matched.quoteAmount;
+        uint256 feeAmount =
+            expectedFeeRecipient != address(0) && expectedFeeBps != 0 ? _feeAmount(grossOutput, expectedFeeBps) : 0;
+        uint256 integratorAmount = integratorBps == 0 ? 0 : _feeAmount(grossOutput, integratorBps);
 
         if (isBid) {
-            expectedNativeBalances[actorIndex] += uint256(baseFilled) - feeAmount;
-            expectedQuoteBalances[actorIndex] -= quoteAmount;
-            if (didRest) expectedQuoteBalances[actorIndex] -= _quoteValue(tick, remaining, true);
+            expectedNativeBalances[actorIndex] += uint256(matched.baseFilled) - feeAmount - integratorAmount;
+            expectedQuoteBalances[actorIndex] -= matched.quoteAmount;
+            if (matched.didRest) {
+                expectedQuoteBalances[actorIndex] -= _quoteValue(tick, matched.remaining, true);
+            }
             expectedNativeFees += feeAmount;
+            expectedNativeIntegratorFees += integratorAmount;
         } else {
-            expectedNativeBalances[actorIndex] -= uint256(baseFilled) + (didRest ? uint256(remaining) : 0);
-            expectedQuoteBalances[actorIndex] += quoteAmount - feeAmount;
+            expectedNativeBalances[actorIndex] -= uint256(matched.baseFilled)
+            + (matched.didRest ? uint256(matched.remaining) : 0);
+            expectedQuoteBalances[actorIndex] += matched.quoteAmount - feeAmount - integratorAmount;
             expectedQuoteFees += feeAmount;
+            expectedQuoteIntegratorFees += integratorAmount;
         }
     }
 
@@ -441,6 +547,7 @@ contract DeepstateV1NativeETHInvariantTest is StdInvariant, Test {
     DeepstateV1NativeETHHandler internal handler;
 
     address internal constant FEE_RECIPIENT = address(0xFEE);
+    address internal constant INTEGRATOR_RECIPIENT = address(0x1A7E);
 
     function setUp() public {
         engine = new DeepstateV1();
@@ -451,13 +558,17 @@ contract DeepstateV1NativeETHInvariantTest is StdInvariant, Test {
         excludeContract(address(engine));
         excludeContract(address(quote));
 
-        bytes4[] memory selectors = new bytes4[](6);
+        bytes4[] memory selectors = new bytes4[](10);
         selectors[0] = DeepstateV1NativeETHHandler.placeBid.selector;
         selectors[1] = DeepstateV1NativeETHHandler.placeAsk.selector;
         selectors[2] = DeepstateV1NativeETHHandler.takeAsBid.selector;
         selectors[3] = DeepstateV1NativeETHHandler.takeAsAsk.selector;
-        selectors[4] = DeepstateV1NativeETHHandler.cancel.selector;
-        selectors[5] = DeepstateV1NativeETHHandler.configureFee.selector;
+        selectors[4] = DeepstateV1NativeETHHandler.placeBidWithIntegrator.selector;
+        selectors[5] = DeepstateV1NativeETHHandler.placeAskWithIntegrator.selector;
+        selectors[6] = DeepstateV1NativeETHHandler.takeAsBidWithIntegrator.selector;
+        selectors[7] = DeepstateV1NativeETHHandler.takeAsAskWithIntegrator.selector;
+        selectors[8] = DeepstateV1NativeETHHandler.cancel.selector;
+        selectors[9] = DeepstateV1NativeETHHandler.configureFee.selector;
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
 
@@ -469,8 +580,9 @@ contract DeepstateV1NativeETHInvariantTest is StdInvariant, Test {
 
     /// @notice Every actor and fee balance must match the independent settlement model.
     function invariant_NativeActorFeeAndSupplyAccounting() public view {
-        uint256 nativeTotal = address(engine).balance + FEE_RECIPIENT.balance;
-        uint256 quoteTotal = quote.balanceOf(address(engine)) + quote.balanceOf(FEE_RECIPIENT);
+        uint256 nativeTotal = address(engine).balance + FEE_RECIPIENT.balance + INTEGRATOR_RECIPIENT.balance;
+        uint256 quoteTotal =
+            quote.balanceOf(address(engine)) + quote.balanceOf(FEE_RECIPIENT) + quote.balanceOf(INTEGRATOR_RECIPIENT);
 
         for (uint256 i; i < handler.actorCount(); ++i) {
             address actor = handler.actorAt(i);
@@ -482,6 +594,14 @@ contract DeepstateV1NativeETHInvariantTest is StdInvariant, Test {
 
         assertEq(FEE_RECIPIENT.balance, handler.expectedNativeFeeBalance(), "native fee balance");
         assertEq(quote.balanceOf(FEE_RECIPIENT), handler.expectedQuoteFeeBalance(), "quote fee balance");
+        assertEq(
+            INTEGRATOR_RECIPIENT.balance, handler.expectedNativeIntegratorFeeBalance(), "native integrator fee balance"
+        );
+        assertEq(
+            quote.balanceOf(INTEGRATOR_RECIPIENT),
+            handler.expectedQuoteIntegratorFeeBalance(),
+            "quote integrator fee balance"
+        );
         assertEq(nativeTotal, handler.initialNativeSupply(), "native conservation");
         assertEq(quoteTotal, handler.initialQuoteSupply(), "quote conservation");
         assertEq(quote.totalSupply(), handler.initialQuoteSupply(), "quote total supply");

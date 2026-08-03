@@ -63,6 +63,7 @@ contract DeepstateV1Test is Test {
     address internal alice = address(0xA11CE);
     address internal bob = address(0xB0B);
     address internal feeRecipient = address(0xFEE);
+    address internal integratorRecipient = address(0x1A7E);
 
     function setUp() public {
         RoutingTestERC20 a = new RoutingTestERC20("A", "A");
@@ -130,6 +131,152 @@ contract DeepstateV1Test is Test {
         (recipient, bps) = engine.feeConfig();
         assertEq(recipient, address(0));
         assertEq(bps, 0);
+    }
+
+    function test_IntegratorFeeValidationAndCanonicalDisable() public {
+        DeepstateV1.FillParams memory params = _fill(0, _order(10, 1, 0), true, false, false);
+
+        vm.expectRevert(DeepstateV1.InvalidIntegratorFee.selector);
+        engine.fillWithIntegratorFee(params, _integratorFee(integratorRecipient, 101));
+
+        vm.expectRevert(DeepstateV1.InvalidIntegratorFee.selector);
+        engine.fillWithIntegratorFee(params, _integratorFee(address(0), 1));
+
+        vm.expectRevert(DeepstateV1.InvalidIntegratorFee.selector);
+        engine.fillWithIntegratorFee(params, _integratorFee(integratorRecipient, 0));
+
+        vm.expectRevert(DeepstateV1.InvalidIntegratorFee.selector);
+        engine.fillWithIntegratorFee(params, _integratorFee(address(engine), 1));
+
+        vm.prank(alice);
+        bytes32 resting = engine.fillWithIntegratorFee(params, _integratorFee(address(0), 0));
+        assertEq(resting, _order(10, 1, MAX_ORDER_NONCE));
+        assertEq(token0.balanceOf(integratorRecipient), 0);
+        assertEq(token1.balanceOf(integratorRecipient), 0);
+    }
+
+    function test_IntegratorAndProtocolFeesUseSameGrossBidOutput() public {
+        engine.setFeeConfig(feeRecipient, 100);
+
+        vm.prank(alice);
+        bytes32 ask = engine.fill(_fill(0, _order(0, 10_000, 0), false, false, false));
+
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+        vm.prank(bob);
+        engine.fillWithIntegratorFee(
+            _fill(0, _order(0, 10_000, 0), true, true, true), _integratorFee(integratorRecipient, 10)
+        );
+
+        assertEq(token0.balanceOf(bob), bobToken0Before + 9_890);
+        assertEq(token1.balanceOf(bob), bobToken1Before - 10_000);
+        assertEq(token0.balanceOf(feeRecipient), 100);
+        assertEq(token0.balanceOf(integratorRecipient), 10);
+        assertEq(token1.balanceOf(feeRecipient), 0);
+        assertEq(token1.balanceOf(integratorRecipient), 0);
+
+        vm.prank(alice);
+        (, uint256 makerQuote) = engine.cancel(address(token0), address(token1), 0, ask);
+        assertEq(makerQuote, 10_000);
+    }
+
+    function test_IntegratorAndProtocolFeesUseSameGrossAskOutput() public {
+        engine.setFeeConfig(feeRecipient, 100);
+
+        vm.prank(alice);
+        bytes32 bid = engine.fill(_fill(0, _order(0, 10_000, 0), true, false, false));
+
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+        vm.prank(bob);
+        engine.fillWithIntegratorFee(
+            _fill(0, _order(0, 10_000, 0), false, true, true), _integratorFee(integratorRecipient, 10)
+        );
+
+        assertEq(token0.balanceOf(bob), bobToken0Before - 10_000);
+        assertEq(token1.balanceOf(bob), bobToken1Before + 9_890);
+        assertEq(token1.balanceOf(feeRecipient), 100);
+        assertEq(token1.balanceOf(integratorRecipient), 10);
+        assertEq(token0.balanceOf(feeRecipient), 0);
+        assertEq(token0.balanceOf(integratorRecipient), 0);
+
+        vm.prank(alice);
+        (uint256 makerBase,) = engine.cancel(address(token0), address(token1), 0, bid);
+        assertEq(makerBase, 10_000);
+    }
+
+    function test_IntegratorFeeAppliesOnlyToMatchedOutputBeforeRemainderRests() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 10_000, 0), false, false, false));
+
+        uint256 bobBaseBefore = token0.balanceOf(bob);
+        uint256 bobQuoteBefore = token1.balanceOf(bob);
+        vm.prank(bob);
+        bytes32 restingBid = engine.fillWithIntegratorFee(
+            _fill(0, _order(0, 15_000, 0), true, false, false), _integratorFee(integratorRecipient, 10)
+        );
+
+        assertEq(restingBid, _order(0, 5_000, MAX_ORDER_NONCE - 1));
+        assertEq(token0.balanceOf(bob), bobBaseBefore + 9_990);
+        assertEq(token1.balanceOf(bob), bobQuoteBefore - 15_000);
+        assertEq(token0.balanceOf(integratorRecipient), 10);
+
+        vm.prank(bob);
+        (, uint256 collateralRefund) = engine.cancel(address(token0), address(token1), 0, restingBid);
+        assertEq(collateralRefund, 5_000);
+        assertEq(token1.balanceOf(bob), bobQuoteBefore - 10_000);
+        assertEq(token0.balanceOf(integratorRecipient), 10);
+    }
+
+    function test_UnmatchedIntegratorFillRestsWithoutChargingFee() public {
+        vm.prank(alice);
+        bytes32 resting = engine.fillWithIntegratorFee(
+            _fill(0, _order(10, 10_000, 0), true, false, false), _integratorFee(integratorRecipient, 100)
+        );
+
+        assertEq(resting, _order(10, 10_000, MAX_ORDER_NONCE));
+        assertEq(token0.balanceOf(integratorRecipient), 0);
+        assertEq(token1.balanceOf(integratorRecipient), 0);
+
+        vm.prank(alice);
+        (, uint256 quoteRefund) = engine.cancel(address(token0), address(token1), 0, resting);
+        assertEq(quoteRefund, _quoteValue(10, 10_000, true));
+    }
+
+    function test_SameRecipientReceivesProtocolAndIntegratorFees() public {
+        engine.setFeeConfig(integratorRecipient, 100);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 10_000, 0), false, false, false));
+
+        vm.prank(bob);
+        engine.fillWithIntegratorFee(
+            _fill(0, _order(0, 10_000, 0), true, true, true), _integratorFee(integratorRecipient, 10)
+        );
+
+        assertEq(token0.balanceOf(integratorRecipient), 110);
+    }
+
+    function test_MaxSignedAskOutputWithBothFeesDoesNotOverflow() public {
+        engine.setFeeConfig(feeRecipient, 100);
+
+        uint160 quantity = uint160(uint256(1) << 154);
+        uint256 matchedQuote = _quoteValue(type(int32).max, quantity, true);
+        token1.mint(alice, matchedQuote);
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(type(int32).max, quantity, 0), true, false, false));
+
+        token0.mint(bob, quantity);
+        uint256 bobQuoteBefore = token1.balanceOf(bob);
+        vm.prank(bob);
+        engine.fillWithIntegratorFee(
+            _fill(0, _order(type(int32).max, quantity, 0), false, true, true), _integratorFee(integratorRecipient, 100)
+        );
+
+        uint256 eachFee = matchedQuote / 100;
+        assertEq(token1.balanceOf(bob), bobQuoteBefore + matchedQuote - eachFee - eachFee);
+        assertEq(token1.balanceOf(feeRecipient), eachFee);
+        assertEq(token1.balanceOf(integratorRecipient), eachFee);
     }
 
     function test_OnlyOwnerCanConfigureAndOwnershipTransferTakesEffect() public {
@@ -432,6 +579,86 @@ contract DeepstateV1Test is Test {
         assertEq(token1.balanceOf(feeRecipient), 0);
     }
 
+    function test_IntegratorRouteAccumulatesRepeatedFeesForOneToken() public {
+        engine.setFeeConfig(feeRecipient, 100);
+
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 20_000, 0), false, false, false));
+
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](2);
+        route[0] = _fill(0, _order(0, 10_000, 0), true, true, true);
+        route[1] = _fill(0, _order(0, 10_000, 0), true, true, true);
+
+        vm.prank(bob);
+        engine.fillRouteWithIntegratorFee(route, _integratorFee(integratorRecipient, 10));
+
+        assertEq(token0.balanceOf(bob), bobToken0Before + 19_780);
+        assertEq(token1.balanceOf(bob), bobToken1Before - 20_000);
+        assertEq(token0.balanceOf(feeRecipient), 200);
+        assertEq(token0.balanceOf(integratorRecipient), 20);
+        assertEq(token1.balanceOf(feeRecipient), 0);
+        assertEq(token1.balanceOf(integratorRecipient), 0);
+    }
+
+    function test_DisabledIntegratorRoutePreservesStandardSettlement() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(0, 5, 0), false, false, false));
+
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](1);
+        route[0] = _fill(0, _order(0, 5, 0), true, true, true);
+
+        vm.prank(bob);
+        engine.fillRouteWithIntegratorFee(route, _integratorFee(address(0), 0));
+
+        assertEq(token0.balanceOf(bob), bobToken0Before + 5);
+        assertEq(token1.balanceOf(bob), bobToken1Before - 5);
+    }
+
+    function test_ActiveIntegratorRouteDoesNotChargeZeroOutputLeg() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), false, false, false));
+
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](1);
+        route[0] = _fill(0, _order(0, 5, 0), true, true, false);
+
+        vm.prank(bob);
+        engine.fillRouteWithIntegratorFee(route, _integratorFee(integratorRecipient, 10));
+
+        assertEq(token0.balanceOf(bob), bobToken0Before);
+        assertEq(token1.balanceOf(bob), bobToken1Before);
+        assertEq(token0.balanceOf(integratorRecipient), 0);
+        assertEq(token1.balanceOf(integratorRecipient), 0);
+    }
+
+    function test_IntegratorRouteLateFailureRevertsFeesAndEarlierLegAtomically() public {
+        vm.prank(alice);
+        bytes32 restingAsk = engine.fill(_fill(0, _order(0, 5_000, 0), false, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        uint256 bobToken0Before = token0.balanceOf(bob);
+        uint256 bobToken1Before = token1.balanceOf(bob);
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](2);
+        route[0] = _fill(0, _order(0, 3_000, 0), true, true, true);
+        route[1] = _fill(0, _order(0, 3_000, 0), true, true, true);
+
+        vm.prank(bob);
+        vm.expectRevert(bytes4(keccak256("FillOrKill()")));
+        engine.fillRouteWithIntegratorFee(route, _integratorFee(integratorRecipient, 10));
+
+        (bytes32 askRoot,) = engine.roots(address(token0), address(token1), 0);
+        assertEq(askRoot, restingAsk);
+        assertEq(engine.ownerOfOrder(engine.orderId(id, restingAsk)), alice);
+        assertEq(token0.balanceOf(bob), bobToken0Before);
+        assertEq(token1.balanceOf(bob), bobToken1Before);
+        assertEq(token0.balanceOf(integratorRecipient), 0);
+    }
+
     function test_LateRouteFailureRevertsEarlierLegAtomically() public {
         vm.prank(alice);
         bytes32 restingAsk = engine.fill(_fill(0, _order(10, 5, 0), false, false, false));
@@ -708,6 +935,14 @@ contract DeepstateV1Test is Test {
             noRest: noRest,
             fillOrKill: fillOrKill
         });
+    }
+
+    function _integratorFee(address recipient, uint16 bps)
+        internal
+        pure
+        returns (DeepstateV1.IntegratorFee memory fee)
+    {
+        fee = DeepstateV1.IntegratorFee({recipient: recipient, bps: bps});
     }
 
     function _sortTokens(RoutingTestERC20 a, RoutingTestERC20 b, RoutingTestERC20 c)

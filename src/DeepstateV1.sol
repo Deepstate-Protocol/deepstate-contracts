@@ -2128,6 +2128,18 @@ contract DeepstateV1 is Ownable {
         bool fillOrKill;
     }
 
+    /// @notice Optional fee selected by an integrator for one fill or atomic route.
+    /// @param recipient Address paid the fee. Zero is valid only when `bps` is also zero.
+    /// @param bps Fee in basis points, capped at 100 (1%).
+    /// @dev The fee is carved only from matched taker output. It never applies to resting
+    /// collateral, maker claims, or cancellation proceeds.
+    struct IntegratorFee {
+        /// @notice Address paid the integrator fee.
+        address recipient;
+        /// @notice Integrator fee rate in basis points.
+        uint16 bps;
+    }
+
     /// @notice Mutable in-memory accumulator for a route.
     /// @dev
     /// `touched` and `feeTouched` are deduplicated token lists. The actual signed token deltas live
@@ -2142,6 +2154,27 @@ contract DeepstateV1 is Ownable {
         address[] feeTouched;
         /// @notice Number of populated entries in `feeTouched`.
         uint256 feeTouchedCount;
+    }
+
+    /// @notice In-memory accumulator for integrator fees across one atomic route.
+    /// @dev Integrator fees use a transient namespace distinct from user deltas and protocol fees.
+    struct IntegratorRouteState {
+        /// @notice Tokens with nonzero accumulated integrator fees.
+        address[] touched;
+        /// @notice Number of populated entries in `touched`.
+        uint256 touchedCount;
+    }
+
+    /// @notice Post-fee settlement amounts for one fill.
+    struct FillFeeSettlement {
+        /// @notice Caller-relative token0 delta after all taker fees.
+        int256 token0Delta;
+        /// @notice Caller-relative token1 delta after all taker fees.
+        int256 token1Delta;
+        /// @notice Protocol fee paid from matched output.
+        uint256 protocolFeeAmount;
+        /// @notice Integrator fee paid from the same pre-fee matched output.
+        uint256 integratorFeeAmount;
     }
 
     /// @dev Low 254 bits of `_poolEpochAndHookFlags`; high bits are hook activation flags.
@@ -2166,6 +2199,8 @@ contract DeepstateV1 is Ownable {
     uint256 private constant _HOOK_GAS_LIMIT = 200_000;
     /// @dev High-bit domain separator for transient protocol fee slots.
     uint256 private constant _FEE_DELTA_DOMAIN = uint256(1) << 255;
+    /// @dev Independent transient namespace for route integrator fees.
+    uint256 private constant _INTEGRATOR_FEE_DELTA_DOMAIN = uint256(1) << 254;
     /// @notice Latest restable epoch for each sorted token pair.
     mapping(bytes32 poolId => uint256 epochAndHookFlags) private _poolEpochAndHookFlags;
 
@@ -2199,6 +2234,8 @@ contract DeepstateV1 is Ownable {
     error InvalidHook();
     /// @notice Fee config is invalid.
     error InvalidFeeConfig();
+    /// @notice Integrator fee parameters are invalid.
+    error InvalidIntegratorFee();
     /// @notice A token delta cannot be represented in the signed settlement accumulator.
     error DeltaOverflow();
     /// @notice Supplied native ETH is less than the caller's net ETH debit.
@@ -2293,6 +2330,41 @@ contract DeepstateV1 is Ownable {
         _refundNativeValue(nativeRefund);
     }
 
+    /// @notice Submit one bid or ask and pay an optional integrator from matched taker output.
+    /// @param params Fill parameters.
+    /// @param integratorFee Integrator recipient and fee rate. Use `(address(0), 0)` to disable it.
+    /// @return restingOrder Packed order node if any quantity rested, otherwise zero.
+    /// @dev
+    /// The protocol and integrator fees are each rounded down from the same pre-fee matched output;
+    /// neither fee compounds on the other. The caller is settled first, then the protocol recipient,
+    /// then the integrator recipient. Cancellation and maker claims are never charged this fee.
+    function fillWithIntegratorFee(FillParams calldata params, IntegratorFee calldata integratorFee)
+        external
+        payable
+        nonReentrant
+        returns (bytes32 restingOrder)
+    {
+        uint256 integratorConfig = _validateIntegratorFee(integratorFee);
+        int256 token0Delta;
+        int256 token1Delta;
+        (restingOrder, token0Delta, token1Delta) = _executeFill(params);
+
+        uint256 protocolConfig = _feeConfig;
+        FillFeeSettlement memory settlement =
+            _applyFillFees(params.isBid, token0Delta, token1Delta, protocolConfig, integratorConfig);
+
+        uint256 nativeRefund =
+            _settleDeltas(params.token0, settlement.token0Delta, params.token1, settlement.token1Delta);
+        address outputToken = params.isBid ? params.token0 : params.token1;
+        if (settlement.protocolFeeAmount != 0) {
+            _safeTransferOut(outputToken, _configRecipient(protocolConfig), settlement.protocolFeeAmount);
+        }
+        if (settlement.integratorFeeAmount != 0) {
+            _safeTransferOut(outputToken, integratorFee.recipient, settlement.integratorFeeAmount);
+        }
+        _refundNativeValue(nativeRefund);
+    }
+
     /// @notice Execute multiple routed fills atomically and settle each touched token once.
     /// @param fills Sequential route legs.
     /// @dev
@@ -2321,6 +2393,46 @@ contract DeepstateV1 is Ownable {
                 feeRecipient := config
             }
             _settleFees(feeRecipient, route.feeTouched, route.feeTouchedCount);
+        }
+        _refundNativeValue(nativeRefund);
+    }
+
+    /// @notice Execute an atomic route and pay one optional integrator from each leg's matched output.
+    /// @param fills Sequential route legs.
+    /// @param integratorFee Integrator recipient and fee rate. Use `(address(0), 0)` to disable it.
+    /// @dev
+    /// Each leg computes both protocol and integrator fees independently from its own pre-fee matched
+    /// output. Integrator fees are netted by token and transferred once after caller and protocol-fee
+    /// settlement. No fee is charged for zero-output legs or unmatched quantity that rests.
+    function fillRouteWithIntegratorFee(FillParams[] calldata fills, IntegratorFee calldata integratorFee)
+        external
+        payable
+        nonReentrant
+    {
+        uint256 integratorConfig = _validateIntegratorFee(integratorFee);
+        // slither-disable-start uninitialized-local
+        uint256 length = fills.length;
+        RouteState memory route;
+        route.touched = new address[](length * 2);
+        uint256 protocolConfig = _feeConfig;
+        if (protocolConfig != 0) route.feeTouched = new address[](length);
+        IntegratorRouteState memory integratorRoute;
+        // slither-disable-end uninitialized-local
+        if (integratorConfig != 0) integratorRoute.touched = new address[](length);
+
+        for (uint256 i; i < length;) {
+            _executeIntegratorRouteLeg(fills[i], protocolConfig, integratorConfig, route, integratorRoute);
+            unchecked {
+                ++i;
+            }
+        }
+
+        uint256 nativeRefund = _settleTouched(route.touched, route.touchedCount);
+        if (protocolConfig != 0) {
+            _settleFees(_configRecipient(protocolConfig), route.feeTouched, route.feeTouchedCount);
+        }
+        if (integratorConfig != 0) {
+            _settleIntegratorFees(integratorFee.recipient, integratorRoute.touched, integratorRoute.touchedCount);
         }
         _refundNativeValue(nativeRefund);
     }
@@ -2550,6 +2662,41 @@ contract DeepstateV1 is Ownable {
         }
         route.touchedCount = _addDelta(params.token0, token0Delta, route.touched, route.touchedCount);
         route.touchedCount = _addDelta(params.token1, token1Delta, route.touched, route.touchedCount);
+    }
+
+    /// @notice Execute one integrator route leg and merge user and fee deltas into transient storage.
+    /// @param params Fill parameters for the leg.
+    /// @param protocolConfig Packed protocol fee config loaded once by the route entrypoint.
+    /// @param integratorConfig Packed integrator fee config validated once by the route entrypoint.
+    /// @param route User and protocol-fee route accumulators.
+    /// @param integratorRoute Integrator-fee route accumulator.
+    function _executeIntegratorRouteLeg(
+        FillParams calldata params,
+        uint256 protocolConfig,
+        uint256 integratorConfig,
+        RouteState memory route,
+        IntegratorRouteState memory integratorRoute
+    ) private {
+        int256 rawToken0Delta;
+        int256 rawToken1Delta;
+        (, rawToken0Delta, rawToken1Delta) = _executeFill(params);
+
+        FillFeeSettlement memory settlement =
+            _applyFillFees(params.isBid, rawToken0Delta, rawToken1Delta, protocolConfig, integratorConfig);
+        address outputToken = params.isBid ? params.token0 : params.token1;
+
+        if (protocolConfig != 0) {
+            route.feeTouchedCount =
+                _addFee(outputToken, settlement.protocolFeeAmount, route.feeTouched, route.feeTouchedCount);
+        }
+        if (integratorConfig != 0) {
+            integratorRoute.touchedCount = _addIntegratorFee(
+                outputToken, settlement.integratorFeeAmount, integratorRoute.touched, integratorRoute.touchedCount
+            );
+        }
+
+        route.touchedCount = _addDelta(params.token0, settlement.token0Delta, route.touched, route.touchedCount);
+        route.touchedCount = _addDelta(params.token1, settlement.token1Delta, route.touched, route.touchedCount);
     }
 
     /// @notice Match against an initialized routed book, or validate an order that may only rest.
@@ -2846,6 +2993,32 @@ contract DeepstateV1 is Ownable {
         return touchedCount;
     }
 
+    /// @notice Add an integrator fee amount to its independent transient namespace.
+    function _addIntegratorFee(address token, uint256 amount, address[] memory touched, uint256 touchedCount)
+        private
+        returns (uint256)
+    {
+        if (amount == 0) return touchedCount;
+
+        if (!_isTouched(token, touched, touchedCount)) {
+            touched[touchedCount] = token;
+            unchecked {
+                ++touchedCount;
+            }
+        }
+
+        bytes32 slot = _integratorFeeSlot(token);
+        uint256 current;
+        assembly {
+            current := tload(slot)
+        }
+        uint256 next = current + amount;
+        assembly {
+            tstore(slot, next)
+        }
+        return touchedCount;
+    }
+
     /// @notice Return whether a token is already in a touched-token list.
     function _isTouched(address token, address[] memory touched, uint256 touchedCount) private pure returns (bool) {
         for (uint256 i; i < touchedCount;) {
@@ -2976,6 +3149,98 @@ contract DeepstateV1 is Ownable {
         }
     }
 
+    /// @notice Transfer route integrator fees after caller and protocol-fee settlement.
+    function _settleIntegratorFees(address recipient, address[] memory touched, uint256 touchedCount) private {
+        for (uint256 i; i < touchedCount;) {
+            address token = touched[i];
+            bytes32 slot = _integratorFeeSlot(token);
+            uint256 amount;
+            assembly {
+                amount := tload(slot)
+                tstore(slot, 0)
+            }
+
+            if (amount != 0) _safeTransferOut(token, recipient, amount);
+
+            unchecked {
+                ++i;
+            }
+        }
+    }
+
+    /// @notice Apply protocol and integrator fees to one raw matched-output settlement.
+    /// @dev Both amounts are calculated from the original positive output delta, so fee order does
+    /// not change either recipient's amount. Their combined deduction is at most 2%.
+    function _applyFillFees(
+        bool isBid,
+        int256 rawToken0Delta,
+        int256 rawToken1Delta,
+        uint256 protocolConfig,
+        uint256 integratorConfig
+    ) private pure returns (FillFeeSettlement memory settlement) {
+        settlement.token0Delta = rawToken0Delta;
+        settlement.token1Delta = rawToken1Delta;
+
+        if (protocolConfig != 0) {
+            uint16 protocolBps;
+            /// @solidity memory-safe-assembly
+            assembly {
+                protocolBps := shr(160, protocolConfig)
+            }
+            (settlement.token0Delta, settlement.token1Delta, settlement.protocolFeeAmount) =
+                _applyFillFee(isBid, rawToken0Delta, rawToken1Delta, protocolBps);
+        }
+
+        if (integratorConfig != 0) {
+            uint16 integratorBps;
+            /// @solidity memory-safe-assembly
+            assembly {
+                integratorBps := shr(160, integratorConfig)
+            }
+            settlement.integratorFeeAmount = _outputFeeAmount(isBid, rawToken0Delta, rawToken1Delta, integratorBps);
+            if (settlement.integratorFeeAmount != 0) {
+                if (isBid) {
+                    settlement.token0Delta -= int256(settlement.integratorFeeAmount);
+                } else {
+                    settlement.token1Delta -= int256(settlement.integratorFeeAmount);
+                }
+            }
+        }
+    }
+
+    /// @notice Validate and pack one call-scoped integrator fee.
+    function _validateIntegratorFee(IntegratorFee calldata integratorFee) private view returns (uint256 config) {
+        address recipient = integratorFee.recipient;
+        uint16 bps = integratorFee.bps;
+        if (
+            bps > _MAX_FEE_BPS || (recipient == address(0) && bps != 0) || (recipient != address(0) && bps == 0)
+                || recipient == address(this)
+        ) {
+            revert InvalidIntegratorFee();
+        }
+        config = uint256(uint160(recipient)) | (uint256(bps) << 160);
+    }
+
+    /// @notice Return the recipient packed into either fee configuration.
+    function _configRecipient(uint256 config) private pure returns (address recipient) {
+        /// @solidity memory-safe-assembly
+        assembly {
+            recipient := config
+        }
+    }
+
+    /// @notice Calculate a fee from the taker's positive matched-output delta.
+    function _outputFeeAmount(bool isBid, int256 token0Delta, int256 token1Delta, uint16 feeBps)
+        private
+        pure
+        returns (uint256 feeAmount)
+    {
+        int256 outputDelta = isBid ? token0Delta : token1Delta;
+        if (feeBps == 0 || outputDelta <= 0) return 0;
+        // forge-lint: disable-next-line(unsafe-typecast)
+        feeAmount = _feeAmount(uint256(outputDelta), feeBps);
+    }
+
     /// @notice Carve protocol fee from the taker's outgoing matched token.
     /// @param isBid True when the taker is buying token0; fee is taken from positive token0 output.
     /// @param token0Delta Caller-relative token0 delta before fee.
@@ -3023,6 +3288,11 @@ contract DeepstateV1 is Ownable {
     /// @notice Transient storage slot for protocol fees in one token.
     function _feeSlot(address token) private pure returns (bytes32) {
         return bytes32(_FEE_DELTA_DOMAIN | uint256(uint160(token)));
+    }
+
+    /// @notice Transient storage slot for integrator fees in one token.
+    function _integratorFeeSlot(address token) private pure returns (bytes32) {
+        return bytes32(_INTEGRATOR_FEE_DELTA_DOMAIN | uint256(uint160(token)));
     }
 
     /// @notice Validate the caller's net native ETH debit and return any excess value.
