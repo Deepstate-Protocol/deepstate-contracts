@@ -301,7 +301,7 @@ contract DeepstateV1NativeETHTest is Test {
         assertEq(address(engine).balance, 0);
     }
 
-    function test_NativePoolHookReceivesZeroAddressToken() public {
+    function test_NativePoolHookReportsTheBidSideSoldToken() public {
         NativeRecordingHook hook = new NativeRecordingHook();
         engine.setPoolHookConfig(address(0), address(quoteA), address(hook), true, false);
 
@@ -313,7 +313,7 @@ contract DeepstateV1NativeETHTest is Test {
         assertEq(engine.poolHook(pool), address(hook));
         assertEq(hook.lastPoolId(), pool);
         assertEq(hook.lastBookId(), engine.bookId(address(0), address(quoteA), 0));
-        assertEq(hook.lastToken(), address(0));
+        assertEq(hook.lastToken(), address(quoteA));
         assertEq(hook.lastOutgoingQuantity(), 0);
         assertEq(hook.lastIncomingNonce(), MAX_ORDER_NONCE);
     }

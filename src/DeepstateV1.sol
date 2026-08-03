@@ -63,7 +63,7 @@ import {TickMath32} from "./libraries/TickMath32.sol";
 /// Pools use sorted token addresses, and each pool epoch derives an isolated book id. `fillRoute`
 /// mutates every selected book before settling one net transient delta per touched token. Optional
 /// fees are taken from matched taker output and settled after user deltas. Top-of-book hooks are
-/// similarly isolated: the matcher records outgoing amount and incoming nonce in transient slots,
+/// similarly isolated: the matcher records the outgoing order and incoming nonce in transient slots,
 /// then the outer fill/cancel flow invokes the configured pool hook after the book mutation.
 /// Token settlement treats `address(0)` as native ETH and otherwise uses Solady safe transfer
 /// helpers with standard, non-fee-on-transfer ERC20 behavior. Malicious or inexact token behavior
@@ -139,8 +139,8 @@ contract DeepstateV1 is Ownable {
     /// @dev High bit in packed match-change metadata indicating a retained dirty right-spine anchor.
     uint256 private constant _MATCH_CHANGE_DIRTY = uint256(1) << 255;
 
-    /// @dev Transient slot carrying the live amount of a displaced top order back to the router.
-    bytes32 private constant _TOP_CHANGE_OUTGOING_AMOUNT_SLOT =
+    /// @dev Transient slot carrying the complete displaced top-order leaf back to the router.
+    bytes32 private constant _TOP_CHANGE_OUTGOING_ORDER_SLOT =
         0x64b7215baea1c17e16f66db8b03af21431032e2e221c15ac43b0752d82a69b31;
     /// @dev Transient slot carrying the nonce of the new top order back to the router.
     bytes32 private constant _TOP_CHANGE_INCOMING_NONCE_SLOT =
@@ -309,7 +309,7 @@ contract DeepstateV1 is Ownable {
 
         if (!_rightSpineDirty(book, false) && limitPrice == type(int32).max && _quantity(root) <= remaining) {
             baseFilled = _quantity(root);
-            if (hookEnabled) _recordTopOrderChange(_quantity(_rightmostLeaf(book, root)), 0);
+            if (hookEnabled) _recordTopOrderChange(_rightmostLeaf(book, root), 0);
             quoteAmount = _consumeSubtree(id, book, root, false);
             book.tree[_ROOT_NODE].leftNode = bytes32(0);
             unchecked {
@@ -350,7 +350,7 @@ contract DeepstateV1 is Ownable {
 
         if (!_rightSpineDirty(book, true) && limitPrice == type(int32).min && _quantity(root) <= remaining) {
             baseFilled = _quantity(root);
-            if (hookEnabled) _recordTopOrderChange(_quantity(_rightmostLeaf(book, root)), 0);
+            if (hookEnabled) _recordTopOrderChange(_rightmostLeaf(book, root), 0);
             quoteAmount = _consumeSubtree(id, book, root, true);
             book.tree[_ROOT_NODE].rightNode = bytes32(0);
             unchecked {
@@ -477,7 +477,7 @@ contract DeepstateV1 is Ownable {
                 }
                 if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, true);
                 if (hookEnabled && removedTop) {
-                    _recordTopOrderChange(_quantity(removed), _replacementTopNonce(book, newRoot));
+                    _recordTopOrderChange(removed, _replacementTopNonce(book, newRoot));
                 }
             }
         } else {
@@ -492,7 +492,7 @@ contract DeepstateV1 is Ownable {
                 }
                 if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, false);
                 if (hookEnabled && removedTop) {
-                    _recordTopOrderChange(_quantity(removed), _replacementTopNonce(book, newRoot));
+                    _recordTopOrderChange(removed, _replacementTopNonce(book, newRoot));
                 }
             }
         }
@@ -697,7 +697,7 @@ contract DeepstateV1 is Ownable {
         if (rightNode == bytes32(0)) {
             (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(node, limitPrice, remaining);
             if (matchFlags & _MATCH_HOOK != 0 && fillQuantity != 0) {
-                _recordTopOrderChange(_quantity(node), newNode == bytes32(0) ? 0 : _nonce(newNode));
+                _recordTopOrderChange(node, newNode == bytes32(0) ? 0 : _nonce(newNode));
             }
             return (newNode, fillQuantity, quoteAmount, matchChange);
         }
@@ -713,12 +713,12 @@ contract DeepstateV1 is Ownable {
                 samePrice = _price(leftNode) == _price(rightNode);
             }
             if (samePrice) {
-                uint160 outgoingTopQuantity;
-                (fillQuantity, quoteAmount, outgoingTopQuantity) =
+                bytes32 outgoingTopOrder;
+                (fillQuantity, quoteAmount, outgoingTopOrder) =
                     _samePriceRightSpineFillQuantity(book, node, limitPrice, remaining, matchFlags);
                 if (fillQuantity != 0) {
                     if (matchFlags & _MATCH_HOOK != 0) {
-                        _recordTopOrderChange(outgoingTopQuantity, 0);
+                        _recordTopOrderChange(outgoingTopOrder, 0);
                     }
                     _emitAskRightSpineMatch(node, fillQuantity, quoteAmount, matchFlags);
                     return (bytes32(0), fillQuantity, quoteAmount, matchChange);
@@ -839,7 +839,7 @@ contract DeepstateV1 is Ownable {
         if (rightNode == bytes32(0)) {
             (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(node, limitPrice, remaining);
             if (matchFlags & _MATCH_HOOK != 0 && fillQuantity != 0) {
-                _recordTopOrderChange(_quantity(node), newNode == bytes32(0) ? 0 : _nonce(newNode));
+                _recordTopOrderChange(node, newNode == bytes32(0) ? 0 : _nonce(newNode));
             }
             return (newNode, fillQuantity, quoteAmount, matchChange);
         }
@@ -855,13 +855,13 @@ contract DeepstateV1 is Ownable {
                 samePrice = _price(leftNode) == _price(rightNode);
             }
             if (samePrice) {
-                uint160 outgoingTopQuantity;
-                (fillQuantity, quoteAmount, outgoingTopQuantity) = _samePriceRightSpineFillQuantity(
+                bytes32 outgoingTopOrder;
+                (fillQuantity, quoteAmount, outgoingTopOrder) = _samePriceRightSpineFillQuantity(
                     book, node, limitPrice, remaining, matchFlags | _MATCH_RESTING_BID
                 );
                 if (fillQuantity != 0) {
                     if (matchFlags & _MATCH_HOOK != 0) {
-                        _recordTopOrderChange(outgoingTopQuantity, 0);
+                        _recordTopOrderChange(outgoingTopOrder, 0);
                     }
                     _emitBidRightSpineMatch(node, fillQuantity, quoteAmount, matchFlags);
                     return (bytes32(0), fillQuantity, quoteAmount, matchChange);
@@ -971,14 +971,14 @@ contract DeepstateV1 is Ownable {
         returns (bytes32 newRoot)
     {
         if (root == bytes32(0)) {
-            if (hookEnabled) _recordTopOrderChange(0, _nonce(node));
+            if (hookEnabled) _recordTopOrderChange(bytes32(0), _nonce(node));
             return node;
         }
 
         bytes32 leftNode = book.tree[root].leftNode;
         if (leftNode == bytes32(0)) {
             if (hookEnabled && nodeKey > _bidSortKey(root)) {
-                _recordTopOrderChange(_quantity(root), _nonce(node));
+                _recordTopOrderChange(root, _nonce(node));
             }
             return _storeBranch(book, root, node, _bidSortKey(root), nodeKey, true);
         }
@@ -988,7 +988,7 @@ contract DeepstateV1 is Ownable {
         uint8 branchDepth = _commonPrefix(leftKey, _bidSortKey(rightNode));
         if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
             if (hookEnabled && _bit(nodeKey, _commonPrefix(nodeKey, leftKey))) {
-                _recordTopOrderChange(_quantity(_rightmostLeaf(book, root)), _nonce(node));
+                _recordTopOrderChange(_rightmostLeaf(book, root), _nonce(node));
             }
             return _storeBranch(book, root, node, _bidSortKey(root), nodeKey, true);
         }
@@ -1014,14 +1014,14 @@ contract DeepstateV1 is Ownable {
         returns (bytes32 newRoot)
     {
         if (root == bytes32(0)) {
-            if (hookEnabled) _recordTopOrderChange(0, _nonce(node));
+            if (hookEnabled) _recordTopOrderChange(bytes32(0), _nonce(node));
             return node;
         }
 
         bytes32 leftNode = book.tree[root].leftNode;
         if (leftNode == bytes32(0)) {
             if (hookEnabled && nodeKey > _askSortKey(root)) {
-                _recordTopOrderChange(_quantity(root), _nonce(node));
+                _recordTopOrderChange(root, _nonce(node));
             }
             return _storeBranch(book, root, node, _askSortKey(root), nodeKey, false);
         }
@@ -1031,7 +1031,7 @@ contract DeepstateV1 is Ownable {
         uint8 branchDepth = _commonPrefix(leftKey, _askSortKey(rightNode));
         if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
             if (hookEnabled && _bit(nodeKey, _commonPrefix(nodeKey, leftKey))) {
-                _recordTopOrderChange(_quantity(_rightmostLeaf(book, root)), _nonce(node));
+                _recordTopOrderChange(_rightmostLeaf(book, root), _nonce(node));
             }
             return _storeBranch(book, root, node, _askSortKey(root), nodeKey, false);
         }
@@ -1323,24 +1323,26 @@ contract DeepstateV1 is Ownable {
         int32 limitPrice,
         uint160 remaining,
         uint256 matchFlags
-    ) private view returns (uint160 fillQuantity, uint256 quoteAmount, uint160 outgoingTopQuantity) {
+    ) private view returns (uint160 fillQuantity, uint256 quoteAmount, bytes32 outgoingTopOrder) {
         bool isBid = matchFlags & _MATCH_RESTING_BID != 0;
         int32 price;
         bool uniform;
         if (matchFlags & _MATCH_DIRTY != 0) {
-            (uniform, price, fillQuantity, quoteAmount, outgoingTopQuantity) = _dirtyRightSpineData(book, node, isBid);
+            (uniform, price, fillQuantity, quoteAmount, outgoingTopOrder) = _dirtyRightSpineData(book, node, isBid);
         } else {
             uniform = _correctionCode(node) != 0;
             price = _price(node);
             fillQuantity = _quantity(node);
             quoteAmount = uniform ? _uniformBranchQuote(node, isBid) : 0;
             if (matchFlags & _MATCH_HOOK != 0) {
-                outgoingTopQuantity = _quantity(_rightmostLeaf(book, node));
+                outgoingTopOrder = _rightmostLeaf(book, node);
             }
         }
-        if (!uniform) return (0, 0, 0);
-        if (matchFlags & _MATCH_RESTING_BID != 0 ? price < limitPrice : price > limitPrice) return (0, 0, 0);
-        if (fillQuantity > remaining) return (0, 0, 0);
+        if (!uniform) return (0, 0, bytes32(0));
+        if (matchFlags & _MATCH_RESTING_BID != 0 ? price < limitPrice : price > limitPrice) {
+            return (0, 0, bytes32(0));
+        }
+        if (fillQuantity > remaining) return (0, 0, bytes32(0));
     }
 
     /// @notice Recover exact same-tick quantity and quote value from a stale global right spine.
@@ -1350,26 +1352,26 @@ contract DeepstateV1 is Ownable {
     function _dirtyRightSpineData(Book storage book, bytes32 node, bool isBid)
         private
         view
-        returns (bool uniform, int32 tick, uint160 quantity, uint256 quoteAmount, uint160 rightmostQuantity)
+        returns (bool uniform, int32 tick, uint160 quantity, uint256 quoteAmount, bytes32 rightmostOrder)
     {
         bytes32 leftNode = book.tree[node].leftNode;
         if (leftNode == bytes32(0)) {
             quantity = _quantity(node);
-            return (true, _price(node), quantity, _quoteValue(_price(node), quantity, isBid), quantity);
+            return (true, _price(node), quantity, _quoteValue(_price(node), quantity, isBid), node);
         }
 
         bytes32 rightNode = book.tree[node].rightNode;
         bool leftUniform = book.tree[leftNode].leftNode == bytes32(0) || _correctionCode(leftNode) != 0;
         if (!leftUniform) return (false, 0, 0, 0, 0);
 
-        (bool rightUniform, int32 rightTick, uint160 rightQuantity, uint256 rightQuote, uint160 topQuantity) =
+        (bool rightUniform, int32 rightTick, uint160 rightQuantity, uint256 rightQuote, bytes32 rightmostLeaf) =
             _dirtyRightSpineData(book, rightNode, isBid);
-        if (!rightUniform || _price(leftNode) != rightTick) return (false, 0, 0, 0, 0);
+        if (!rightUniform || _price(leftNode) != rightTick) return (false, 0, 0, 0, bytes32(0));
 
         tick = rightTick;
         quantity = _quantity(leftNode) + rightQuantity;
         quoteAmount = _uniformNodeQuote(book, leftNode, isBid) + rightQuote;
-        rightmostQuantity = topQuantity;
+        rightmostOrder = rightmostLeaf;
         uniform = true;
     }
 
@@ -1555,7 +1557,7 @@ contract DeepstateV1 is Ownable {
         assembly {
             incomingNonce := tload(_TOP_CHANGE_INCOMING_NONCE_SLOT)
         }
-        // Callers reach this helper only after a top fill has recorded a nonzero outgoing amount.
+        // Callers reach this helper only after a top fill has recorded a nonzero outgoing order.
         if (incomingNonce != 0 || newNode == bytes32(0)) return;
         incomingNonce = _replacementTopNonce(book, newNode);
         /// @solidity memory-safe-assembly
@@ -1646,25 +1648,26 @@ contract DeepstateV1 is Ownable {
     }
 
     /// @notice Record one top-order change in transient storage for the router to consume.
-    /// @dev Either slot being nonzero is the signal that a hook should be considered. First rest
-    /// writes only `incomingNonce`; an emptied side writes only `outgoingAmount`.
-    function _recordTopOrderChange(uint160 outgoingAmount, uint32 incomingNonce) private {
+    /// @dev Either slot being nonzero is the signal that a hook should be considered. The complete
+    /// outgoing leaf is retained so the router can report the sold token and sold amount without
+    /// widening the hook callback. A first rest writes only `incomingNonce`.
+    function _recordTopOrderChange(bytes32 outgoingOrder, uint32 incomingNonce) private {
         /// @solidity memory-safe-assembly
         assembly {
-            tstore(_TOP_CHANGE_OUTGOING_AMOUNT_SLOT, outgoingAmount)
+            tstore(_TOP_CHANGE_OUTGOING_ORDER_SLOT, outgoingOrder)
             tstore(_TOP_CHANGE_INCOMING_NONCE_SLOT, incomingNonce)
         }
     }
 
     /// @notice Consume and clear the latest recorded top-order change.
-    /// @return outgoingAmount Previous top order's live amount in the rewarded token.
+    /// @return outgoingOrder Previous top order's complete live leaf.
     /// @return incomingNonce New top order nonce, or zero if the side is empty/unknown.
-    function _takeTopOrderChange() internal returns (uint160 outgoingAmount, uint32 incomingNonce) {
+    function _takeTopOrderChange() internal returns (bytes32 outgoingOrder, uint32 incomingNonce) {
         /// @solidity memory-safe-assembly
         assembly {
-            outgoingAmount := tload(_TOP_CHANGE_OUTGOING_AMOUNT_SLOT)
+            outgoingOrder := tload(_TOP_CHANGE_OUTGOING_ORDER_SLOT)
             incomingNonce := tload(_TOP_CHANGE_INCOMING_NONCE_SLOT)
-            tstore(_TOP_CHANGE_OUTGOING_AMOUNT_SLOT, 0)
+            tstore(_TOP_CHANGE_OUTGOING_ORDER_SLOT, 0)
             tstore(_TOP_CHANGE_INCOMING_NONCE_SLOT, 0)
         }
     }
@@ -2234,7 +2237,7 @@ contract DeepstateV1 is Ownable {
     /// @notice Configure optional canonical top-of-book hooks for a sorted token pair.
     /// @param token0 Lower token address in the pair.
     /// @param token1 Higher token address in the pair.
-    /// @param hook Hook contract called when a top buyer changes.
+    /// @param hook Hook contract called when a side's top order changes.
     /// @param token0Active True to hook token0 buyers, i.e. top bids.
     /// @param token1Active True to hook token1 buyers, i.e. top asks.
     function setPoolHookConfig(address token0, address token1, address hook, bool token0Active, bool token1Active)
@@ -2391,6 +2394,20 @@ contract DeepstateV1 is Ownable {
     /// @return Globally unique order id used by `ownerOfOrder`.
     function orderId(bytes32 id, bytes32 order) external pure returns (bytes32) {
         return _orderId(id, order);
+    }
+
+    /// @notice Return the nonce and live sold amount of one book side's best order.
+    /// @param id Canonical book id.
+    /// @param isBid True for the bid tree, false for the ask tree.
+    /// @return nonce Current best order nonce, or zero when the side is empty.
+    /// @return soldAmount Current collateral sold by that order, saturated at `uint160.max`.
+    function topOrder(bytes32 id, bool isBid) external view returns (uint32 nonce, uint160 soldAmount) {
+        Book storage book = books[id];
+        bytes32 root = isBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
+        if (root == bytes32(0)) return (0, 0);
+
+        bytes32 order = _rightmostLeaf(book, root);
+        return (_nonce(order), _hookAmount(order, isBid));
     }
 
     /// @notice Return the active book id for a sorted token pair.
@@ -2701,24 +2718,38 @@ contract DeepstateV1 is Ownable {
     /// @param token0 Lower token address.
     /// @param token1 Higher token address.
     /// @param id Book id where the top change occurred.
-    /// @param isBid True if the bid-side top buyer changed, false for ask-side.
+    /// @param isBid True if the bid-side top order changed, false for ask-side.
     /// @dev
-    /// Matching/resting code records only two transient values: outgoing amount and incoming nonce.
-    /// This function adds pool/book/token context at the top layer. Hook failures are intentionally
-    /// swallowed so a bad hook implementation cannot block the matching engine.
+    /// Matching/resting code records only the outgoing leaf and incoming nonce. This function adds
+    /// pool/book context and converts the leaf into sold-token units at the top layer. Hook failures
+    /// are intentionally swallowed so a bad hook implementation cannot block the matching engine.
     function _executeTopOrderHook(address token0, address token1, bytes32 id, bool isBid) private {
-        (uint160 outgoingAmount, uint32 incomingNonce) = _takeTopOrderChange();
-        if (outgoingAmount == 0 && incomingNonce == 0) return;
+        (bytes32 outgoingOrder, uint32 incomingNonce) = _takeTopOrderChange();
+        if (outgoingOrder == bytes32(0) && incomingNonce == 0) return;
 
         bytes32 pid = poolId(token0, token1);
         address hook = poolHook[pid];
         if (hook == address(0)) return;
 
-        address token = isBid ? token0 : token1;
+        address token = isBid ? token1 : token0;
+        uint160 outgoingAmount = _hookAmount(outgoingOrder, isBid);
         // A gas cap makes the best-effort guarantee meaningful for a hook that loops or otherwise
         // consumes all gas. Reverts and out-of-gas inside this bounded call are intentionally ignored.
         // slither-disable-next-line calls-loop
         try IHook(hook).execute{gas: _HOOK_GAS_LIMIT}(pid, id, token, outgoingAmount, incomingNonce) {} catch {}
+    }
+
+    /// @notice Convert one live order into the collateral amount it is offering to sell.
+    /// @dev Bids sell quote (`token1`) and asks sell base (`token0`). Saturation is sufficient for
+    /// bounded reward thresholds while avoiding a hook ABI expansion for extreme quote values.
+    function _hookAmount(bytes32 order, bool isBid) private pure returns (uint160 amount) {
+        if (order == bytes32(0)) return 0;
+        if (!isBid) return _quantity(order);
+
+        uint256 quoteAmount = _quoteValue(_price(order), _quantity(order), true);
+        // The preceding comparison proves the quote amount fits in 160 bits.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return quoteAmount > type(uint160).max ? type(uint160).max : uint160(quoteAmount);
     }
 
     // slither-disable-end reentrancy-no-eth,reentrancy-benign

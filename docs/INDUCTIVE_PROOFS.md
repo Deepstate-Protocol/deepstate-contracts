@@ -342,7 +342,7 @@ restores the prior transient and persistent state.
 Top-order tracking follows the same rightmost induction as matching:
 
 - insertion records only when an empty side gains a top or the new key exceeds the old maximum;
-- partial top fill records the retained nonce and outgoing amount;
+- partial top fill records the retained nonce and outgoing order for sold-amount reporting;
 - full top removal records the rightmost nonce of the rebuilt replacement, or zero for empty; and
 - left-side changes disable hook propagation because they cannot change the maximum key.
 
