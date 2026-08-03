@@ -78,6 +78,7 @@ def bind_model_to_source():
         "uint256 private constant _NONCE_MASK = type(uint32).max;",
         "uint256 private constant _POOL_EPOCH_MASK = (uint256(1) << 254) - 1;",
         "uint256 private constant _FEE_DELTA_DOMAIN = uint256(1) << 255;",
+        "uint256 private constant _INTEGRATOR_FEE_DELTA_DOMAIN = uint256(1) << 254;",
         "0x64b7215baea1c17e16f66db8b03af21431032e2e221c15ac43b0752d82a69b31",
         "0xf95dfdfe2cf36f265e91ff578507ac6f6f9bffb77b95dcb89aef8ed16e5b1f45",
         "0x7f8fe082ccb9a281fa5fa179f118219e229bb906df4e4aa8aee95977b867f45d",
@@ -99,6 +100,7 @@ def bind_model_to_source():
         "uint256 next = current + amount;",
         "if (current < type(int256).min + signedAmount) revert DeltaOverflow();",
         "return bytes32(_FEE_DELTA_DOMAIN | uint256(uint160(token)));",
+        "return bytes32(_INTEGRATOR_FEE_DELTA_DOMAIN | uint256(uint160(token)));",
         "feeAmount = whole * uint256(feeBps) + (remainder * uint256(feeBps)) / _BPS_DENOMINATOR;",
         "token0Delta = int256(uint256(baseFilled));",
         "token0Delta = -int256(uint256(baseFilled));",
@@ -107,6 +109,9 @@ def bind_model_to_source():
         "baseAmount = filledQuantity;",
         "baseAmount = remainingQuantity;",
         "nextToken0Delta = token0Delta - int256(feeAmount);",
+        "_applyFillFee(isBid, token0Delta, token1Delta, _configBps(integratorConfig));",
+        "settlement.token0Delta -= int256(settlement.integratorFeeAmount);",
+        "settlement.token1Delta -= int256(settlement.integratorFeeAmount);",
         "nativeRefund = _nativeRefund(nativeDelta);",
         "nativeRefund = _nativeRefund(token0 == address(0) ? amount0 : int256(0));",
         "if (msg.value < required) revert InvalidNativeValue();",
@@ -114,6 +119,8 @@ def bind_model_to_source():
         "_refundNativeValue(nativeRefund);",
         "if (amount != 0) _safeTransferOut(address(0), msg.sender, amount);",
         "_safeTransferOut(params.isBid ? params.token0 : params.token1, feeRecipient, feeAmount);",
+        "_safeTransferOut(outputToken, _configRecipient(protocolConfig), settlement.protocolFeeAmount);",
+        "_safeTransferOut(outputToken, integratorFee.recipient, settlement.integratorFeeAmount);",
         "if (baseAmount != 0) _safeTransferOut(token0, owner, baseAmount);",
         "_safeTransferOut(token, msg.sender, uint256(amount));",
         "_safeTransferOut(token0, msg.sender, uint256(amount0));",
@@ -128,9 +135,9 @@ def bind_model_to_source():
     if missing:
         raise ProofFailure(f"production/model binding is stale; missing source fragment: {missing[0]}")
 
-    # Every native outflow must pass through the six modelled call sites and the single transfer
+    # Every native outflow must pass through the nine modelled call sites and the single transfer
     # helper. A future direct ETH transfer or additional helper call must extend the proof first.
-    if source.count("_safeTransferOut(") != 7:
+    if source.count("_safeTransferOut(") != 10:
         raise ProofFailure("production/model binding is stale; unexpected native-capable outflow site count")
     if source.count("safeTransferETH(") != 1:
         raise ProofFailure("production/model binding is stale; unexpected direct native transfer count")
@@ -369,6 +376,7 @@ def prove_fees(p):
             And(
                 implementation >= 0,
                 implementation <= amount,
+                implementation <= amount / 100,
                 amount == amount - implementation + implementation,
             ),
             *assumptions,
@@ -382,6 +390,29 @@ def prove_fees(p):
             gross >= 0,
             gross <= INT256_MAX,
         )
+
+    gross = Int("combined_fee_gross")
+    protocol_fee = Int("combined_protocol_fee")
+    integrator_fee = Int("combined_integrator_fee")
+    net_output = gross - protocol_fee - integrator_fee
+    combined_domain = (
+        gross >= 0,
+        gross <= INT256_MAX,
+        protocol_fee >= 0,
+        protocol_fee <= gross / 100,
+        integrator_fee >= 0,
+        integrator_fee <= gross / 100,
+    )
+    p.prove(
+        "A6.independent-fees-conserve-gross-output",
+        And(net_output >= 0, gross == net_output + protocol_fee + integrator_fee),
+        *combined_domain,
+    )
+    p.prove(
+        "A6.independent-fees-are-order-invariant",
+        gross - protocol_fee - integrator_fee == gross - integrator_fee - protocol_fee,
+        *combined_domain,
+    )
 
 
 def prove_keys_and_radix(p):
@@ -534,14 +565,23 @@ def prove_nonce_epoch_and_namespaces(p):
     user_b_256 = ZeroExt(96, address_b)
     fee_a = BitVecVal(1 << 255, 256) | user_a_256
     fee_b = BitVecVal(1 << 255, 256) | user_b_256
+    integrator_fee_a = BitVecVal(1 << 254, 256) | user_a_256
+    integrator_fee_b = BitVecVal(1 << 254, 256) | user_b_256
     p.prove("N1.user-token-slot-injective", Implies(address_a != address_b, user_a != user_b))
     p.prove("N1.fee-token-slot-injective", Implies(address_a != address_b, fee_a != fee_b))
+    p.prove(
+        "N1.integrator-fee-token-slot-injective",
+        Implies(address_a != address_b, integrator_fee_a != integrator_fee_b),
+    )
     p.prove("N1.user-fee-slot-disjoint", user_a_256 != fee_b)
+    p.prove("N1.user-integrator-fee-slot-disjoint", user_a_256 != integrator_fee_b)
+    p.prove("N1.protocol-integrator-fee-slot-disjoint", fee_a != integrator_fee_b)
 
     fixed = {name: BitVecVal(value, 256) for name, value in FIXED_TRANSIENT_SLOTS.items()}
     for name, slot in fixed.items():
         p.prove(f"N1.user-fixed-slot-disjoint.{name}", user_a_256 != slot)
         p.prove(f"N1.fee-fixed-slot-disjoint.{name}", fee_a != slot)
+        p.prove(f"N1.integrator-fee-fixed-slot-disjoint.{name}", integrator_fee_a != slot)
     fixed_items = list(fixed.items())
     for index, (left_name, left_slot) in enumerate(fixed_items):
         for right_name, right_slot in fixed_items[index + 1:]:
@@ -916,8 +956,9 @@ def prove_route_and_signed_accounting(p):
     before = Int("engine_balance_before")
     delta = Int("user_delta")
     fee = Int("protocol_fee")
-    after = before - delta - fee
-    p.prove("N4.settlement-conservation", after + delta + fee == before)
+    integrator_fee = Int("integrator_fee")
+    after = before - delta - fee - integrator_fee
+    p.prove("N4.settlement-conservation", after + delta + fee + integrator_fee == before)
 
     current = Int("current_signed_delta")
     debit = Int("unsigned_debit")
@@ -938,6 +979,19 @@ def prove_route_and_signed_accounting(p):
         prior_fee >= 0,
         leg_fee >= 0,
         prior_fee + leg_fee < UINT256,
+    )
+
+    prior_integrator_fee = Int("route_prior_integrator_fee")
+    leg_integrator_fee = Int("route_leg_integrator_fee")
+    p.prove(
+        "N4.checked-integrator-fee-prefix-is-exact",
+        And(
+            prior_integrator_fee + leg_integrator_fee >= 0,
+            prior_integrator_fee + leg_integrator_fee < UINT256,
+        ),
+        prior_integrator_fee >= 0,
+        leg_integrator_fee >= 0,
+        prior_integrator_fee + leg_integrator_fee < UINT256,
     )
 
     token0_delta = Int("leg_token0_delta")
@@ -1009,11 +1063,12 @@ def prove_native_eth_solvency(p):
     ask_liability = Int("native_ask_liability")
     bid_liability = Int("native_bid_liability")
     matched_asks = Int("native_matched_asks")
-    native_fee = Int("native_bid_fee")
+    native_fee = Int("native_bid_protocol_fee")
+    native_integrator_fee = Int("native_bid_integrator_fee")
     liability_before = ask_liability + bid_liability
     liability_after_bid = ask_liability - matched_asks + bid_liability
-    user_bid_output = matched_asks - native_fee
-    engine_after_bid = engine_before - user_bid_output - native_fee
+    user_bid_output = matched_asks - native_fee - native_integrator_fee
+    engine_after_bid = engine_before - user_bid_output - native_fee - native_integrator_fee
     bid_fill_domain = (
         engine_before >= liability_before,
         ask_liability >= 0,
@@ -1021,7 +1076,8 @@ def prove_native_eth_solvency(p):
         matched_asks >= 0,
         matched_asks <= ask_liability,
         native_fee >= 0,
-        native_fee <= matched_asks,
+        native_integrator_fee >= 0,
+        native_fee + native_integrator_fee <= matched_asks,
     )
     p.prove(
         "A7.incoming-bid-preserves-native-surplus",

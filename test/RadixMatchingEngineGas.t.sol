@@ -759,3 +759,133 @@ contract RadixMatchingEngineFeeGasTest is RadixMatchingEngineGasTest {
         engine.setFeeConfig(address(0xFEE), 100);
     }
 }
+
+contract DeepstateV1IntegratorFeeGasTest is Test {
+    GasTestERC20 internal token0;
+    GasTestERC20 internal token1;
+    DeepstateV1 internal engine;
+
+    address internal constant MAKER = address(0xA11CE);
+    address internal constant TAKER = address(0xB0B);
+    address internal constant INTEGRATOR = address(0x1A7E);
+
+    function setUp() public {
+        GasTestERC20 tokenA = new GasTestERC20();
+        GasTestERC20 tokenB = new GasTestERC20();
+        (token0, token1) = address(tokenA) < address(tokenB) ? (tokenA, tokenB) : (tokenB, tokenA);
+        engine = new DeepstateV1();
+        _fundAndApprove(MAKER);
+        _fundAndApprove(TAKER);
+    }
+
+    function testGas_IntegratorFillRestBidEmptyBook() public {
+        vm.pauseGasMetering();
+        vm.prank(TAKER);
+        vm.resumeGasMetering();
+        bytes32 restingOrder =
+            engine.fillWithIntegratorFee(_params(_order(0, 10_000, 0), true, false), _integratorFee());
+        vm.pauseGasMetering();
+
+        assertEq(_quantity(restingOrder), 10_000);
+        assertEq(token0.balanceOf(INTEGRATOR), 0);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_IntegratorFillBidFullyMatchesSingleAsk() public {
+        vm.pauseGasMetering();
+        vm.prank(MAKER);
+        engine.fill(_params(_order(0, 10_000, 0), false, false));
+
+        vm.prank(TAKER);
+        vm.resumeGasMetering();
+        engine.fillWithIntegratorFee(_params(_order(0, 10_000, 0), true, true), _integratorFee());
+        vm.pauseGasMetering();
+
+        assertEq(token0.balanceOf(INTEGRATOR), 10);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_IntegratorFillAskFullyMatchesSingleBid() public {
+        vm.pauseGasMetering();
+        vm.prank(MAKER);
+        engine.fill(_params(_order(0, 10_000, 0), true, false));
+
+        vm.prank(TAKER);
+        vm.resumeGasMetering();
+        engine.fillWithIntegratorFee(_params(_order(0, 10_000, 0), false, true), _integratorFee());
+        vm.pauseGasMetering();
+
+        assertEq(token1.balanceOf(INTEGRATOR), 10);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_IntegratorAndProtocolFeeFill() public {
+        vm.pauseGasMetering();
+        engine.setFeeConfig(address(0xFEE), 100);
+        vm.prank(MAKER);
+        engine.fill(_params(_order(0, 10_000, 0), false, false));
+
+        vm.prank(TAKER);
+        vm.resumeGasMetering();
+        engine.fillWithIntegratorFee(_params(_order(0, 10_000, 0), true, true), _integratorFee());
+        vm.pauseGasMetering();
+
+        assertEq(token0.balanceOf(address(0xFEE)), 100);
+        assertEq(token0.balanceOf(INTEGRATOR), 10);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_IntegratorRouteNetsRepeatedFeeToken() public {
+        vm.pauseGasMetering();
+        vm.prank(MAKER);
+        engine.fill(_params(_order(0, 20_000, 0), false, false));
+
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](2);
+        route[0] = _params(_order(0, 10_000, 0), true, true);
+        route[1] = _params(_order(0, 10_000, 0), true, true);
+        vm.prank(TAKER);
+        vm.resumeGasMetering();
+        engine.fillRouteWithIntegratorFee(route, _integratorFee());
+        vm.pauseGasMetering();
+
+        assertEq(token0.balanceOf(INTEGRATOR), 20);
+        vm.resumeGasMetering();
+    }
+
+    function _fundAndApprove(address account) private {
+        token0.mint(account, 1_000_000);
+        token1.mint(account, 1_000_000);
+        vm.startPrank(account);
+        token0.approve(address(engine), type(uint256).max);
+        token1.approve(address(engine), type(uint256).max);
+        vm.stopPrank();
+    }
+
+    function _params(bytes32 order, bool isBid, bool noRest)
+        private
+        view
+        returns (DeepstateV1.FillParams memory params)
+    {
+        params = DeepstateV1.FillParams({
+            token0: address(token0),
+            token1: address(token1),
+            epoch: 0,
+            order: order,
+            isBid: isBid,
+            noRest: noRest,
+            fillOrKill: false
+        });
+    }
+
+    function _integratorFee() private pure returns (DeepstateV1.IntegratorFee memory fee) {
+        fee = DeepstateV1.IntegratorFee({recipient: INTEGRATOR, bps: 10});
+    }
+
+    function _order(int32 tick, uint160 quantity, uint32 nonce) private pure returns (bytes32) {
+        return bytes32((uint256(uint32(tick)) << 224) | (uint256(quantity) << 64) | uint256(nonce));
+    }
+
+    function _quantity(bytes32 order) private pure returns (uint160) {
+        return uint160(uint256(order) >> 64);
+    }
+}

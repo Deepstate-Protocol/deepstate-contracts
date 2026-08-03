@@ -139,6 +139,8 @@ jobs:
             contract: RadixMatchingEngineHookGasTest
           - label: fees
             contract: RadixMatchingEngineFeeGasTest
+          - label: integrator-fees
+            contract: DeepstateV1IntegratorFeeGasTest
     env:
       FOUNDRY_DISABLE_NIGHTLY_WARNING: "1"
     steps:
