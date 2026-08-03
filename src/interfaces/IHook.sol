@@ -2,7 +2,7 @@
 pragma solidity 0.8.28;
 
 /// @title Top-of-Book Hook
-/// @notice Generic hook called by the routing engine when a canonical top buyer changes.
+/// @notice Generic hook called by the routing engine when a canonical top order changes.
 /// @dev
 /// Hooks are optional side effects. The routing engine calls them with a fixed gas cap and
 /// `try/catch`, so a reverting or gas-burning hook does not revert matching, resting, canceling,
@@ -12,8 +12,8 @@ interface IHook {
     /// @notice Execute hook logic for a top-of-book transition.
     /// @param poolId Sorted-token pool id.
     /// @param bookId Canonical book id where the top change occurred.
-    /// @param token Token whose top buyer changed; this is not necessarily a reward payout token.
-    /// @param outgoingAmount Previous top order's live amount in `token` terms, or zero on first top.
+    /// @param token Token sold by this side of the book; this is not necessarily a reward payout token.
+    /// @param outgoingAmount Previous top order's live sold amount in `token` terms, or zero on first top.
     /// @param incomingOrderNonce New top order nonce, or zero if the side is empty.
     function execute(bytes32 poolId, bytes32 bookId, address token, uint160 outgoingAmount, uint32 incomingOrderNonce)
         external;

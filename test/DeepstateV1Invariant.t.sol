@@ -783,11 +783,19 @@ contract DeepstateV1MultiPoolHandler is Test {
         if (bookHookMasks[id] & sideFlag == 0 || poolHookKinds[poolIndex] != 1) return hookCount;
 
         (address lower, address upper,,) = _pair(poolIndex);
+        uint160 outgoingAmount;
+        if (beforeTop.exists) {
+            uint256 soldAmount =
+                isBid ? _quoteValue(_tick(beforeTop.order), beforeTop.quantity, true) : beforeTop.quantity;
+            // The preceding comparison proves the sold amount fits in 160 bits.
+            // forge-lint: disable-next-line(unsafe-typecast)
+            outgoingAmount = soldAmount > type(uint160).max ? type(uint160).max : uint160(soldAmount);
+        }
         expectedHooks[hookCount] = ExpectedHook({
             poolId: ENGINE.poolId(lower, upper),
             bookId: id,
-            token: isBid ? lower : upper,
-            outgoingAmount: beforeTop.exists ? beforeTop.quantity : 0,
+            token: isBid ? upper : lower,
+            outgoingAmount: outgoingAmount,
             incomingNonce: afterTop.exists ? afterTop.nonce : 0
         });
         return hookCount + 1;

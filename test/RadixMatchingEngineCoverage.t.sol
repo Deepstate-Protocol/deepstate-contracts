@@ -142,6 +142,61 @@ contract RadixMatchingEngineCoverageTest is Test {
         assertEq(engine.orderId(id, order), keccak256(abi.encode(id, order)));
     }
 
+    function testCoverage_TopOrderReportsLiveSoldAmounts() public {
+        bytes32 id = _bookId();
+        (uint32 nonce, uint160 soldAmount) = engine.topOrder(id, true);
+        assertEq(nonce, 0);
+        assertEq(soldAmount, 0);
+
+        vm.prank(alice);
+        bytes32 bid = engine.fill(_order(100, 3, 0), true);
+        vm.prank(bob);
+        bytes32 ask = engine.fill(_order(200, 4, 0), false);
+
+        (nonce, soldAmount) = engine.topOrder(id, true);
+        assertEq(nonce, _nonce(bid));
+        assertEq(soldAmount, _quoteValue(100, 3, true));
+        (nonce, soldAmount) = engine.topOrder(id, false);
+        assertEq(nonce, _nonce(ask));
+        assertEq(soldAmount, 4);
+    }
+
+    function testCoverage_TopOrderReportsRemainingBidCollateralAfterPartialFill() public {
+        bytes32 id = _bookId();
+        vm.prank(alice);
+        bytes32 bid = engine.fill(_order(100, 5, 0), true);
+
+        vm.prank(bob);
+        engine.fill(_order(100, 2, 0), false);
+
+        (uint32 nonce, uint160 soldAmount) = engine.topOrder(id, true);
+        assertEq(nonce, _nonce(bid));
+        assertEq(soldAmount, _quoteValue(100, 3, true));
+    }
+
+    function testCoverage_SoldQuoteAmountsSaturateForHookAndView() public {
+        CoverageHook hook = new CoverageHook();
+        engine.setPoolHookConfig(address(base), address(quote), address(hook), true, false);
+
+        uint160 quantity = type(uint160).max;
+        uint256 collateral = _quoteValue(1, quantity, true);
+        assertGt(collateral, type(uint160).max);
+        quote.mint(alice, collateral);
+
+        vm.prank(alice);
+        bytes32 bid = engine.fill(_order(1, quantity, 0), true);
+
+        (uint32 nonce, uint160 soldAmount) = engine.topOrder(_bookId(), true);
+        assertEq(nonce, _nonce(bid));
+        assertEq(soldAmount, type(uint160).max);
+
+        vm.prank(alice);
+        engine.cancel(bid);
+        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastOutgoingAmount(), type(uint160).max);
+        assertEq(hook.lastIncomingNonce(), 0);
+    }
+
     function testCoverage_HookEnabledTopChangesAcrossBidAndAskBooks() public {
         CoverageHook hook = new CoverageHook();
         engine.setPoolHookConfig(address(base), address(quote), address(hook), true, true);
@@ -154,27 +209,27 @@ contract RadixMatchingEngineCoverageTest is Test {
         assertEq(hook.calls(), 1);
         assertEq(hook.lastPoolId(), pid);
         assertEq(hook.lastBookId(), id);
-        assertEq(hook.lastToken(), address(base));
+        assertEq(hook.lastToken(), address(quote));
         assertEq(hook.lastOutgoingAmount(), 0);
         assertEq(hook.lastIncomingNonce(), _nonce(lowerBid));
 
         vm.prank(bob);
         bytes32 topBid = engine.fill(_order(110, 1, 0), true);
         assertEq(hook.calls(), 2);
-        assertEq(hook.lastOutgoingAmount(), 1);
+        assertEq(hook.lastOutgoingAmount(), _quoteValue(100, 1, true));
         assertEq(hook.lastIncomingNonce(), _nonce(topBid));
 
         vm.prank(carol);
         engine.fill(_order(100, 1, 0), false);
         assertEq(hook.calls(), 3);
-        assertEq(hook.lastToken(), address(base));
-        assertEq(hook.lastOutgoingAmount(), 1);
+        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastOutgoingAmount(), _quoteValue(110, 1, true));
         assertEq(hook.lastIncomingNonce(), _nonce(lowerBid));
 
         vm.prank(alice);
         bytes32 worseAsk = engine.fill(_order(120, 1, 0), false);
         assertEq(hook.calls(), 4);
-        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastToken(), address(base));
         assertEq(hook.lastOutgoingAmount(), 0);
         assertEq(hook.lastIncomingNonce(), _nonce(worseAsk));
 
@@ -187,7 +242,7 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(carol);
         engine.fill(_order(110, 1, 0), true);
         assertEq(hook.calls(), 6);
-        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastToken(), address(base));
         assertEq(hook.lastOutgoingAmount(), 1);
         assertEq(hook.lastIncomingNonce(), _nonce(worseAsk));
     }
@@ -205,7 +260,7 @@ contract RadixMatchingEngineCoverageTest is Test {
         engine.fill(_order(type(int32).max, 5, 0), true);
 
         assertEq(engine.askRoot(), bytes32(0));
-        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastToken(), address(base));
         assertEq(hook.lastOutgoingAmount(), 2);
         assertEq(hook.lastIncomingNonce(), 0);
         assertNotEq(bestAsk, bytes32(0));
@@ -219,8 +274,8 @@ contract RadixMatchingEngineCoverageTest is Test {
         engine.fill(_order(type(int32).min, 5, 0), false);
 
         assertEq(engine.bidRoot(), bytes32(0));
-        assertEq(hook.lastToken(), address(base));
-        assertEq(hook.lastOutgoingAmount(), 3);
+        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastOutgoingAmount(), _quoteValue(20, 3, true));
         assertEq(hook.lastIncomingNonce(), 0);
         assertNotEq(bestBid, bytes32(0));
     }
@@ -239,8 +294,8 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(carol);
         engine.cancel(topBid);
 
-        assertEq(hook.lastToken(), address(base));
-        assertEq(hook.lastOutgoingAmount(), 3);
+        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastOutgoingAmount(), _quoteValue(100, 3, true));
         assertEq(hook.lastIncomingNonce(), _nonce(nextBid));
 
         vm.prank(alice);
@@ -253,7 +308,7 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(carol);
         engine.cancel(topAsk);
 
-        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastToken(), address(base));
         assertEq(hook.lastOutgoingAmount(), 3);
         assertEq(hook.lastIncomingNonce(), _nonce(nextAsk));
     }
@@ -269,8 +324,8 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(carol);
         bytes32 newTopBid = engine.fill(_order(101, 4, 0), true);
 
-        assertEq(hook.lastToken(), address(base));
-        assertEq(hook.lastOutgoingAmount(), 2);
+        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastOutgoingAmount(), _quoteValue(100, 2, true));
         assertEq(hook.lastIncomingNonce(), _nonce(newTopBid));
         assertNotEq(originalTopBid, bytes32(0));
 
@@ -281,7 +336,7 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(carol);
         bytes32 newTopAsk = engine.fill(_order(199, 4, 0), false);
 
-        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastToken(), address(base));
         assertEq(hook.lastOutgoingAmount(), 2);
         assertEq(hook.lastIncomingNonce(), _nonce(newTopAsk));
         assertNotEq(originalTopAsk, bytes32(0));
@@ -299,7 +354,7 @@ contract RadixMatchingEngineCoverageTest is Test {
         engine.fill(_order(50, 5, 0), true);
 
         assertEq(engine.askRoot(), bytes32(0));
-        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastToken(), address(base));
         assertEq(hook.lastOutgoingAmount(), 2);
         assertEq(hook.lastIncomingNonce(), 0);
 
@@ -311,8 +366,8 @@ contract RadixMatchingEngineCoverageTest is Test {
         engine.fill(_order(70, 5, 0), false);
 
         assertEq(engine.bidRoot(), bytes32(0));
-        assertEq(hook.lastToken(), address(base));
-        assertEq(hook.lastOutgoingAmount(), 2);
+        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastOutgoingAmount(), _quoteValue(70, 2, true));
         assertEq(hook.lastIncomingNonce(), 0);
     }
 
@@ -328,7 +383,7 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(carol);
         engine.fill(_order(50, 1, 0), true);
 
-        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastToken(), address(base));
         assertEq(hook.lastOutgoingAmount(), 3);
         assertEq(hook.lastIncomingNonce(), _nonce(topAsk));
 
@@ -344,8 +399,8 @@ contract RadixMatchingEngineCoverageTest is Test {
         engine.cancel(onlyBid);
 
         assertEq(engine.bidRoot(), bytes32(0));
-        assertEq(hook.lastToken(), address(base));
-        assertEq(hook.lastOutgoingAmount(), 1);
+        assertEq(hook.lastToken(), address(quote));
+        assertEq(hook.lastOutgoingAmount(), _quoteValue(100, 1, true));
         assertEq(hook.lastIncomingNonce(), 0);
     }
 
