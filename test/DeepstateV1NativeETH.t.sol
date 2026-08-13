@@ -37,6 +37,20 @@ contract NativeRecordingHook {
     }
 }
 
+contract NativeFeeReceiver {
+    uint256 public receiveCalls;
+
+    receive() external payable {
+        ++receiveCalls;
+    }
+}
+
+contract NativeRejectingFeeRecipient {
+    receive() external payable {
+        revert();
+    }
+}
+
 contract NativeReentrantBuyer {
     DeepstateV1 internal immutable ENGINE;
     address internal immutable QUOTE;
@@ -79,6 +93,7 @@ contract DeepstateV1NativeETHTest is Test {
     address internal bob = address(0xB0B);
     address internal makerB = address(0xBEEF);
     address internal feeRecipient = address(0xFEE);
+    address internal integratorRecipient = address(0x1A7E);
 
     function setUp() public {
         engine = new DeepstateV1();
@@ -299,6 +314,98 @@ contract DeepstateV1NativeETHTest is Test {
         assertEq(bob.balance, bobEthBefore + 9_900);
         assertEq(feeRecipient.balance, 100);
         assertEq(address(engine).balance, 0);
+    }
+
+    function test_NativeIntegratorBidFeeMatchesProtocolTakerFee() public {
+        uint160 quantity = 10_000;
+        engine.setFeeConfig(feeRecipient, 100);
+
+        vm.prank(alice);
+        engine.fill{value: quantity}(_fill(quoteA, _order(0, quantity), false, false, false));
+
+        uint256 bobEthBefore = bob.balance;
+        vm.prank(bob);
+        engine.fillWithIntegratorFee(
+            _fill(quoteA, _order(0, quantity), true, true, true),
+            DeepstateV1.IntegratorFee({recipient: integratorRecipient, bps: 50})
+        );
+
+        assertEq(bob.balance, bobEthBefore + 9_850);
+        assertEq(feeRecipient.balance, 100);
+        assertEq(integratorRecipient.balance, 50);
+        assertEq(address(engine).balance, 0);
+    }
+
+    function test_NativeIntegratorAskFeeTakesOnlyOutgoingQuoteAndRefundsExcessETH() public {
+        uint160 quantity = 10_000;
+        uint256 excess = 1 ether;
+        engine.setFeeConfig(feeRecipient, 100);
+
+        vm.prank(alice);
+        engine.fill(_fill(quoteA, _order(0, quantity), true, false, false));
+
+        uint256 bobEthBefore = bob.balance;
+        uint256 bobQuoteBefore = quoteA.balanceOf(bob);
+        vm.prank(bob);
+        engine.fillWithIntegratorFee{value: uint256(quantity) + excess}(
+            _fill(quoteA, _order(0, quantity), false, true, true),
+            DeepstateV1.IntegratorFee({recipient: integratorRecipient, bps: 50})
+        );
+
+        assertEq(bob.balance, bobEthBefore - quantity);
+        assertEq(quoteA.balanceOf(bob), bobQuoteBefore + 9_850);
+        assertEq(quoteA.balanceOf(feeRecipient), 100);
+        assertEq(quoteA.balanceOf(integratorRecipient), 50);
+        assertEq(address(engine).balance, quantity);
+    }
+
+    function test_NativeIntegratorRouteConsolidatesRepeatedFeeToken() public {
+        uint160 quantity = 10_000;
+        NativeFeeReceiver receiver = new NativeFeeReceiver();
+
+        vm.startPrank(alice);
+        engine.fill{value: quantity}(_fill(quoteA, _order(0, quantity), false, false, false));
+        engine.fill{value: quantity}(_fill(quoteA, _order(0, quantity), false, false, false));
+        vm.stopPrank();
+
+        DeepstateV1.FillParams[] memory route = new DeepstateV1.FillParams[](2);
+        route[0] = _fill(quoteA, _order(0, quantity), true, true, true);
+        route[1] = _fill(quoteA, _order(0, quantity), true, true, true);
+
+        uint256 bobEthBefore = bob.balance;
+        vm.prank(bob);
+        engine.fillRouteWithIntegratorFee(route, DeepstateV1.IntegratorFee({recipient: address(receiver), bps: 100}));
+
+        assertEq(bob.balance, bobEthBefore + 19_800);
+        assertEq(address(receiver).balance, 200);
+        assertEq(receiver.receiveCalls(), 1);
+        assertEq(address(engine).balance, 0);
+    }
+
+    function test_RevertingNativeIntegratorPayoutRevertsFillAtomically() public {
+        uint160 quantity = 10_000;
+        NativeRejectingFeeRecipient rejector = new NativeRejectingFeeRecipient();
+
+        vm.prank(alice);
+        bytes32 restingAsk = engine.fill{value: quantity}(_fill(quoteA, _order(0, quantity), false, false, false));
+
+        bytes32 id = engine.bookId(address(0), address(quoteA), 0);
+        uint256 bobEthBefore = bob.balance;
+        uint256 bobQuoteBefore = quoteA.balanceOf(bob);
+        vm.prank(bob);
+        vm.expectRevert();
+        engine.fillWithIntegratorFee(
+            _fill(quoteA, _order(0, quantity), true, true, true),
+            DeepstateV1.IntegratorFee({recipient: address(rejector), bps: 100})
+        );
+
+        (bytes32 askRoot,) = engine.roots(address(0), address(quoteA), 0);
+        assertEq(askRoot, restingAsk);
+        assertEq(engine.ownerOfOrder(engine.orderId(id, restingAsk)), alice);
+        assertEq(bob.balance, bobEthBefore);
+        assertEq(quoteA.balanceOf(bob), bobQuoteBefore);
+        assertEq(address(engine).balance, quantity);
+        assertEq(address(rejector).balance, 0);
     }
 
     function test_NativePoolHookReportsTheBidSideSoldToken() public {
