@@ -118,15 +118,17 @@ def bind_model_to_source():
         "refund = msg.value - required;",
         "_refundNativeValue(nativeRefund);",
         "if (amount != 0) _safeTransferOut(address(0), msg.sender, amount);",
-        "_safeTransferOut(params.isBid ? params.token0 : params.token1, feeRecipient, feeAmount);",
-        "_safeTransferOut(outputToken, _configRecipient(protocolConfig), settlement.protocolFeeAmount);",
+        "_safeTransferProtocolFeeOut(params.isBid ? params.token0 : params.token1, feeRecipient, feeAmount);",
+        "_safeTransferProtocolFeeOut(outputToken, _configRecipient(protocolConfig), settlement.protocolFeeAmount);",
         "_safeTransferOut(outputToken, integratorFee.recipient, settlement.integratorFeeAmount);",
         "if (baseAmount != 0) _safeTransferOut(token0, owner, baseAmount);",
         "_safeTransferOut(token, msg.sender, uint256(amount));",
         "_safeTransferOut(token0, msg.sender, uint256(amount0));",
+        "if (amount != 0) _safeTransferProtocolFeeOut(token, recipient, amount);",
         "if (amount != 0) _safeTransferOut(token, recipient, amount);",
         "if iszero(lt(token0, token1)) {",
         "if (token == address(0)) {",
+        "to.forceSafeTransferETH(amount);",
         "to.safeTransferETH(amount);",
         "if tload(_REENTRANCY_GUARD_SLOT) {",
         "try IHook(hook).execute{gas: _HOOK_GAS_LIMIT}",
@@ -135,12 +137,16 @@ def bind_model_to_source():
     if missing:
         raise ProofFailure(f"production/model binding is stale; missing source fragment: {missing[0]}")
 
-    # Every native outflow must pass through the nine modelled call sites and the single transfer
-    # helper. A future direct ETH transfer or additional helper call must extend the proof first.
-    if source.count("_safeTransferOut(") != 10:
-        raise ProofFailure("production/model binding is stale; unexpected native-capable outflow site count")
+    # Every native outflow must pass through the nine modelled call sites and exactly one of the two
+    # transfer helpers. A future direct ETH transfer or additional helper call must extend the proof.
+    if source.count("_safeTransferOut(") != 7:
+        raise ProofFailure("production/model binding is stale; unexpected general outflow site count")
+    if source.count("_safeTransferProtocolFeeOut(") != 4:
+        raise ProofFailure("production/model binding is stale; unexpected protocol-fee outflow site count")
     if source.count("safeTransferETH(") != 1:
         raise ProofFailure("production/model binding is stale; unexpected direct native transfer count")
+    if source.count("forceSafeTransferETH(") != 1:
+        raise ProofFailure("production/model binding is stale; unexpected forced native transfer count")
 
 
 def prove_tick_decomposition(p):
