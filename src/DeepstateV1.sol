@@ -2237,7 +2237,7 @@ contract DeepstateV1 is Ownable {
     }
 
     /// @notice Configure protocol fees taken from taker output on matched quantity.
-    /// @param recipient Fee recipient. Zero disables fees and requires `bps == 0`.
+    /// @param recipient Fee recipient. Zero disables fees; native ETH fees cannot be rejected.
     /// @param bps Fee in basis points, capped at 100.
     function setFeeConfig(address recipient, uint16 bps) external onlyOwner {
         if (bps > _MAX_FEE_BPS || (recipient == address(0) && bps != 0)) revert InvalidFeeConfig();
@@ -2315,7 +2315,7 @@ contract DeepstateV1 is Ownable {
             assembly {
                 feeRecipient := config
             }
-            _safeTransferOut(params.isBid ? params.token0 : params.token1, feeRecipient, feeAmount);
+            _safeTransferProtocolFeeOut(params.isBid ? params.token0 : params.token1, feeRecipient, feeAmount);
         }
         _refundNativeValue(nativeRefund);
     }
@@ -2347,7 +2347,7 @@ contract DeepstateV1 is Ownable {
             _settleDeltas(params.token0, settlement.token0Delta, params.token1, settlement.token1Delta);
         address outputToken = params.isBid ? params.token0 : params.token1;
         if (settlement.protocolFeeAmount != 0) {
-            _safeTransferOut(outputToken, _configRecipient(protocolConfig), settlement.protocolFeeAmount);
+            _safeTransferProtocolFeeOut(outputToken, _configRecipient(protocolConfig), settlement.protocolFeeAmount);
         }
         if (settlement.integratorFeeAmount != 0) {
             _safeTransferOut(outputToken, integratorFee.recipient, settlement.integratorFeeAmount);
@@ -3154,7 +3154,7 @@ contract DeepstateV1 is Ownable {
                 tstore(slot, 0)
             }
 
-            if (amount != 0) _safeTransferOut(token, recipient, amount);
+            if (amount != 0) _safeTransferProtocolFeeOut(token, recipient, amount);
 
             unchecked {
                 ++i;
@@ -3309,6 +3309,17 @@ contract DeepstateV1 is Ownable {
     /// @notice Return native ETH supplied above the caller's net debit.
     function _refundNativeValue(uint256 amount) private {
         if (amount != 0) _safeTransferOut(address(0), msg.sender, amount);
+    }
+
+    /// @notice Pay an owner-configured protocol fee without letting an ETH receiver block fills.
+    /// @dev ERC20 settlement retains standard safe-transfer behavior. For native ETH, Solady first
+    /// attempts a bounded call and force-sends through an ephemeral contract if the recipient rejects.
+    function _safeTransferProtocolFeeOut(address token, address to, uint256 amount) private {
+        if (token == address(0)) {
+            to.forceSafeTransferETH(amount);
+        } else {
+            token.safeTransfer(to, amount);
+        }
     }
 
     /// @notice Pay either native ETH (`token == address(0)`) or an ERC20.
