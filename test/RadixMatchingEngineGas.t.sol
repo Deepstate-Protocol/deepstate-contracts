@@ -741,6 +741,279 @@ contract RadixMatchingEngineGasTest is Test {
     }
 }
 
+contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
+    uint32 internal constant MAX_ORDER_NONCE = type(uint32).max;
+    uint256 internal constant BID_RIGHT_SPINE_DIRTY = uint256(1) << 32;
+    uint256 internal constant QUANTITY_SHIFT = 64;
+    uint256 internal constant QUANTITY_MASK = (uint256(1) << 160) - 1;
+
+    address internal constant HOT_WALLET = 0x8f99B0b48b23908Da9f727B5083052d5099e6aea;
+    address internal constant LIQUIDITY_PROVIDER = address(0xB0B);
+    address internal constant TAKER = address(0xCA201);
+
+    int32 internal constant OBSERVED_TICK = -629_095_628;
+    uint160 internal constant OBSERVED_QUANTITY = 292_278_014_847_723_144;
+    uint32 internal constant OBSERVED_NONCE = 4_294_965_378;
+    bytes32 internal constant OBSERVED_ORDER = 0xda80c334000000000000000000000000040e614e52a7a68800000000fffff882;
+    uint160 internal constant OBSERVED_FILL_ONE = 19_634_000_000_000_000;
+    uint160 internal constant OBSERVED_FILL_TWO = 26_812_000_000_000_000;
+    uint160 internal constant OBSERVED_FILL_THREE = 12_376_000_000_000_000;
+    uint256 internal constant OBSERVED_CANCEL_QUOTE = 798_746_407;
+
+    uint256 internal constant OBSERVED_SPINE_DEPTH = 5;
+    uint256 internal constant PATHOLOGICAL_SPINE_DEPTH = 64;
+    uint160 internal constant PATHOLOGICAL_QUANTITY = 4;
+    uint160 internal constant PATHOLOGICAL_SAME_PRICE_QUEUE = 11;
+
+    GasTestERC20 internal usdc;
+    DeepstateV1 internal engine;
+
+    function setUp() public {
+        usdc = new GasTestERC20();
+        engine = new DeepstateV1();
+
+        usdc.mint(HOT_WALLET, uint256(1) << 220);
+        usdc.mint(LIQUIDITY_PROVIDER, uint256(1) << 220);
+        vm.prank(HOT_WALLET);
+        usdc.approve(address(engine), type(uint256).max);
+        vm.prank(LIQUIDITY_PROVIDER);
+        usdc.approve(address(engine), type(uint256).max);
+
+        vm.deal(TAKER, 100 ether);
+    }
+
+    /// @dev Regression for the Railway Anvil incident. Transaction
+    /// 0xe4702419f4de3df0f31e4ce7b5dffcbfda2590b69c717abb6924be8dc0400a68 ran out of gas;
+    /// 0x1c3f782b619200f689a7f890f4777a446dd92bf97fd59823d7611c58aad45ce2 was the successful retry.
+    function testGas_ObservedNativeBidRestsAfterFiveLevelDirtySpine() public {
+        vm.pauseGasMetering();
+        _prepareDirtyBidSpine(OBSERVED_TICK, OBSERVED_SPINE_DEPTH);
+        _setNextNonce(OBSERVED_NONCE, true);
+
+        vm.prank(HOT_WALLET);
+        vm.resumeGasMetering();
+        bytes32 restingBid = _fillBid(OBSERVED_TICK, OBSERVED_QUANTITY);
+        vm.pauseGasMetering();
+
+        assertEq(restingBid, OBSERVED_ORDER);
+        assertEq(_ownerOf(restingBid), HOT_WALLET);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_ObservedNativeBidPartialMatchAfterDirtySpineRest() public {
+        vm.pauseGasMetering();
+        bytes32 restingBid = _prepareObservedBid();
+
+        vm.prank(TAKER);
+        vm.resumeGasMetering();
+        bytes32 restingAsk = _fillAskNoRest(OBSERVED_TICK, OBSERVED_FILL_ONE);
+        vm.pauseGasMetering();
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(_ownerOf(restingBid), HOT_WALLET);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_ObservedNativeBidCancelAfterThreePartialMatches() public {
+        vm.pauseGasMetering();
+        bytes32 restingBid = _prepareObservedBid();
+        _fillObservedOrderThreeTimes();
+
+        vm.prank(HOT_WALLET);
+        vm.resumeGasMetering();
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(address(0), address(usdc), 0, restingBid);
+        vm.pauseGasMetering();
+
+        assertEq(baseAmount, uint256(OBSERVED_FILL_ONE) + OBSERVED_FILL_TWO + OBSERVED_FILL_THREE);
+        assertEq(quoteAmount, OBSERVED_CANCEL_QUOTE);
+        assertEq(_ownerOf(restingBid), address(0));
+        vm.resumeGasMetering();
+    }
+
+    function testGas_PathologicalNativeBidRestsAfterFullDepthDirtySpine() public {
+        vm.pauseGasMetering();
+        _prepareDirtyBidSpine(type(int32).max, PATHOLOGICAL_SPINE_DEPTH);
+        _setNextNonce(OBSERVED_NONCE, true);
+
+        vm.prank(HOT_WALLET);
+        vm.resumeGasMetering();
+        bytes32 restingBid = _fillBid(type(int32).max, PATHOLOGICAL_QUANTITY);
+        vm.pauseGasMetering();
+
+        assertEq(_quantity(restingBid), PATHOLOGICAL_QUANTITY);
+        assertEq(_ownerOf(restingBid), HOT_WALLET);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_PathologicalNativeBidPartialMatchAfterDirtySpineRest() public {
+        vm.pauseGasMetering();
+        bytes32 restingBid = _preparePathologicalBid();
+
+        vm.prank(TAKER);
+        vm.resumeGasMetering();
+        bytes32 restingAsk = _fillAskNoRest(type(int32).max, PATHOLOGICAL_SAME_PRICE_QUEUE + 1);
+        vm.pauseGasMetering();
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(_ownerOf(restingBid), HOT_WALLET);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_PathologicalNativeBidCancelAfterThreePartialMatches() public {
+        vm.pauseGasMetering();
+        bytes32 restingBid = _preparePathologicalBid();
+        vm.startPrank(TAKER);
+        _fillAskNoRest(type(int32).max, PATHOLOGICAL_SAME_PRICE_QUEUE + 1);
+        _fillAskNoRest(type(int32).max, 1);
+        _fillAskNoRest(type(int32).max, 1);
+        vm.stopPrank();
+
+        vm.prank(HOT_WALLET);
+        vm.resumeGasMetering();
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(address(0), address(usdc), 0, restingBid);
+        vm.pauseGasMetering();
+
+        assertEq(baseAmount, 3);
+        assertGt(quoteAmount, 0);
+        assertEq(_ownerOf(restingBid), address(0));
+        vm.resumeGasMetering();
+    }
+
+    function _prepareObservedBid() internal returns (bytes32 restingBid) {
+        _prepareDirtyBidSpine(OBSERVED_TICK, OBSERVED_SPINE_DEPTH);
+        _setNextNonce(OBSERVED_NONCE, true);
+        vm.prank(HOT_WALLET);
+        restingBid = _fillBid(OBSERVED_TICK, OBSERVED_QUANTITY);
+        assertEq(restingBid, OBSERVED_ORDER);
+    }
+
+    function _preparePathologicalBid() internal returns (bytes32 restingBid) {
+        _prepareDirtyBidSpine(type(int32).max, PATHOLOGICAL_SPINE_DEPTH);
+        _setNextNonce(OBSERVED_NONCE, true);
+        vm.prank(HOT_WALLET);
+        restingBid = _fillBid(type(int32).max, PATHOLOGICAL_QUANTITY);
+    }
+
+    function _prepareDirtyBidSpine(int32 targetTick, uint256 depth) internal {
+        uint64 targetKey = _bidSortKey(targetTick, MAX_ORDER_NONCE);
+
+        _setNextNonce(MAX_ORDER_NONCE, false);
+        vm.prank(LIQUIDITY_PROVIDER);
+        bytes32 targetBid = _fillBid(targetTick, 1);
+
+        uint256 branches;
+        for (uint256 cursor = 64; cursor != 0 && branches < depth;) {
+            unchecked {
+                --cursor;
+            }
+            uint64 bit = uint64(1) << uint64(cursor);
+            if (targetKey & bit == 0) continue;
+
+            uint64 siblingKey = targetKey ^ bit;
+            int32 siblingTick = int32(uint32(siblingKey >> 32) ^ 0x80000000);
+            uint32 siblingNonce = uint32(siblingKey);
+            _setNextNonce(siblingNonce, false);
+            vm.prank(LIQUIDITY_PROVIDER);
+            _fillBid(siblingTick, 1);
+            unchecked {
+                ++branches;
+            }
+        }
+
+        assertEq(branches, depth, "insufficient one bits for requested spine");
+        _assertRightSpine(_bidRoot(), targetBid, depth);
+
+        vm.prank(TAKER);
+        _fillAskNoRest(targetTick, 1);
+        assertTrue(_nonceAndFlags() & BID_RIGHT_SPINE_DIRTY != 0, "bid spine was not marked dirty");
+    }
+
+    function _fillObservedOrderThreeTimes() internal {
+        vm.startPrank(TAKER);
+        _fillAskNoRest(OBSERVED_TICK, OBSERVED_FILL_ONE);
+        _fillAskNoRest(OBSERVED_TICK, OBSERVED_FILL_TWO);
+        _fillAskNoRest(OBSERVED_TICK, OBSERVED_FILL_THREE);
+        vm.stopPrank();
+    }
+
+    function _fillBid(int32 tick, uint160 quantity) internal returns (bytes32 restingOrder) {
+        restingOrder = engine.fill(
+            DeepstateV1.FillParams({
+                token0: address(0),
+                token1: address(usdc),
+                epoch: 0,
+                order: _order(tick, quantity, 0),
+                isBid: true,
+                noRest: false,
+                fillOrKill: false
+            })
+        );
+    }
+
+    function _fillAskNoRest(int32 tick, uint160 quantity) internal returns (bytes32 restingOrder) {
+        restingOrder = engine.fill{value: quantity}(
+            DeepstateV1.FillParams({
+                token0: address(0),
+                token1: address(usdc),
+                epoch: 0,
+                order: _order(tick, quantity, 0),
+                isBid: false,
+                noRest: true,
+                fillOrKill: false
+            })
+        );
+    }
+
+    function _setNextNonce(uint32 nonce, bool dirty) internal {
+        uint256 nonceAndFlags = uint256(nonce);
+        if (dirty) nonceAndFlags |= BID_RIGHT_SPINE_DIRTY;
+        vm.store(address(engine), _nextNonceSlot(), bytes32(nonceAndFlags));
+    }
+
+    function _nonceAndFlags() internal view returns (uint256) {
+        return uint256(vm.load(address(engine), _nextNonceSlot()));
+    }
+
+    function _nextNonceSlot() internal view returns (bytes32) {
+        return keccak256(abi.encode(_bookId(), uint256(0)));
+    }
+
+    function _bookId() internal view returns (bytes32) {
+        return engine.bookId(address(0), address(usdc), 0);
+    }
+
+    function _bidRoot() internal view returns (bytes32 bidRoot) {
+        (, bidRoot) = engine.roots(address(0), address(usdc), 0);
+    }
+
+    function _ownerOf(bytes32 order) internal view returns (address owner) {
+        owner = engine.ownerOfOrder(engine.orderId(_bookId(), order));
+    }
+
+    function _assertRightSpine(bytes32 root, bytes32 expectedLeaf, uint256 expectedBranchCount) internal view {
+        bytes32 node = root;
+        for (uint256 i; i < expectedBranchCount; ++i) {
+            (bytes32 leftNode, bytes32 rightNode) = engine.tree(_bookId(), node);
+            assertTrue(leftNode != bytes32(0));
+            assertTrue(rightNode != bytes32(0));
+            node = rightNode;
+        }
+        assertEq(node, expectedLeaf);
+    }
+
+    function _bidSortKey(int32 tick, uint32 nonce) internal pure returns (uint64) {
+        return (uint64(uint32(tick) ^ 0x80000000) << 32) | uint64(nonce);
+    }
+
+    function _order(int32 tick, uint160 quantity, uint32 nonce) internal pure returns (bytes32) {
+        return bytes32((uint256(uint32(tick)) << 224) | (uint256(quantity) << 64) | uint256(nonce));
+    }
+
+    function _quantity(bytes32 order) internal pure returns (uint160) {
+        return uint160((uint256(order) >> QUANTITY_SHIFT) & QUANTITY_MASK);
+    }
+}
+
 contract RadixMatchingEngineHookGasTest is RadixMatchingEngineGasTest {
     MockHook internal hook;
 
