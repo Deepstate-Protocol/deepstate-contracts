@@ -590,7 +590,7 @@ contract DeepstateV1MultiPoolHandler is Test {
         try ENGINE.fill(params) returns (bytes32 restingOrder) {
             Vm.Log[] memory entries = vm.getRecordedLogs();
             (RestLog[] memory rests, uint256 restCount) = _restLogs(entries, actors[actorIndex]);
-            ExpectedHook[] memory expectedHooks = new ExpectedHook[](3);
+            ExpectedHook[] memory expectedHooks = new ExpectedHook[](5);
             AppliedLeg memory applied = _applyLeg(params, actorIndex, rests, 0, expectedHooks, 0, 0);
 
             assertEq(applied.restCursor, restCount, "single rest log count");
@@ -622,7 +622,7 @@ contract DeepstateV1MultiPoolHandler is Test {
         ) {
             Vm.Log[] memory entries = vm.getRecordedLogs();
             (RestLog[] memory rests, uint256 restCount) = _restLogs(entries, actors[actorIndex]);
-            ExpectedHook[] memory expectedHooks = new ExpectedHook[](3);
+            ExpectedHook[] memory expectedHooks = new ExpectedHook[](5);
             AppliedLeg memory applied = _applyLeg(params, actorIndex, rests, 0, expectedHooks, 0, integratorBps);
 
             assertEq(applied.restCursor, restCount, "integrator single rest log count");
@@ -648,7 +648,7 @@ contract DeepstateV1MultiPoolHandler is Test {
         try ENGINE.fillRoute(fills) {
             Vm.Log[] memory entries = vm.getRecordedLogs();
             (RestLog[] memory rests, uint256 restCount) = _restLogs(entries, actors[actorIndex]);
-            ExpectedHook[] memory expectedHooks = new ExpectedHook[](fills.length * 3);
+            ExpectedHook[] memory expectedHooks = new ExpectedHook[](fills.length * 5);
             int256[3] memory deltas;
             uint256 restCursor;
             uint256 hookCount;
@@ -687,7 +687,7 @@ contract DeepstateV1MultiPoolHandler is Test {
         ) {
             Vm.Log[] memory entries = vm.getRecordedLogs();
             (RestLog[] memory rests, uint256 restCount) = _restLogs(entries, actors[actorIndex]);
-            ExpectedHook[] memory expectedHooks = new ExpectedHook[](fills.length * 3);
+            ExpectedHook[] memory expectedHooks = new ExpectedHook[](fills.length * 5);
             int256[3] memory deltas;
             uint256 restCursor;
             uint256 hookCount;
@@ -757,6 +757,20 @@ contract DeepstateV1MultiPoolHandler is Test {
             hookCount = _appendHookIfNeeded(
                 expectedHooks, hookCount, matched.poolIndex, rested.bookId, params.isBid, beforeRest, afterRest
             );
+
+            (address lower, address upper,,) = _pair(matched.poolIndex);
+            bytes32 pid = ENGINE.poolId(lower, upper);
+            if (
+                rested.bookId == matched.routedBook && ENGINE.nextNonce(lower, upper, params.epoch) == 1
+                    && ENGINE.poolEpoch(pid) == params.epoch + 1
+            ) {
+                hookCount = _appendBookClosureHook(
+                    expectedHooks, hookCount, matched.poolIndex, rested.bookId, true, _top(rested.bookId, true)
+                );
+                hookCount = _appendBookClosureHook(
+                    expectedHooks, hookCount, matched.poolIndex, rested.bookId, false, _top(rested.bookId, false)
+                );
+            }
         }
 
         (applied.amount0, applied.amount1) = _applyLegAmounts(params, matched, integratorBps);
@@ -972,22 +986,45 @@ contract DeepstateV1MultiPoolHandler is Test {
         if (bookHookMasks[id] & sideFlag == 0 || poolHookKinds[poolIndex] != 1) return hookCount;
 
         (address lower, address upper,,) = _pair(poolIndex);
-        uint160 outgoingAmount;
-        if (beforeTop.exists) {
-            uint256 soldAmount =
-                isBid ? _quoteValue(_tick(beforeTop.order), beforeTop.quantity, true) : beforeTop.quantity;
-            // The preceding comparison proves the sold amount fits in 160 bits.
-            // forge-lint: disable-next-line(unsafe-typecast)
-            outgoingAmount = soldAmount > type(uint160).max ? type(uint160).max : uint160(soldAmount);
-        }
         expectedHooks[hookCount] = ExpectedHook({
             poolId: ENGINE.poolId(lower, upper),
             bookId: id,
             token: isBid ? upper : lower,
-            outgoingAmount: outgoingAmount,
+            outgoingAmount: _topHookAmount(beforeTop, isBid),
             incomingNonce: afterTop.exists ? afterTop.nonce : 0
         });
         return hookCount + 1;
+    }
+
+    function _appendBookClosureHook(
+        ExpectedHook[] memory expectedHooks,
+        uint256 hookCount,
+        uint8 poolIndex,
+        bytes32 id,
+        bool isBid,
+        TopOrder memory top
+    ) private view returns (uint256) {
+        uint8 sideFlag = isBid ? 1 : 2;
+        if (bookHookMasks[id] & sideFlag == 0 || poolHookKinds[poolIndex] != 1) return hookCount;
+
+        (address lower, address upper,,) = _pair(poolIndex);
+        expectedHooks[hookCount] = ExpectedHook({
+            poolId: ENGINE.poolId(lower, upper),
+            bookId: id,
+            token: isBid ? upper : lower,
+            outgoingAmount: _topHookAmount(top, isBid),
+            incomingNonce: 0
+        });
+        return hookCount + 1;
+    }
+
+    function _topHookAmount(TopOrder memory top, bool isBid) private pure returns (uint160 outgoingAmount) {
+        if (!top.exists) return 0;
+
+        uint256 soldAmount = isBid ? _quoteValue(_tick(top.order), top.quantity, true) : top.quantity;
+        // The preceding comparison proves the sold amount fits in 160 bits.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return soldAmount > type(uint160).max ? type(uint160).max : uint160(soldAmount);
     }
 
     function _assertHookCalls(uint256 start, ExpectedHook[] memory expectedHooks, uint256 expectedCount) private {
