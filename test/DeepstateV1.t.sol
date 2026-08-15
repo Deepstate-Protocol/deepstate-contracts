@@ -36,6 +36,51 @@ contract GasBurningHook {
     }
 }
 
+contract RotationRecordingHook {
+    struct Call {
+        bytes32 poolId;
+        bytes32 bookId;
+        address token;
+        uint160 outgoingAmount;
+        uint32 incomingNonce;
+    }
+
+    address internal immutable ENGINE;
+    Call[] internal calls;
+
+    constructor(address engine_) {
+        ENGINE = engine_;
+    }
+
+    function execute(bytes32 poolId, bytes32 bookId, address token, uint160 outgoingAmount, uint32 incomingNonce)
+        external
+    {
+        require(msg.sender == ENGINE, "only engine");
+        calls.push(
+            Call({
+                poolId: poolId,
+                bookId: bookId,
+                token: token,
+                outgoingAmount: outgoingAmount,
+                incomingNonce: incomingNonce
+            })
+        );
+    }
+
+    function callCount() external view returns (uint256) {
+        return calls.length;
+    }
+
+    function callAt(uint256 index)
+        external
+        view
+        returns (bytes32 poolId, bytes32 bookId, address token, uint160 outgoingAmount, uint32 incomingNonce)
+    {
+        Call storage recorded = calls[index];
+        return (recorded.poolId, recorded.bookId, recorded.token, recorded.outgoingAmount, recorded.incomingNonce);
+    }
+}
+
 contract DeepstateV1Harness is DeepstateV1 {
     function setNonceAndFlags(bytes32 id, uint256 nonceAndFlags) external {
         books[id].nonceAndFlags = nonceAndFlags;
@@ -828,6 +873,50 @@ contract DeepstateV1Test is Test {
         assertEq(engine.nextNonce(address(token0), address(token1), 1), MAX_ORDER_NONCE);
         assertEq(engine.ownerOfOrder(engine.orderId(oldBook, resting)), alice);
         assertEq(engine.ownerOfOrder(engine.orderId(newBook, resting)), address(0));
+    }
+
+    function test_RotationFinalizesBothEnabledOldBookTopsBeforeDisablingHooks() public {
+        RotationRecordingHook hook = new RotationRecordingHook(address(engine));
+        engine.setPoolHookConfig(address(token0), address(token1), address(hook), true, true);
+
+        vm.prank(alice);
+        bytes32 ask = engine.fill(_fill(0, _order(20, 7, 0), false, false, false));
+        vm.prank(bob);
+        bytes32 bid = engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 pid = engine.poolId(address(token0), address(token1));
+        bytes32 oldBook = engine.bookId(address(token0), address(token1), 0);
+        uint256 callsBeforeRotation = hook.callCount();
+        assertEq(callsBeforeRotation, 2);
+
+        engine.setNonceAndFlags(oldBook, 2 | (uint256(1) << 34) | (uint256(1) << 35));
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(5, 3, 0), true, false, false));
+
+        assertEq(engine.poolEpoch(pid), 1);
+        assertEq(hook.callCount(), callsBeforeRotation + 2);
+
+        (bytes32 bidPid, bytes32 bidBook, address bidToken, uint160 bidAmount, uint32 bidIncoming) =
+            hook.callAt(callsBeforeRotation);
+        assertEq(bidPid, pid);
+        assertEq(bidBook, oldBook);
+        assertEq(bidToken, address(token1));
+        assertEq(bidAmount, _quoteValue(10, 5, true));
+        assertEq(bidIncoming, 0);
+
+        (bytes32 askPid, bytes32 askBook, address askToken, uint160 askAmount, uint32 askIncoming) =
+            hook.callAt(callsBeforeRotation + 1);
+        assertEq(askPid, pid);
+        assertEq(askBook, oldBook);
+        assertEq(askToken, address(token0));
+        assertEq(askAmount, 7);
+        assertEq(askIncoming, 0);
+
+        vm.prank(bob);
+        engine.cancel(address(token0), address(token1), 0, bid);
+        vm.prank(alice);
+        engine.cancel(address(token0), address(token1), 0, ask);
+        assertEq(hook.callCount(), callsBeforeRotation + 2);
     }
 
     function test_FinalEpochCannotAliasHookFlagsAndFailedRestIsAtomic() public {

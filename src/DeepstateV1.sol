@@ -2169,6 +2169,14 @@ contract DeepstateV1 is Ownable {
         uint256 integratorFeeAmount;
     }
 
+    /// @notice Scratch state for rotating one exhausted pool book.
+    struct BookRotationState {
+        bytes32 poolId;
+        uint256 poolState;
+        uint256 epoch;
+        uint256 hookFlags;
+    }
+
     /// @dev Low 254 bits of `_poolEpochAndHookFlags`; high bits are hook activation flags.
     uint256 private constant _POOL_EPOCH_MASK = (uint256(1) << 254) - 1;
     /// @dev Pool flag enabling hooks when token0 buyers change, i.e. bid-side top changes.
@@ -2502,10 +2510,8 @@ contract DeepstateV1 is Ownable {
     /// @return soldAmount Current collateral sold by that order, saturated at `uint160.max`.
     function topOrder(bytes32 id, bool isBid) external view returns (uint32 nonce, uint160 soldAmount) {
         Book storage book = books[id];
-        bytes32 root = isBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
-        if (root == bytes32(0)) return (0, 0);
-
-        bytes32 order = _rightmostLeaf(book, root);
+        bytes32 order = _topOrder(book, isBid);
+        if (order == bytes32(0)) return (0, 0);
         return (_nonce(order), _hookAmount(order, isBid));
     }
 
@@ -2824,23 +2830,43 @@ contract DeepstateV1 is Ownable {
     /// route a separate leg to the next active epoch to create maker liquidity. Hook flags are
     /// removed from the old book and copied into the newly initialized book.
     function _rotateIfExhausted(address token0, address token1) private {
-        bytes32 pid = poolId(token0, token1);
-        uint256 poolState = _poolEpochAndHookFlags[pid];
-        uint256 oldEpoch = _poolEpoch(poolState);
-        if (oldEpoch == _POOL_EPOCH_MASK) revert EpochExhausted();
-        uint256 bookHookFlags = _bookHookFlags(poolState);
-        if (bookHookFlags != 0) _setBookHookFlags(books[bookId(token0, token1, oldEpoch)], 0);
-
-        uint256 epoch;
-        unchecked {
-            epoch = oldEpoch + 1;
+        BookRotationState memory rotation =
+            BookRotationState({poolId: poolId(token0, token1), poolState: 0, epoch: 0, hookFlags: 0});
+        rotation.poolState = _poolEpochAndHookFlags[rotation.poolId];
+        rotation.epoch = _poolEpoch(rotation.poolState);
+        if (rotation.epoch == _POOL_EPOCH_MASK) revert EpochExhausted();
+        rotation.hookFlags = _bookHookFlags(rotation.poolState);
+        if (rotation.hookFlags != 0) {
+            _closeBookHooks(token0, token1, rotation.poolId, rotation.epoch, rotation.hookFlags);
         }
-        _poolEpochAndHookFlags[pid] = _withPoolEpoch(poolState, epoch);
 
-        bytes32 id = bookId(token0, token1, epoch);
+        unchecked {
+            ++rotation.epoch;
+        }
+        _poolEpochAndHookFlags[rotation.poolId] = _withPoolEpoch(rotation.poolState, rotation.epoch);
+
+        bytes32 id = bookId(token0, token1, rotation.epoch);
         Book storage nextBook = books[id];
-        _initializeBookWithHookFlags(nextBook, bookHookFlags);
-        emit BookInitialized(pid, id, epoch);
+        _initializeBookWithHookFlags(nextBook, rotation.hookFlags);
+        emit BookInitialized(rotation.poolId, id, rotation.epoch);
+    }
+
+    /// @notice Finalize enabled sides and remove hook flags from an exhausted historical book.
+    function _closeBookHooks(address token0, address token1, bytes32 pid, uint256 oldEpoch, uint256 bookHookFlags)
+        private
+    {
+        bytes32 oldBookId = bookId(token0, token1, oldEpoch);
+        Book storage oldBook = books[oldBookId];
+        address hook = poolHook[pid];
+        if (hook != address(0)) {
+            if (bookHookFlags & _BOOK_HOOK_TOKEN0_ACTIVE != 0) {
+                _executeBookClosureHook(hook, pid, oldBookId, oldBook, token1, true);
+            }
+            if (bookHookFlags & _BOOK_HOOK_TOKEN1_ACTIVE != 0) {
+                _executeBookClosureHook(hook, pid, oldBookId, oldBook, token0, false);
+            }
+        }
+        _setBookHookFlags(oldBook, 0);
     }
 
     /// @notice Consume transient top-change data and call the configured pool hook if needed.
@@ -2862,10 +2888,41 @@ contract DeepstateV1 is Ownable {
 
         address token = isBid ? token1 : token0;
         uint160 outgoingAmount = _hookAmount(outgoingOrder, isBid);
+        _callHook(hook, pid, id, token, outgoingAmount, incomingNonce);
+    }
+
+    /// @notice Finalize one enabled side before an exhausted book loses its hook flags.
+    function _executeBookClosureHook(
+        address hook,
+        bytes32 pid,
+        bytes32 id,
+        Book storage book,
+        address token,
+        bool isBid
+    ) private {
+        bytes32 outgoingOrder = _topOrder(book, isBid);
+        _callHook(hook, pid, id, token, _hookAmount(outgoingOrder, isBid), 0);
+    }
+
+    /// @notice Call a configured hook inside the engine's bounded best-effort failure domain.
+    function _callHook(
+        address hook,
+        bytes32 pid,
+        bytes32 id,
+        address token,
+        uint160 outgoingAmount,
+        uint32 incomingNonce
+    ) private {
         // A gas cap makes the best-effort guarantee meaningful for a hook that loops or otherwise
         // consumes all gas. Reverts and out-of-gas inside this bounded call are intentionally ignored.
         // slither-disable-next-line calls-loop
         try IHook(hook).execute{gas: _HOOK_GAS_LIMIT}(pid, id, token, outgoingAmount, incomingNonce) {} catch {}
+    }
+
+    /// @notice Return one side's live best order, or zero when that side is empty.
+    function _topOrder(Book storage book, bool isBid) private view returns (bytes32 order) {
+        bytes32 root = isBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
+        if (root != bytes32(0)) order = _rightmostLeaf(book, root);
     }
 
     /// @notice Convert one live order into the collateral amount it is offering to sell.
