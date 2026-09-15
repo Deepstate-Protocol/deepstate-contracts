@@ -29,10 +29,13 @@ contract MultiPoolInvariantERC20 is ERC20 {
 }
 
 contract DeepstateV1MultiPoolHarness is DeepstateV1 {
-    function forceNextNonce(address token0, address token1, uint256 epoch, uint32 nonce) external {
+    function forceIdentityFrontsToExhaust(address token0, address token1, uint256 epoch) external {
         bytes32 id = bookId(token0, token1, epoch);
         uint256 nonceAndFlags = books[id].nonceAndFlags;
-        books[id].nonceAndFlags = (nonceAndFlags & ~uint256(type(uint32).max)) | uint256(nonce);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        uint32 branchNonce = uint32(nonceAndFlags >> 64);
+        uint32 orderNonce = branchNonce == 0 ? 2 : branchNonce + 1;
+        books[id].nonceAndFlags = (nonceAndFlags & ~uint256(type(uint32).max)) | uint256(orderNonce);
     }
 }
 
@@ -378,7 +381,7 @@ contract DeepstateV1MultiPoolHandler is Test {
         (address lower, address upper,,) = _pair(poolIndex);
         bytes32 oldBook = ENGINE.bookId(lower, upper, oldEpoch);
 
-        ENGINE.forceNextNonce(lower, upper, oldEpoch, 2);
+        ENGINE.forceIdentityFrontsToExhaust(lower, upper, oldEpoch);
         int32 tick = isBid ? type(int32).min : type(int32).max;
         DeepstateV1.FillParams memory params = _fillParams(poolIndex, oldEpoch, tick, 1, isBid, false);
         _performSingle(actorIndex, params);
@@ -1338,8 +1341,8 @@ contract DeepstateV1MultiPoolInvariantTest is StdInvariant, Test {
             (bytes32 leftNode, bytes32 rightNode) = engine.tree(id, root);
             if (leftNode == bytes32(0)) return _sortKey(root, isBid) == targetKey ? root : bytes32(0);
 
-            uint64 leftKey = _sortKey(leftNode, isBid);
-            uint8 depth = _commonPrefix(leftKey, _sortKey(rightNode, isBid));
+            uint64 leftKey = _nodeKey(id, leftNode, isBid);
+            uint8 depth = _commonPrefix(leftKey, _nodeKey(id, rightNode, isBid));
             if (_commonPrefix(targetKey, leftKey) < depth) return bytes32(0);
             root = _bit(targetKey, depth) ? rightNode : leftNode;
         }
@@ -1353,6 +1356,15 @@ contract DeepstateV1MultiPoolInvariantTest is StdInvariant, Test {
             root = rightNode;
         }
         return bytes32(0);
+    }
+
+    function _nodeKey(bytes32 id, bytes32 node, bool isBid) private view returns (uint64) {
+        while (node != bytes32(0)) {
+            (bytes32 leftNode,) = engine.tree(id, node);
+            if (leftNode == bytes32(0)) return _sortKey(node, isBid);
+            node = leftNode;
+        }
+        return 0;
     }
 
     function _pair(uint8 poolIndex) private view returns (address lower, address upper) {

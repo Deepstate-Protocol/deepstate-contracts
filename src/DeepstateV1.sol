@@ -15,7 +15,7 @@ import {TickMath32} from "./libraries/TickMath32.sol";
 /// - bits 224-255: signed 32-bit logarithmic tick.
 /// - bits  64-223: 160-bit quantity.
 /// - bits  32-63: 32-bit same-tick branch correction code; zero for leaves/mixed branches.
-/// - bits   0-31: 32-bit nonce/path suffix.
+/// - bits   0-31: 32-bit node identity (order nonce for leaves, branch nonce for branches).
 ///
 /// Tick `t` represents the dimensionless quote/base price `2 ** (96 * t / 2**31)`.
 /// Tick zero is therefore exactly 1:1, the full signed domain spans approximately
@@ -33,12 +33,11 @@ import {TickMath32} from "./libraries/TickMath32.sol";
 /// zero; the contract assigns a decrementing nonce so higher nonce values have earlier time
 /// priority at the same price.
 ///
-/// Branch nodes are self-addressing aggregate nodes. A branch address is built with the maximum
-/// raw price/nonce path key of its two children and the sum of their quantities. The child pointers
-/// are stored in `tree[branch]`. A node is treated as a branch if it has a nonzero left child in
-/// `tree`; otherwise it is treated as a leaf. This intentionally allows a branch key and an
-/// original order key to be the same `bytes32`: branch structure lives in `tree`, while ownership
-/// and side metadata live together in `orderOf`.
+/// Branch nodes are aggregate nodes whose packed word lives in their parent pointer. Their child
+/// pointers are stored in `tree[bytes32(nonce)]`, using the packed node's unique nonce as a stable
+/// identity. Quantity/correction changes therefore rewrite only the parent pointer and never move
+/// the node's children to a new mapping key. A node is a branch when that nonce-addressed slot has
+/// a nonzero left child; otherwise it is a leaf. Ownership and side metadata live in `orderOf`.
 ///
 /// The bid and ask books are conceptual trees that coexist in the same `tree` mapping:
 ///
@@ -54,11 +53,11 @@ import {TickMath32} from "./libraries/TickMath32.sol";
 /// decouples matching from per-maker execution while preserving price-time priority.
 ///
 /// Right-spine optimization: fills and cancels near the best price often mutate only the rightmost
-/// path. In those cases the engine may keep a stable branch address and update only its right child
-/// pointer. The branch word can then have a stale aggregate quantity/path, so the corresponding
-/// book flag is set. Same-side insertion materializes the right spine back into exact aggregate
-/// nodes before adding a new leaf. Matching can still safely consume same-price dirty subtrees by
-/// recomputing their live quantity from child pointers.
+/// path. Nonce-addressed child slots remain stable while the packed node is rewritten in its parent.
+/// The branch word can then have a stale aggregate quantity/path, so the corresponding book flag is
+/// set. Same-side insertion materializes the right spine back into exact aggregate nodes before
+/// adding a new leaf. Matching can still safely consume same-price dirty subtrees by recomputing
+/// their live quantity from child pointers.
 ///
 /// Pools use sorted token addresses, and each pool epoch derives an isolated book id. `fillRoute`
 /// mutates every selected book before settling one net transient delta per touched token. Optional
@@ -91,9 +90,10 @@ contract DeepstateV1 is Ownable {
     }
 
     /// @notice One isolated radix book for one token pair epoch.
-    /// @dev The low 32 bits of `nonceAndFlags` are the decrementing nonce. Bits above the nonce
-    /// hold per-book right-spine dirty flags. The zero node in `tree` is reserved as the root
-    /// anchor: `leftNode` is the ask root and `rightNode` is the bid root.
+    /// @dev The low 32 bits of `nonceAndFlags` are the decrementing order nonce, bits 32-33 are
+    /// per-book right-spine dirty flags, and bits 64-95 are the ascending branch nonce. The zero
+    /// node in `tree` is reserved as the root anchor: `leftNode` is the ask root and `rightNode` is
+    /// the bid root.
     struct Book {
         uint256 nonceAndFlags;
         mapping(bytes32 => Branch) tree;
@@ -118,10 +118,27 @@ contract DeepstateV1 is Ownable {
     uint256 private constant _QUANTITY_MASK = (uint256(1) << 160) - 1;
     /// @dev Mask for extracting the 32-bit same-tick correction code.
     uint256 private constant _CORRECTION_MASK = type(uint32).max;
-    /// @dev Mask for extracting or validating the 32-bit nonce/path suffix.
+    /// @dev Mask for extracting or validating a 32-bit node nonce.
     uint256 private constant _NONCE_MASK = type(uint32).max;
+    /// @dev Bit offset of the ascending branch-identity counter in `Book.nonceAndFlags`.
+    uint256 private constant _BRANCH_NONCE_SHIFT = 64;
+    /// @dev Mask for replacing the ascending branch-identity counter.
+    uint256 private constant _BRANCH_NONCE_MASK = uint256(type(uint32).max) << _BRANCH_NONCE_SHIFT;
     /// @dev Root anchor in every book's tree. `leftNode` is ask root; `rightNode` is bid root.
     bytes32 private constant _ROOT_NODE = bytes32(0);
+
+    /// @dev Return the storage key for a packed node's stable nonce identity.
+    function _branchKey(bytes32 node) private pure returns (bytes32) {
+        return bytes32(uint256(_nonce(node)));
+    }
+
+    /// @dev Store a branch's two child pointers at the slot selected by its stable nonce identity.
+    function _setBranchChildren(Book storage book, bytes32 node, bytes32 leftNode, bytes32 rightNode) private {
+        Branch storage branch = book.tree[_branchKey(node)];
+        branch.leftNode = leftNode;
+        branch.rightNode = rightNode;
+    }
+
     /// @dev Dirty bit stored above the 32-bit `nextNonce` field when bid right-spine anchors are stale.
     uint256 private constant _BID_RIGHT_SPINE_DIRTY = uint256(1) << 32;
     /// @dev Dirty bit stored above the 32-bit `nextNonce` field when ask right-spine anchors are stale.
@@ -537,20 +554,30 @@ contract DeepstateV1 is Ownable {
             nonceAndFlags &= ~dirtyFlag;
         }
 
+        bytes32 root = isBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
+        bool createsBranch = root != bytes32(0);
+
+        // Order identities descend from uint32.max while branch identities ascend from one. They
+        // share one namespace and the book rotates before the two allocation fronts can collide.
         // forge-lint: disable-next-line(unsafe-typecast)
         uint32 nonce = uint32(nonceAndFlags & _NONCE_MASK);
-        if (nonce <= 1) revert NonceExhausted();
+        uint32 branchNonce = _nextBranchNonce(nonceAndFlags);
+        if (nonce <= branchNonce) revert NonceExhausted();
+
+        uint32 nextBranchNonce = branchNonce;
         unchecked {
             nextNonceAfter = nonce - 1;
+            if (createsBranch) nextBranchNonce = branchNonce + 1;
         }
-        unchecked {
-            book.nonceAndFlags = (nonceAndFlags & ~_NONCE_MASK) | uint256(nextNonceAfter);
-        }
+        if (nextNonceAfter <= nextBranchNonce) nextNonceAfter = 1;
+
+        book.nonceAndFlags = (nonceAndFlags & ~(_NONCE_MASK | _BRANCH_NONCE_MASK)) | uint256(nextNonceAfter)
+            | (uint256(nextBranchNonce) << _BRANCH_NONCE_SHIFT);
 
         restingOrder = _pack(price, quantity, nonce);
         orderOf[_orderId(id, restingOrder)] = OrderState({owner: owner, isBid: isBid});
 
-        _insertRestingOrder(book, restingOrder, isBid, hookEnabled);
+        _insertRestingOrder(book, restingOrder, isBid, hookEnabled, createsBranch ? branchNonce : 0);
 
         emit OrderRested(id, restingOrder, owner, isBid);
     }
@@ -560,15 +587,21 @@ contract DeepstateV1 is Ownable {
     /// @param restingOrder Packed leaf to insert.
     /// @param isBid True for bid tree, false for ask tree.
     /// @param hookEnabled True to record a top-order change if insertion improves the book.
-    function _insertRestingOrder(Book storage book, bytes32 restingOrder, bool isBid, bool hookEnabled) private {
+    function _insertRestingOrder(
+        Book storage book,
+        bytes32 restingOrder,
+        bool isBid,
+        bool hookEnabled,
+        uint32 newBranchNonce
+    ) private {
         if (isBid) {
             bytes32 root = book.tree[_ROOT_NODE].rightNode;
             book.tree[_ROOT_NODE].rightNode =
-                _insertBid(book, root, restingOrder, _bidSortKey(restingOrder), hookEnabled);
+                _insertBid(book, root, restingOrder, _bidSortKey(restingOrder), hookEnabled, newBranchNonce);
         } else {
             bytes32 root = book.tree[_ROOT_NODE].leftNode;
             book.tree[_ROOT_NODE].leftNode =
-                _insertAsk(book, root, restingOrder, _askSortKey(restingOrder), hookEnabled);
+                _insertAsk(book, root, restingOrder, _askSortKey(restingOrder), hookEnabled, newBranchNonce);
         }
     }
 
@@ -745,7 +778,7 @@ contract DeepstateV1 is Ownable {
             (newNode, branchDirty) = _replaceRightmostRightChild(book, node, newLeftNode, newRightNode, false);
             if (branchDirty) matchChange = _markMatchDirty(matchChange);
         } else {
-            newNode = _replaceBranch(book, newLeftNode, newRightNode, false);
+            newNode = _replaceBranch(book, node, newLeftNode, newRightNode, false);
         }
         unchecked {
             fillQuantity += rightFillQuantity;
@@ -769,7 +802,7 @@ contract DeepstateV1 is Ownable {
         private
         returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount)
     {
-        bytes32 leftNode = book.tree[node].leftNode;
+        bytes32 leftNode = book.tree[_branchKey(node)].leftNode;
         if (leftNode == bytes32(0)) {
             (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(node, limitPrice, remaining);
             return (newNode, fillQuantity, quoteAmount);
@@ -791,7 +824,7 @@ contract DeepstateV1 is Ownable {
         uint160 rightFillQuantity;
         uint256 rightQuoteAmount;
         {
-            bytes32 rightNode = book.tree[node].rightNode;
+            bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
             (newRightNode, rightFillQuantity, rightQuoteAmount) =
                 _matchAskSubtree(id, book, rightNode, limitPrice, remaining);
         }
@@ -806,7 +839,7 @@ contract DeepstateV1 is Ownable {
             (newLeftNode, fillQuantity, quoteAmount) = _matchAskSubtree(id, book, leftNode, limitPrice, remaining);
         }
 
-        newNode = _replaceBranch(book, newLeftNode, newRightNode, false);
+        newNode = _replaceBranch(book, node, newLeftNode, newRightNode, false);
         unchecked {
             fillQuantity += rightFillQuantity;
             quoteAmount += rightQuoteAmount;
@@ -888,7 +921,7 @@ contract DeepstateV1 is Ownable {
             (newNode, branchDirty) = _replaceRightmostRightChild(book, node, newLeftNode, newRightNode, true);
             if (branchDirty) matchChange = _markMatchDirty(matchChange);
         } else {
-            newNode = _replaceBranch(book, newLeftNode, newRightNode, true);
+            newNode = _replaceBranch(book, node, newLeftNode, newRightNode, true);
         }
         unchecked {
             fillQuantity += rightFillQuantity;
@@ -912,7 +945,7 @@ contract DeepstateV1 is Ownable {
         private
         returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount)
     {
-        bytes32 leftNode = book.tree[node].leftNode;
+        bytes32 leftNode = book.tree[_branchKey(node)].leftNode;
         if (leftNode == bytes32(0)) {
             (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(node, limitPrice, remaining);
             return (newNode, fillQuantity, quoteAmount);
@@ -934,7 +967,7 @@ contract DeepstateV1 is Ownable {
         uint160 rightFillQuantity;
         uint256 rightQuoteAmount;
         {
-            bytes32 rightNode = book.tree[node].rightNode;
+            bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
             (newRightNode, rightFillQuantity, rightQuoteAmount) =
                 _matchBidSubtree(id, book, rightNode, limitPrice, remaining);
         }
@@ -949,7 +982,7 @@ contract DeepstateV1 is Ownable {
             (newLeftNode, fillQuantity, quoteAmount) = _matchBidSubtree(id, book, leftNode, limitPrice, remaining);
         }
 
-        newNode = _replaceBranch(book, newLeftNode, newRightNode, true);
+        newNode = _replaceBranch(book, node, newLeftNode, newRightNode, true);
         unchecked {
             fillQuantity += rightFillQuantity;
             quoteAmount += rightQuoteAmount;
@@ -966,40 +999,46 @@ contract DeepstateV1 is Ownable {
     /// Insertion follows Patricia/radix-tree rules. If the new key diverges before the current
     /// branch split, a new parent branch is created above `root`. Otherwise recursion continues
     /// into the child selected by the branch split bit.
-    function _insertBid(Book storage book, bytes32 root, bytes32 node, uint64 nodeKey, bool hookEnabled)
-        private
-        returns (bytes32 newRoot)
-    {
+    function _insertBid(
+        Book storage book,
+        bytes32 root,
+        bytes32 node,
+        uint64 nodeKey,
+        bool hookEnabled,
+        uint32 newBranchNonce
+    ) private returns (bytes32 newRoot) {
         if (root == bytes32(0)) {
             if (hookEnabled) _recordTopOrderChange(bytes32(0), _nonce(node));
             return node;
         }
 
-        bytes32 leftNode = book.tree[root].leftNode;
+        bytes32 leftNode = book.tree[_branchKey(root)].leftNode;
         if (leftNode == bytes32(0)) {
-            if (hookEnabled && nodeKey > _bidSortKey(root)) {
+            uint64 rootKey = _bidSortKey(root);
+            if (hookEnabled && nodeKey > rootKey) {
                 _recordTopOrderChange(root, _nonce(node));
             }
-            return _storeBranch(book, root, node, _bidSortKey(root), nodeKey, true);
+            return _storeBranch(book, root, node, rootKey, nodeKey, true, newBranchNonce);
         }
 
-        bytes32 rightNode = book.tree[root].rightNode;
-        uint64 leftKey = _bidSortKey(leftNode);
-        uint8 branchDepth = _commonPrefix(leftKey, _bidSortKey(rightNode));
+        bytes32 rightNode = book.tree[_branchKey(root)].rightNode;
+        uint64 leftKey = _bidNodeKey(book, leftNode);
+        uint64 rightKey = _bidNodeKey(book, rightNode);
+        uint8 branchDepth = _commonPrefix(leftKey, rightKey);
         if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
             if (hookEnabled && _bit(nodeKey, _commonPrefix(nodeKey, leftKey))) {
                 _recordTopOrderChange(_rightmostLeaf(book, root), _nonce(node));
             }
-            return _storeBranch(book, root, node, _bidSortKey(root), nodeKey, true);
+            return _storeBranch(book, root, node, leftKey, nodeKey, true, newBranchNonce);
         }
 
         if (_bit(nodeKey, branchDepth)) {
-            rightNode = _insertBid(book, rightNode, node, nodeKey, hookEnabled);
+            rightNode = _insertBid(book, rightNode, node, nodeKey, hookEnabled, newBranchNonce);
         } else {
-            leftNode = _insertBid(book, leftNode, node, nodeKey, false);
+            leftNode = _insertBid(book, leftNode, node, nodeKey, false, newBranchNonce);
         }
 
-        return _replaceBranch(book, leftNode, rightNode, true);
+        return _replaceBranch(book, root, leftNode, rightNode, true);
     }
 
     /// @notice Insert a leaf or branch into the ask tree.
@@ -1009,40 +1048,46 @@ contract DeepstateV1 is Ownable {
     /// @param hookEnabled True while this recursive frame can still affect the ask-side best order.
     /// @return newRoot Updated subtree root.
     /// @dev Same insertion algorithm as bids, but callers provide inverted-price ask keys.
-    function _insertAsk(Book storage book, bytes32 root, bytes32 node, uint64 nodeKey, bool hookEnabled)
-        private
-        returns (bytes32 newRoot)
-    {
+    function _insertAsk(
+        Book storage book,
+        bytes32 root,
+        bytes32 node,
+        uint64 nodeKey,
+        bool hookEnabled,
+        uint32 newBranchNonce
+    ) private returns (bytes32 newRoot) {
         if (root == bytes32(0)) {
             if (hookEnabled) _recordTopOrderChange(bytes32(0), _nonce(node));
             return node;
         }
 
-        bytes32 leftNode = book.tree[root].leftNode;
+        bytes32 leftNode = book.tree[_branchKey(root)].leftNode;
         if (leftNode == bytes32(0)) {
-            if (hookEnabled && nodeKey > _askSortKey(root)) {
+            uint64 rootKey = _askSortKey(root);
+            if (hookEnabled && nodeKey > rootKey) {
                 _recordTopOrderChange(root, _nonce(node));
             }
-            return _storeBranch(book, root, node, _askSortKey(root), nodeKey, false);
+            return _storeBranch(book, root, node, rootKey, nodeKey, false, newBranchNonce);
         }
 
-        bytes32 rightNode = book.tree[root].rightNode;
-        uint64 leftKey = _askSortKey(leftNode);
-        uint8 branchDepth = _commonPrefix(leftKey, _askSortKey(rightNode));
+        bytes32 rightNode = book.tree[_branchKey(root)].rightNode;
+        uint64 leftKey = _askNodeKey(book, leftNode);
+        uint64 rightKey = _askNodeKey(book, rightNode);
+        uint8 branchDepth = _commonPrefix(leftKey, rightKey);
         if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
             if (hookEnabled && _bit(nodeKey, _commonPrefix(nodeKey, leftKey))) {
                 _recordTopOrderChange(_rightmostLeaf(book, root), _nonce(node));
             }
-            return _storeBranch(book, root, node, _askSortKey(root), nodeKey, false);
+            return _storeBranch(book, root, node, leftKey, nodeKey, false, newBranchNonce);
         }
 
         if (_bit(nodeKey, branchDepth)) {
-            rightNode = _insertAsk(book, rightNode, node, nodeKey, hookEnabled);
+            rightNode = _insertAsk(book, rightNode, node, nodeKey, hookEnabled, newBranchNonce);
         } else {
-            leftNode = _insertAsk(book, leftNode, node, nodeKey, false);
+            leftNode = _insertAsk(book, leftNode, node, nodeKey, false, newBranchNonce);
         }
 
-        return _replaceBranch(book, leftNode, rightNode, false);
+        return _replaceBranch(book, root, leftNode, rightNode, false);
     }
 
     /// @notice Remove one bid leaf by exact bid sort key.
@@ -1060,15 +1105,15 @@ contract DeepstateV1 is Ownable {
         private
         returns (bytes32 newRoot, bytes32 removed, bool dirtyChanged, bool removedTop)
     {
-        bytes32 leftNode = book.tree[root].leftNode;
+        bytes32 leftNode = book.tree[_branchKey(root)].leftNode;
         if (leftNode == bytes32(0)) {
             return
                 _bidSortKey(root) == targetKey ? (bytes32(0), root, false, rightmost) : (root, bytes32(0), false, false);
         }
 
-        bytes32 rightNode = book.tree[root].rightNode;
-        uint64 leftKey = _bidSortKey(leftNode);
-        uint8 branchDepth = _commonPrefix(leftKey, _bidSortKey(rightNode));
+        bytes32 rightNode = book.tree[_branchKey(root)].rightNode;
+        uint64 leftKey = _bidNodeKey(book, leftNode);
+        uint8 branchDepth = _commonPrefix(leftKey, _bidNodeKey(book, rightNode));
         if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0), false, false);
 
         bool goRight = _bit(targetKey, branchDepth);
@@ -1084,7 +1129,7 @@ contract DeepstateV1 is Ownable {
             (newRoot, branchDirty) = _replaceRightmostRightChild(book, root, leftNode, rightNode, true);
             return (newRoot, removed, dirtyChanged || branchDirty, removedTop);
         }
-        return (_replaceBranch(book, leftNode, rightNode, true), removed, dirtyChanged, removedTop);
+        return (_replaceBranch(book, root, leftNode, rightNode, true), removed, dirtyChanged, removedTop);
     }
 
     /// @notice Remove one ask leaf by exact ask sort key.
@@ -1100,15 +1145,15 @@ contract DeepstateV1 is Ownable {
         private
         returns (bytes32 newRoot, bytes32 removed, bool dirtyChanged, bool removedTop)
     {
-        bytes32 leftNode = book.tree[root].leftNode;
+        bytes32 leftNode = book.tree[_branchKey(root)].leftNode;
         if (leftNode == bytes32(0)) {
             return
                 _askSortKey(root) == targetKey ? (bytes32(0), root, false, rightmost) : (root, bytes32(0), false, false);
         }
 
-        bytes32 rightNode = book.tree[root].rightNode;
-        uint64 leftKey = _askSortKey(leftNode);
-        uint8 branchDepth = _commonPrefix(leftKey, _askSortKey(rightNode));
+        bytes32 rightNode = book.tree[_branchKey(root)].rightNode;
+        uint64 leftKey = _askNodeKey(book, leftNode);
+        uint8 branchDepth = _commonPrefix(leftKey, _askNodeKey(book, rightNode));
         if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0), false, false);
 
         bool goRight = _bit(targetKey, branchDepth);
@@ -1124,7 +1169,7 @@ contract DeepstateV1 is Ownable {
             (newRoot, branchDirty) = _replaceRightmostRightChild(book, root, leftNode, rightNode, false);
             return (newRoot, removed, dirtyChanged || branchDirty, removedTop);
         }
-        return (_replaceBranch(book, leftNode, rightNode, false), removed, dirtyChanged, removedTop);
+        return (_replaceBranch(book, root, leftNode, rightNode, false), removed, dirtyChanged, removedTop);
     }
 
     /// @notice Update a right-spine branch after only its right child changed.
@@ -1147,10 +1192,10 @@ contract DeepstateV1 is Ownable {
     ) private returns (bytes32 newNode, bool dirtyChanged) {
         if (rightNode == bytes32(0)) return (leftNode, false);
         if (rightNode == branchNode || rightNode == leftNode) {
-            return (_replaceBranch(book, leftNode, rightNode, isBid), false);
+            return (_replaceBranch(book, branchNode, leftNode, rightNode, isBid), false);
         }
 
-        book.tree[branchNode].rightNode = rightNode;
+        book.tree[_branchKey(branchNode)].rightNode = rightNode;
         return (branchNode, true);
     }
 
@@ -1160,9 +1205,10 @@ contract DeepstateV1 is Ownable {
     /// @return Replacement subtree root.
     /// @dev
     /// If one child was consumed or canceled, the other child is promoted. If both remain, the
-    /// branch address is recomputed from the child nodes and its pointers are written. Callers pass
-    /// children in already-valid left/right order.
-    function _replaceBranch(Book storage book, bytes32 leftNode, bytes32 rightNode, bool isBid)
+    /// branch summary is recomputed from the child nodes while its stable nonce identity is
+    /// preserved, and its pointers remain at the same mapping key. Callers pass children in
+    /// already-valid left/right order.
+    function _replaceBranch(Book storage book, bytes32 oldBranch, bytes32 leftNode, bytes32 rightNode, bool isBid)
         private
         returns (bytes32)
     {
@@ -1172,9 +1218,9 @@ contract DeepstateV1 is Ownable {
         } else if (rightNode == bytes32(0)) {
             newBranch = leftNode;
         } else {
-            newBranch = _branchNodeForChildren(book, leftNode, rightNode, isBid);
+            newBranch = _branchNodeForChildren(book, leftNode, rightNode, isBid, _nonce(oldBranch));
             // Replacement callers preserve left/right ordering from an existing valid branch.
-            book.tree[newBranch] = Branch({leftNode: leftNode, rightNode: rightNode});
+            _setBranchChildren(book, newBranch, leftNode, rightNode);
         }
 
         return newBranch;
@@ -1202,7 +1248,7 @@ contract DeepstateV1 is Ownable {
         uint16 shift
     ) private returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount) {
         uint160 nodeQuantity = _quantity(node);
-        bytes32 leftNode = book.tree[node].leftNode;
+        bytes32 leftNode = book.tree[_branchKey(node)].leftNode;
 
         if (nodeQuantity <= remaining) {
             quoteAmount = leftNode == bytes32(0)
@@ -1226,7 +1272,7 @@ contract DeepstateV1 is Ownable {
             return (_withQuantity(node, newQuantity), remaining, quoteAmount);
         }
 
-        bytes32 rightNode = book.tree[node].rightNode;
+        bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
         uint160 rightFillQuantity;
         uint256 rightQuoteAmount;
         (rightNode, rightFillQuantity, rightQuoteAmount) =
@@ -1280,13 +1326,11 @@ contract DeepstateV1 is Ownable {
         } else {
             correction = newAggregateQuote + oldCorrection + quoteAmount - oldAggregateQuote;
         }
-        uint64 leftKey = _pathKey(leftNode);
-        uint64 rightKey = _pathKey(rightNode);
-        // A correction is at most liveLeafCount - 1. The decrementing nonce admits at most
-        // 2^32 - 2 resting leaves, so correction + 1 is strictly representable in uint32.
+        // A correction is at most liveLeafCount - 1. The shared node-identity namespace admits
+        // fewer than 2^32 live nodes, so correction + 1 is strictly representable in uint32.
         // forge-lint: disable-next-line(unsafe-typecast)
-        newNode = _branchNode(leftKey > rightKey ? leftKey : rightKey, newQuantity, uint32(correction + 1));
-        book.tree[newNode] = Branch({leftNode: leftNode, rightNode: rightNode});
+        newNode = _branchNode(_price(oldNode), newQuantity, uint32(correction + 1), _nonce(oldNode));
+        _setBranchChildren(book, newNode, leftNode, rightNode);
     }
 
     /// @notice Rebuild a previously optimized right spine back into exact aggregate branches.
@@ -1298,11 +1342,11 @@ contract DeepstateV1 is Ownable {
     function _materializeRightSpine(Book storage book, bytes32 node, bool isBid) private returns (bytes32) {
         if (node == bytes32(0)) return bytes32(0);
 
-        bytes32 leftNode = book.tree[node].leftNode;
+        bytes32 leftNode = book.tree[_branchKey(node)].leftNode;
         if (leftNode == bytes32(0)) return node;
 
-        bytes32 rightNode = _materializeRightSpine(book, book.tree[node].rightNode, isBid);
-        return _replaceBranch(book, leftNode, rightNode, isBid);
+        bytes32 rightNode = _materializeRightSpine(book, book.tree[_branchKey(node)].rightNode, isBid);
+        return _replaceBranch(book, node, leftNode, rightNode, isBid);
     }
 
     /// @notice Return the aggregate quantity for a fully crossing same-price subtree on the global right spine.
@@ -1354,14 +1398,14 @@ contract DeepstateV1 is Ownable {
         view
         returns (bool uniform, int32 tick, uint160 quantity, uint256 quoteAmount, bytes32 rightmostOrder)
     {
-        bytes32 leftNode = book.tree[node].leftNode;
+        bytes32 leftNode = book.tree[_branchKey(node)].leftNode;
         if (leftNode == bytes32(0)) {
             quantity = _quantity(node);
             return (true, _price(node), quantity, _quoteValue(_price(node), quantity, isBid), node);
         }
 
-        bytes32 rightNode = book.tree[node].rightNode;
-        bool leftUniform = book.tree[leftNode].leftNode == bytes32(0) || _correctionCode(leftNode) != 0;
+        bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
+        bool leftUniform = book.tree[_branchKey(leftNode)].leftNode == bytes32(0) || _correctionCode(leftNode) != 0;
         if (!leftUniform) return (false, 0, 0, 0, 0);
 
         (bool rightUniform, int32 rightTick, uint160 rightQuantity, uint256 rightQuote, bytes32 rightmostLeaf) =
@@ -1386,10 +1430,15 @@ contract DeepstateV1 is Ownable {
     /// for honest state because nonce assignment is unique; if corruption makes them equal, this
     /// reverts before overwriting ownership or branch data.
     /// Callers pass nonzero children; empty-subtree cases are handled before this helper is reached.
-    function _storeBranch(Book storage book, bytes32 a, bytes32 b, uint64 aKey, uint64 bKey, bool isBid)
-        private
-        returns (bytes32 branchNode)
-    {
+    function _storeBranch(
+        Book storage book,
+        bytes32 a,
+        bytes32 b,
+        uint64 aKey,
+        uint64 bKey,
+        bool isBid,
+        uint32 branchNonce
+    ) private returns (bytes32 branchNode) {
         uint8 branchDepth = _commonPrefix(aKey, bKey);
         if (branchDepth == 64) revert DuplicateOrder();
 
@@ -1400,70 +1449,69 @@ contract DeepstateV1 is Ownable {
             rightNode = a;
         }
 
-        branchNode = _branchNodeForChildren(book, a, b, isBid);
+        branchNode = _branchNodeForChildren(book, leftNode, rightNode, isBid, branchNonce);
         // Walkers use leftNode as the branch sentinel, so stored branches are always two-child.
-        book.tree[branchNode] = Branch({leftNode: leftNode, rightNode: rightNode});
+        _setBranchChildren(book, branchNode, leftNode, rightNode);
     }
 
-    /// @notice Compute the self-addressed branch node for two children.
+    /// @notice Compute a branch summary for two children while preserving its stable identity.
     /// @param a First child.
     /// @param b Second child.
-    /// @return Branch node whose quantity is the child sum and path is the maximum child path key.
-    /// @dev Uses the raw price/nonce path, not the bid/ask sort key, so bid and ask branches with
-    /// different economic meaning can still coexist in the same mapping as long as their resulting
-    /// `bytes32` branch keys differ. Tests assert that live bid/ask branches do not share storage.
-    function _branchNodeForChildren(Book storage book, bytes32 a, bytes32 b, bool isBid)
+    /// @param branchNonce Stable identity allocated exclusively to this branch.
+    /// @return Branch node whose quantity is the child sum and whose nonce is stable across rewrites.
+    function _branchNodeForChildren(Book storage book, bytes32 a, bytes32 b, bool isBid, uint32 branchNonce)
         private
         view
         returns (bytes32)
     {
-        uint64 aAddressKey = _pathKey(a);
-        uint64 bAddressKey = _pathKey(b);
-        uint64 boundaryKey = aAddressKey > bAddressKey ? aAddressKey : bAddressKey;
         uint160 quantity = _quantity(a) + _quantity(b);
+        int32 tick = _price(_leftmostLeaf(book, a));
         uint32 correctionCode = 0;
 
         if (_price(a) == _price(b) && _uniformNode(book, a) && _uniformNode(book, b)) {
-            int32 tick = _price(a);
+            tick = _price(a);
             (uint256 factor, uint16 shift) = TickMath32.getPriceFactorAtTick(tick);
             uint256 childQuote = _uniformNodeQuoteAtFactor(book, a, isBid, factor, shift)
                 + _uniformNodeQuoteAtFactor(book, b, isBid, factor, shift);
             uint256 aggregateQuote = _quoteAtFactor(factor, shift, quantity, isBid);
             uint256 correction = isBid ? childQuote - aggregateQuote : aggregateQuote - childQuote;
-            // A correction is at most liveLeafCount - 1. The decrementing nonce admits at most
-            // 2^32 - 2 resting leaves, so correction + 1 is strictly representable in uint32.
+            // A correction is at most liveLeafCount - 1. The shared node-identity namespace admits
+            // fewer than 2^32 live nodes, so correction + 1 is strictly representable in uint32.
             // forge-lint: disable-next-line(unsafe-typecast)
             correctionCode = uint32(correction + 1);
         }
 
-        return _branchNode(boundaryKey, quantity, correctionCode);
+        return _branchNode(tick, quantity, correctionCode, branchNonce);
     }
 
-    /// @notice Pack a branch node from a raw path key and aggregate quantity.
-    /// @param key Raw `price || nonce` path key used as the branch address suffix.
+    /// @notice Pack a branch node from aggregate metadata and its stable identity.
+    /// @param tick Representative tick, or the exact tick for a uniform branch.
     /// @param quantity Aggregate quantity represented by the branch.
     /// @return node Packed branch node.
-    function _branchNode(uint64 key, uint160 quantity, uint32 correctionCode) private pure returns (bytes32 node) {
+    function _branchNode(int32 tick, uint160 quantity, uint32 correctionCode, uint32 branchNonce)
+        private
+        pure
+        returns (bytes32 node)
+    {
         /// @solidity memory-safe-assembly
         assembly {
-            let rawTick := xor(shr(32, key), 0x80000000)
             node := or(
-                or(shl(_PRICE_SHIFT, rawTick), shl(_QUANTITY_SHIFT, quantity)),
-                or(shl(_CORRECTION_SHIFT, correctionCode), and(key, 0xffffffff))
+                or(shl(_PRICE_SHIFT, and(tick, 0xffffffff)), shl(_QUANTITY_SHIFT, quantity)),
+                or(shl(_CORRECTION_SHIFT, correctionCode), branchNonce)
             )
         }
     }
 
     /// @notice Return whether a node represents one tick exactly.
     function _uniformNode(Book storage book, bytes32 node) private view returns (bool) {
-        return book.tree[node].leftNode == bytes32(0) || _correctionCode(node) != 0;
+        return book.tree[_branchKey(node)].leftNode == bytes32(0) || _correctionCode(node) != 0;
     }
 
     /// @notice Return the exact sum of leaf-level rounded notionals for a uniform-tick node.
     function _uniformNodeQuote(Book storage book, bytes32 node, bool isBid) private view returns (uint256 quoteAmount) {
         uint160 quantity = _quantity(node);
         quoteAmount = _quoteValue(_price(node), quantity, isBid);
-        if (book.tree[node].leftNode == bytes32(0)) return quoteAmount;
+        if (book.tree[_branchKey(node)].leftNode == bytes32(0)) return quoteAmount;
 
         return _applyUniformCorrection(node, quoteAmount, isBid);
     }
@@ -1487,14 +1535,14 @@ contract DeepstateV1 is Ownable {
         returns (uint256 quoteAmount)
     {
         quoteAmount = _quoteAtFactor(factor, shift, _quantity(node), isBid);
-        if (book.tree[node].leftNode == bytes32(0)) return quoteAmount;
+        if (book.tree[_branchKey(node)].leftNode == bytes32(0)) return quoteAmount;
 
         uint256 correction = uint256(_correctionCode(node)) - 1;
         quoteAmount = isBid ? quoteAmount + correction : quoteAmount - correction;
     }
 
     /// @dev Load a branch's right child and retain its mapping slot so the left child can be read
-    /// later without hashing `tree[node]` a second time.
+    /// later without hashing the nonce-addressed child slot a second time.
     function _rightNodeAndBranchSlot(Book storage book, bytes32 node)
         private
         view
@@ -1502,7 +1550,7 @@ contract DeepstateV1 is Ownable {
     {
         /// @solidity memory-safe-assembly
         assembly {
-            mstore(0, node)
+            mstore(0, and(node, 0xffffffff))
             mstore(0x20, add(book.slot, 1))
             branchSlot := keccak256(0, 0x40)
             rightNode := sload(add(branchSlot, 1))
@@ -1525,12 +1573,14 @@ contract DeepstateV1 is Ownable {
     /// highest ask price because ask sort keys invert price. In both cases this is the "worst"
     /// price that must cross before an entire subtree can be aggregate-consumed.
     function _leftmostLeafPrice(Book storage book, bytes32 node) private view returns (int32 price) {
+        price = _price(_leftmostLeaf(book, node));
+    }
+
+    /// @dev Return any stable routing representative from a subtree without using branch identity.
+    function _leftmostLeaf(Book storage book, bytes32 node) private view returns (bytes32 leaf) {
         while (true) {
-            bytes32 leftNode = book.tree[node].leftNode;
-            if (leftNode == bytes32(0)) {
-                price = _price(node);
-                break;
-            }
+            bytes32 leftNode = book.tree[_branchKey(node)].leftNode;
+            if (leftNode == bytes32(0)) return node;
             node = leftNode;
         }
     }
@@ -1541,7 +1591,7 @@ contract DeepstateV1 is Ownable {
     /// @dev The right child is always the better sort-key side for both bid and ask trees.
     function _rightmostLeaf(Book storage book, bytes32 node) private view returns (bytes32 leaf) {
         while (true) {
-            bytes32 rightNode = book.tree[node].rightNode;
+            bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
             if (rightNode == bytes32(0)) return node;
             node = rightNode;
         }
@@ -1571,7 +1621,7 @@ contract DeepstateV1 is Ownable {
     /// when a top removal leaves a branch root and the successor leaf is not encoded in that root.
     function _replacementTopNonce(Book storage book, bytes32 newNode) private view returns (uint32) {
         if (newNode == bytes32(0)) return 0;
-        if (book.tree[newNode].leftNode == bytes32(0)) return _nonce(newNode);
+        if (book.tree[_branchKey(newNode)].leftNode == bytes32(0)) return _nonce(newNode);
         return _nonce(_rightmostLeaf(book, newNode));
     }
 
@@ -1708,7 +1758,7 @@ contract DeepstateV1 is Ownable {
         returns (uint256 quoteAmount)
     {
         uint160 quantity = _quantity(node);
-        bytes32 leftNode = book.tree[node].leftNode;
+        bytes32 leftNode = book.tree[_branchKey(node)].leftNode;
         if (leftNode == bytes32(0)) {
             return _quoteValue(_price(node), quantity, restingIsBid);
         }
@@ -1717,7 +1767,7 @@ contract DeepstateV1 is Ownable {
             return _uniformNodeQuote(book, node, restingIsBid);
         }
 
-        quoteAmount = _subtreeQuote(book, book.tree[node].rightNode, restingIsBid);
+        quoteAmount = _subtreeQuote(book, book.tree[_branchKey(node)].rightNode, restingIsBid);
         unchecked {
             quoteAmount += _subtreeQuote(book, leftNode, restingIsBid);
         }
@@ -1747,16 +1797,14 @@ contract DeepstateV1 is Ownable {
         }
     }
 
-    /// @notice Build the raw address path key from a node.
-    /// @param order Packed node.
-    /// @return key Raw `price || nonce` key, ignoring quantity.
-    /// @dev Branch addresses use raw path keys for both sides of the book.
-    function _pathKey(bytes32 order) private pure returns (uint64 key) {
-        /// @solidity memory-safe-assembly
-        assembly {
-            let tickKey := xor(and(shr(_PRICE_SHIFT, order), 0xffffffff), 0x80000000)
-            key := or(shl(32, tickKey), and(order, 0xffffffff))
-        }
+    /// @dev Return a bid radix key represented by an actual descendant leaf.
+    function _bidNodeKey(Book storage book, bytes32 node) private view returns (uint64 key) {
+        key = _bidSortKey(_leftmostLeaf(book, node));
+    }
+
+    /// @dev Return an ask radix key represented by an actual descendant leaf.
+    function _askNodeKey(Book storage book, bytes32 node) private view returns (uint64 key) {
+        key = _askSortKey(_leftmostLeaf(book, node));
     }
 
     /// @notice Count matching leading bits between two 64-bit radix keys.
@@ -1810,6 +1858,15 @@ contract DeepstateV1 is Ownable {
     function _nextNonce(Book storage book) internal view returns (uint32) {
         // forge-lint: disable-next-line(unsafe-typecast)
         return uint32(book.nonceAndFlags & _NONCE_MASK);
+    }
+
+    /// @dev Return the next ascending branch identity encoded in a packed book word.
+    function _nextBranchNonce(uint256 nonceAndFlags) private pure returns (uint32 nonce) {
+        // A zero field is accepted for test harnesses and legacy-empty books; identity zero remains
+        // reserved for the root anchor, so allocation begins at one.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        nonce = uint32((nonceAndFlags & _BRANCH_NONCE_MASK) >> _BRANCH_NONCE_SHIFT);
+        if (nonce == 0) nonce = 1;
     }
 
     /// @notice Build the globally unique owner key for an order in a book.
@@ -2010,8 +2067,8 @@ contract DeepstateV1 is Ownable {
     {
         uint256 aggregateQuote = _quoteValue(_price(node), quantity, isBid);
         uint256 correction = isBid ? quoteAmount - aggregateQuote : aggregateQuote - quoteAmount;
-        // A correction is at most matchedLeafCount - 1. The decrementing nonce admits at most
-        // 2^32 - 2 resting leaves, so correction + 1 is strictly representable in uint32.
+        // A correction is at most matchedLeafCount - 1. The opposing order/branch allocation
+        // fronts admit at most 2^31 live leaves, so correction + 1 is representable in uint32.
         // forge-lint: disable-next-line(unsafe-typecast)
         updated = _withQuantityAndCorrection(node, quantity, uint32(correction + 1));
     }
@@ -2049,7 +2106,7 @@ contract DeepstateV1 is Ownable {
     /// @notice Pack price, quantity, and nonce into a node.
     /// @param price Signed 32-bit logarithmic tick.
     /// @param quantity 160-bit base quantity.
-    /// @param nonce 32-bit nonce or branch path suffix.
+    /// @param nonce Unique 32-bit order nonce.
     /// @return packed Packed `bytes32` node.
     function _pack(int32 price, uint160 quantity, uint32 nonce) private pure returns (bytes32 packed) {
         /// @solidity memory-safe-assembly
@@ -2068,9 +2125,9 @@ contract DeepstateV1 is Ownable {
         }
     }
 
-    /// @notice Extract the low 32-bit nonce/path suffix from a packed node.
+    /// @notice Extract the low 32-bit identity from a packed node.
     /// @param order Packed node.
-    /// @return 32-bit nonce or branch path suffix.
+    /// @return 32-bit order nonce or branch nonce.
     function _nonce(bytes32 order) private pure returns (uint32) {
         // forge-lint: disable-next-line(unsafe-typecast)
         return uint32(uint256(order));
@@ -2552,13 +2609,13 @@ contract DeepstateV1 is Ownable {
         bidRoot = root.rightNode;
     }
 
-    /// @notice Branch child pointers for a node in a book.
+    /// @notice Branch child pointers for a node in a book, addressed by the node nonce.
     /// @param id Book id.
     /// @param node Leaf or branch node.
     /// @return leftNode Stored left child, or zero if `node` is a leaf/empty.
     /// @return rightNode Stored right child, or zero if `node` is a leaf/empty.
     function tree(bytes32 id, bytes32 node) external view returns (bytes32 leftNode, bytes32 rightNode) {
-        Branch storage branch = books[id].tree[node];
+        Branch storage branch = books[id].tree[bytes32(uint256(_nonce(node)))];
         leftNode = branch.leftNode;
         rightNode = branch.rightNode;
     }
@@ -2596,9 +2653,9 @@ contract DeepstateV1 is Ownable {
         (limitPrice, remaining, baseFilled, quoteAmount) =
             _matchOrValidate(params, routedBookId, routedBook, routedNonceAndFlags);
 
-        // Rotation initializes the successor as soon as nonce two is assigned, so a nonce-one
-        // book is exhausted and historical under valid state transitions. It remains matchable,
-        // but unmatched quantity from it is automatically no-rest.
+        // Rotation initializes the successor as soon as the order- and branch-identity allocation
+        // fronts meet, so a nonce-one book is exhausted and historical under valid transitions. It
+        // remains matchable, but unmatched quantity from it is automatically no-rest.
         bool restAllowed = !params.noRest && routedNonce != 1;
 
         if (remaining != 0 && params.fillOrKill) revert FillOrKill();
@@ -2811,7 +2868,7 @@ contract DeepstateV1 is Ownable {
 
         uint256 bookHookFlags = 0;
         if (poolState & _POOL_HOOK_ACTIVE_MASK != 0) bookHookFlags = _bookHookFlags(poolState);
-        nonceAndFlags = uint256(type(uint32).max) | bookHookFlags;
+        nonceAndFlags = uint256(type(uint32).max) | (uint256(1) << _BRANCH_NONCE_SHIFT) | bookHookFlags;
         emit BookInitialized(pid, routedBookId, epoch);
     }
 
@@ -2819,10 +2876,11 @@ contract DeepstateV1 is Ownable {
     /// @param token0 Lower token address.
     /// @param token1 Higher token address.
     /// @dev
-    /// The order that receives nonce `2` leaves `nextNonce == 1`; that exhausted book remains
-    /// matchable and cancelable, but later fills against it are automatically no-rest. A caller must
-    /// route a separate leg to the next active epoch to create maker liquidity. Hook flags are
-    /// removed from the old book and copied into the newly initialized book.
+    /// When the descending order front and ascending branch front would meet, `_restBook` stores
+    /// `nextNonce == 1`; that exhausted book remains matchable and cancelable, but later fills
+    /// against it are automatically no-rest. A caller must route a separate leg to the next active
+    /// epoch to create maker liquidity. Hook flags are removed from the old book and copied into the
+    /// newly initialized book.
     function _rotateIfExhausted(address token0, address token1) private {
         bytes32 pid = poolId(token0, token1);
         uint256 poolState = _poolEpochAndHookFlags[pid];
@@ -2929,7 +2987,7 @@ contract DeepstateV1 is Ownable {
     /// @notice Initialize a new book with nonce max and inherited hook flags.
     function _initializeBookWithHookFlags(Book storage book, uint256 flags) private {
         if (_nextNonce(book) != 0) return;
-        book.nonceAndFlags = uint256(type(uint32).max) | flags;
+        book.nonceAndFlags = uint256(type(uint32).max) | (uint256(1) << _BRANCH_NONCE_SHIFT) | flags;
     }
 
     /// @notice Require canonical sorted token addresses; `address(0)` is native ETH and can only be token0.

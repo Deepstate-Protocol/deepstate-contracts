@@ -99,6 +99,65 @@ contract DeepstateV1Test is Test {
         assertEq(token1.balanceOf(address(engine)), _quoteValue(10, 5, true));
     }
 
+    function test_BranchNoncesAreUniqueAndDoNotAliasOrderLeaves() public {
+        bytes32[4] memory orders;
+        for (uint256 i; i < orders.length; ++i) {
+            vm.prank(alice);
+            orders[i] = engine.fill(_fill(0, _order(10, 10, 0), false, false, false));
+            assertEq(uint32(uint256(orders[i])), MAX_ORDER_NONCE - uint32(i), "order nonce sequence");
+        }
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        (bytes32 root,) = engine.roots(address(token0), address(token1), 0);
+        (bytes32 leftBranch, bytes32 rightBranch) = engine.tree(id, root);
+
+        assertTrue(uint32(uint256(root)) < 4, "root branch identity not separately allocated");
+        assertTrue(uint32(uint256(leftBranch)) < 4, "left branch identity not separately allocated");
+        assertTrue(uint32(uint256(rightBranch)) < 4, "right branch identity not separately allocated");
+        assertTrue(uint32(uint256(root)) != uint32(uint256(leftBranch)), "root/left branch nonce collision");
+        assertTrue(uint32(uint256(root)) != uint32(uint256(rightBranch)), "root/right branch nonce collision");
+        assertTrue(uint32(uint256(leftBranch)) != uint32(uint256(rightBranch)), "left/right branch nonce collision");
+
+        for (uint256 i; i < orders.length; ++i) {
+            (bytes32 leafLeft, bytes32 leafRight) = engine.tree(id, orders[i]);
+            assertEq(leafLeft, bytes32(0), "order leaf aliased branch children");
+            assertEq(leafRight, bytes32(0), "order leaf aliased branch children");
+        }
+    }
+
+    function test_PartialFillReusesBranchNonceAndChildSlot() public {
+        for (uint256 i; i < 4; ++i) {
+            vm.prank(alice);
+            engine.fill(_fill(0, _order(10, 10, 0), false, false, false));
+        }
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        (bytes32 oldRoot,) = engine.roots(address(token0), address(token1), 0);
+        (bytes32 oldLeftBranch, bytes32 oldRightBranch) = engine.tree(id, oldRoot);
+        assertTrue(oldLeftBranch != bytes32(0) && oldRightBranch != bytes32(0), "expected balanced branch");
+
+        (bytes32 oldLeftChild, bytes32 oldRightChild) = engine.tree(id, oldLeftBranch);
+
+        // Consume the two best leaves and half of the next one. The former left subtree survives
+        // with a different aggregate quantity and is promoted to the root.
+        vm.prank(bob);
+        engine.fill(_fill(0, _order(10, 25, 0), true, true, false));
+
+        (bytes32 newRoot,) = engine.roots(address(token0), address(token1), 0);
+        assertTrue(newRoot != oldLeftBranch, "aggregate word should change");
+        assertEq(uint32(uint256(newRoot)), uint32(uint256(oldLeftBranch)), "branch identity changed");
+        assertEq(uint160(uint256(newRoot) >> 64), 15, "surviving aggregate quantity");
+
+        (bytes32 newLeftChild, bytes32 newRightChild) = engine.tree(id, newRoot);
+        assertEq(newLeftChild, oldLeftChild, "unchanged child moved");
+        assertTrue(newRightChild != oldRightChild, "partially filled child was not rewritten");
+
+        // The old packed branch word resolves through the same nonce-addressed mapping slot.
+        (bytes32 oldKeyLeft, bytes32 oldKeyRight) = engine.tree(id, oldLeftBranch);
+        assertEq(oldKeyLeft, newLeftChild);
+        assertEq(oldKeyRight, newRightChild);
+    }
+
     function test_InvalidTokenAndHookConfigBranches() public {
         vm.expectRevert(bytes4(keccak256("InvalidToken()")));
         engine.activeBookId(address(token1), address(token0));

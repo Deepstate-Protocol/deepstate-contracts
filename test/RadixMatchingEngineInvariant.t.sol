@@ -1418,14 +1418,16 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         stats.uniform = leftStats.uniform && rightStats.uniform && stats.leftmostPrice == stats.rightmostPrice;
         stats.exists = true;
         if (!rightmost) {
-            assertEq(
-                node,
-                _branchNodeForChildren(leftNode, rightNode, isBidTree, stats.quoteAmount, stats.uniform),
-                "branch address"
-            );
             assertEq(_quantity(node), stats.quantity, "branch quantity");
-            assertEq(_pathKey(node), stats.maxPathKey, "branch max path");
             assertGt(_quantity(node), stats.maxPathLeafQuantity, "branch quantity over max leaf");
+            assertEq(_price(node), leftStats.leftmostPrice, "branch representative price");
+            if (stats.uniform) {
+                uint256 aggregateQuote = _quoteValue(_price(node), stats.quantity, isBidTree);
+                uint256 correction = isBidTree ? stats.quoteAmount - aggregateQuote : aggregateQuote - stats.quoteAmount;
+                assertEq(_correctionCode(node), correction + 1, "branch correction");
+            } else {
+                assertEq(_correctionCode(node), 0, "mixed branch correction");
+            }
             _assertStoredNodeKeyRepresentsSubtree(node, stats, isBidTree);
         }
         _assertSubtreePricePriority(stats, isBidTree);
@@ -1489,7 +1491,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         SubtreeStats memory leftStats,
         SubtreeStats memory rightStats,
         bool isBidTree
-    ) private pure {
+    ) private view {
         uint8 storedBranchDepth = _commonPrefix(
             _storedNodeKey(leftNode, isBidTree), _storedNodeKey(rightNode, isBidTree)
         );
@@ -1498,7 +1500,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
     function _assertStoredNodeKeyRepresentsSubtree(bytes32 node, SubtreeStats memory stats, bool isBidTree)
         private
-        pure
+        view
     {
         uint64 storedKey = _storedNodeKey(node, isBidTree);
         assertGe(storedKey, stats.minKey, "node key below subtree");
@@ -1552,7 +1554,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     function _assertBranchAbsentFromSubtree(bytes32 targetBranch, bytes32 node) private view {
         if (node == bytes32(0) || !_isBranch(node)) return;
 
-        assertTrue(targetBranch != node, "shared branch");
+        assertTrue(_nonce(targetBranch) != _nonce(node), "shared branch identity");
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
         _assertBranchAbsentFromSubtree(targetBranch, leftNode);
         _assertBranchAbsentFromSubtree(targetBranch, rightNode);
@@ -1566,7 +1568,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         if (node == bytes32(0)) return seenCount;
 
         for (uint256 i; i < seenCount; ++i) {
-            assertTrue(seenNodes[i] != node, "duplicate live node");
+            assertTrue(_nonce(seenNodes[i]) != _nonce(node), "duplicate live node identity");
         }
         assertLt(seenCount, seenNodes.length, "seen node capacity");
         seenNodes[seenCount++] = node;
@@ -1591,31 +1593,11 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
     function _assertOwnedLiveBranchesBackedByPartialOrders(bytes32 node, bool isBidTree) private view {
         if (node == bytes32(0) || !_isBranch(node)) return;
 
-        address owner = engine.ownerOfOrder(node);
-        if (owner != address(0)) _assertOwnedBranchBackedByPartialOrder(node, owner, isBidTree);
+        assertEq(engine.ownerOfOrder(node), address(0), "branch aliases owned order");
 
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
         _assertOwnedLiveBranchesBackedByPartialOrders(leftNode, isBidTree);
         _assertOwnedLiveBranchesBackedByPartialOrders(rightNode, isBidTree);
-    }
-
-    function _assertOwnedBranchBackedByPartialOrder(bytes32 branchNode, address owner, bool isBidTree) private view {
-        uint256 matches;
-        uint256 length = handler.orderCount();
-
-        for (uint256 i; i < length; ++i) {
-            (bytes32 order, address trackedOwner, bool trackedIsBid, bool active) = handler.orderAt(i);
-            if (order != branchNode) continue;
-
-            assertTrue(active, "owned branch inactive order");
-            assertEq(trackedOwner, owner, "owned branch owner");
-            assertEq(trackedIsBid, isBidTree, "owned branch side");
-            assertGt(handler.remainingQuantityAt(i), 0, "owned branch filled order");
-            assertLt(handler.remainingQuantityAt(i), _quantity(order), "owned branch unfilled order");
-            ++matches;
-        }
-
-        assertEq(matches, 1, "owned branch backing");
     }
 
     function _containsBranchByContractRouting(bytes32 root, bytes32 target, bool isBidTree)
@@ -1732,8 +1714,8 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
             (bytes32 leftNode, bytes32 rightNode) = engine.tree(root);
             if (leftNode == bytes32(0)) return _sortKey(root, isBidTree) == targetKey ? root : bytes32(0);
 
-            uint64 leftKey = _sortKey(leftNode, isBidTree);
-            uint8 branchDepth = _commonPrefix(leftKey, _sortKey(rightNode, isBidTree));
+            uint64 leftKey = _nodeKey(leftNode, isBidTree);
+            uint8 branchDepth = _commonPrefix(leftKey, _nodeKey(rightNode, isBidTree));
             if (_commonPrefix(targetKey, leftKey) < branchDepth) return bytes32(0);
 
             root = _bit(targetKey, branchDepth) ? rightNode : leftNode;
@@ -1758,42 +1740,8 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         return _nodeKey(leftNode != bytes32(0) ? leftNode : rightNode, isBidTree);
     }
 
-    function _storedNodeKey(bytes32 node, bool isBidTree) private pure returns (uint64) {
-        return _sortKey(node, isBidTree);
-    }
-
-    function _branchNodeForChildren(
-        bytes32 leftNode,
-        bytes32 rightNode,
-        bool isBidTree,
-        uint256 childQuoteAmount,
-        bool uniform
-    ) private pure returns (bytes32) {
-        uint64 leftAddressKey = _nodeAddressKey(leftNode);
-        uint64 rightAddressKey = _nodeAddressKey(rightNode);
-        assertTrue(leftAddressKey != rightAddressKey, "branch address key");
-
-        uint160 quantity = _quantity(leftNode) + _quantity(rightNode);
-        uint64 prefix = leftAddressKey > rightAddressKey ? leftAddressKey : rightAddressKey;
-        // forge-lint: disable-next-line(unsafe-typecast)
-        int32 prefixPrice = int32(uint32(prefix >> 32) ^ 0x80000000);
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint32 prefixNonce = uint32(prefix);
-        uint32 correctionCode;
-        if (uniform) {
-            uint256 aggregateQuote = _quoteValue(prefixPrice, quantity, isBidTree);
-            uint256 correction = isBidTree ? childQuoteAmount - aggregateQuote : aggregateQuote - childQuoteAmount;
-            assertLt(correction, type(uint32).max, "branch correction");
-            correctionCode = uint32(correction + 1);
-        }
-        return bytes32(
-            (uint256(uint32(prefixPrice)) << _PRICE_SHIFT) | (uint256(quantity) << _QUANTITY_SHIFT)
-                | (uint256(correctionCode) << 32) | uint256(prefixNonce)
-        );
-    }
-
-    function _nodeAddressKey(bytes32 node) private pure returns (uint64) {
-        return _pathKey(node);
+    function _storedNodeKey(bytes32 node, bool isBidTree) private view returns (uint64) {
+        return _nodeKey(node, isBidTree);
     }
 
     function _sortKey(bytes32 order, bool isBidTree) private pure returns (uint64) {
@@ -1818,6 +1766,11 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
     function _pathKey(bytes32 order) private pure returns (uint64) {
         return (uint64(uint32(_price(order)) ^ 0x80000000) << 32) | uint64(_nonce(order));
+    }
+
+    function _correctionCode(bytes32 node) private pure returns (uint32) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint32(uint256(node) >> 32);
     }
 
     function _commonPrefix(uint64 a, uint64 b) private pure returns (uint8 prefixLength) {

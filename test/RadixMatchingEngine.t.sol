@@ -127,6 +127,7 @@ contract ReentrantTransferFromERC20 is TestERC20 {
 
 contract RadixMatchingEngineTest is Test {
     uint32 internal constant MAX_ORDER_NONCE = type(uint32).max;
+    uint256 internal constant BRANCH_NONCE_SHIFT = 64;
     uint256 internal constant BID_RIGHT_SPINE_DIRTY = uint256(1) << 32;
     uint256 internal constant ASK_RIGHT_SPINE_DIRTY = uint256(1) << 33;
 
@@ -1641,7 +1642,8 @@ contract RadixMatchingEngineTest is Test {
         bytes32 finalSplit = _branchFor(firstBid, secondBid, true);
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(finalSplit);
 
-        assertEq(_pathKey(finalSplit), _pathKey(firstBid));
+        assertEq(_nonce(finalSplit), 1);
+        assertTrue(_nonce(finalSplit) != _nonce(firstBid));
         assertEq(_quantity(finalSplit), _quantity(firstBid) + _quantity(secondBid));
         assertEq(leftNode, secondBid);
         assertEq(rightNode, firstBid);
@@ -1665,7 +1667,8 @@ contract RadixMatchingEngineTest is Test {
         bytes32 finalSplit = _branchFor(firstAsk, secondAsk, false);
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(finalSplit);
 
-        assertEq(_pathKey(finalSplit), _pathKey(firstAsk));
+        assertEq(_nonce(finalSplit), 1);
+        assertTrue(_nonce(finalSplit) != _nonce(firstAsk));
         assertEq(_quantity(finalSplit), _quantity(firstAsk) + _quantity(secondAsk));
         assertEq(leftNode, secondAsk);
         assertEq(rightNode, firstAsk);
@@ -1686,7 +1689,8 @@ contract RadixMatchingEngineTest is Test {
         bytes32 reusedChild = _branchFor(firstBid, thirdBid, true);
         bytes32 newRoot = _branchFor(secondBid, reusedChild, true);
 
-        assertEq(reusedChild, oldRoot);
+        assertTrue(_nonce(reusedChild) != _nonce(oldRoot));
+        assertEq(_nonce(newRoot), _nonce(oldRoot));
         assertEq(engine.bidRoot(), newRoot);
 
         (bytes32 rootLeft, bytes32 rootRight) = engine.tree(newRoot);
@@ -1715,7 +1719,8 @@ contract RadixMatchingEngineTest is Test {
         (bytes32 expectedRootLeft, bytes32 expectedRootRight) = _expectedBranchChildren(secondAsk, reusedChild, false);
         (bytes32 expectedChildLeft, bytes32 expectedChildRight) = _expectedBranchChildren(firstAsk, thirdAsk, false);
 
-        assertEq(reusedChild, oldRoot);
+        assertTrue(_nonce(reusedChild) != _nonce(oldRoot));
+        assertEq(_nonce(newRoot), _nonce(oldRoot));
         assertEq(engine.askRoot(), newRoot);
 
         (bytes32 rootLeft, bytes32 rootRight) = engine.tree(newRoot);
@@ -1786,19 +1791,16 @@ contract RadixMatchingEngineTest is Test {
     function test_FullDepthBidNonceCombFullyMatchesAndClaims() public {
         uint256 orderCount = 65;
         uint160 matchQuantity = 65;
-        uint64 targetKey = type(uint64).max;
         (bytes32[] memory orders, uint256 quoteTotal) = _buildFullDepthBidNonceComb();
 
         bytes32 node = engine.bidRoot();
         for (uint256 depth; depth < 64; ++depth) {
             (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
-            uint64 siblingKey = targetKey ^ uint64(uint256(1) << (63 - depth));
-
             assertTrue(leftNode != bytes32(0));
             assertTrue(rightNode != bytes32(0));
-            assertEq(_commonPrefix(_pathKey(leftNode), _pathKey(rightNode)), depth);
-            assertEq(_pathKey(leftNode), siblingKey);
-            assertEq(_pathKey(rightNode), targetKey);
+            assertEq(_commonPrefix(_nodeKey(leftNode, true), _nodeKey(rightNode, true)), depth);
+            assertEq(leftNode, orders[depth + 1]);
+            assertEq(_rightmostLeaf(rightNode), orders[0]);
             // casting to uint160 is safe because the synthetic comb has 65 orders.
             // forge-lint: disable-next-line(unsafe-typecast)
             assertEq(_quantity(rightNode), uint160(orderCount - depth - 1));
@@ -1861,7 +1863,7 @@ contract RadixMatchingEngineTest is Test {
 
             assertTrue(leftNode != bytes32(0));
             assertTrue(rightNode != bytes32(0));
-            assertEq(_commonPrefix(_askSortKey(leftNode), _askSortKey(rightNode)), depth);
+            assertEq(_commonPrefix(_nodeKey(leftNode, false), _nodeKey(rightNode, false)), depth);
 
             node = rightNode;
         }
@@ -2493,7 +2495,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_subtreeQuantity(engine.askRoot()), 4);
 
         bytes32 dirtyAggregate =
-            bytes32(uint256(_order(price, 4, _nonce(firstAsk))) | (uint256(_correctionCode(aggregate)) << 32));
+            bytes32(uint256(_order(price, 4, _nonce(aggregate))) | (uint256(_correctionCode(aggregate)) << 32));
         vm.expectEmit(false, false, false, true, address(engine));
         emit AskMatched(
             _bookId(),
@@ -2537,7 +2539,7 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_subtreeQuantity(engine.bidRoot()), 4);
 
         bytes32 dirtyAggregate =
-            bytes32(uint256(_order(price, 4, _nonce(firstBid))) | (uint256(_correctionCode(aggregate)) << 32));
+            bytes32(uint256(_order(price, 4, _nonce(aggregate))) | (uint256(_correctionCode(aggregate)) << 32));
         vm.expectEmit(false, false, false, true, address(engine));
         emit BidMatched(
             _bookId(),
@@ -2580,7 +2582,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_quantity(engine.askRoot()), 5);
         assertEq(_subtreeQuantity(engine.askRoot()), 4);
         assertEq(
-            uint256(vm.load(address(engine), _nextNonceSlot())), (uint256(MAX_ORDER_NONCE) - 2) | ASK_RIGHT_SPINE_DIRTY
+            uint256(vm.load(address(engine), _nextNonceSlot())),
+            (uint256(2) << BRANCH_NONCE_SHIFT) | (uint256(MAX_ORDER_NONCE) - 2) | ASK_RIGHT_SPINE_DIRTY
         );
 
         _expectAskMatches(
@@ -2626,7 +2629,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_quantity(engine.bidRoot()), 5);
         assertEq(_subtreeQuantity(engine.bidRoot()), 4);
         assertEq(
-            uint256(vm.load(address(engine), _nextNonceSlot())), (uint256(MAX_ORDER_NONCE) - 2) | BID_RIGHT_SPINE_DIRTY
+            uint256(vm.load(address(engine), _nextNonceSlot())),
+            (uint256(2) << BRANCH_NONCE_SHIFT) | (uint256(MAX_ORDER_NONCE) - 2) | BID_RIGHT_SPINE_DIRTY
         );
 
         _expectBidMatches(
@@ -2677,13 +2681,15 @@ contract RadixMatchingEngineTest is Test {
         assertEq(base.balanceOf(address(engine)), 0);
     }
 
-    function test_CorruptedRightSpineBranchNodeAliasRecomputesBranch() public {
+    function test_StableBranchIdentityCannotAliasPartiallyFilledLeaf() public {
         int32 price = 50;
         bytes32 leftAsk = _order(price, 2, MAX_ORDER_NONCE - 1);
         bytes32 rightAsk = _order(price, 5, MAX_ORDER_NONCE);
-        bytes32 root = _order(price, 4, MAX_ORDER_NONCE);
+        bytes32 root = _order(price, 4, 1);
 
-        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
+        vm.store(
+            address(engine), _nextNonceSlot(), bytes32((uint256(2) << BRANCH_NONCE_SHIFT) | uint256(MAX_ORDER_NONCE))
+        );
         _storeTreeBranch(root, leftAsk, rightAsk);
         vm.store(address(engine), _askRootSlot(), root);
         base.mint(address(engine), 1);
@@ -2691,10 +2697,11 @@ contract RadixMatchingEngineTest is Test {
         vm.prank(carol);
         bytes32 restingBid = engine.fill(_order(price, 1, 0), true);
 
-        bytes32 expectedRoot = _branchFor(leftAsk, root, false);
+        bytes32 reducedRightAsk = _order(price, 4, _nonce(rightAsk));
         assertEq(restingBid, bytes32(0));
-        assertEq(engine.askRoot(), expectedRoot);
-        _assertTreeBranchStorage(expectedRoot, leftAsk, root, "alias-recomputed");
+        assertEq(engine.askRoot(), root);
+        _assertTreeBranchStorage(root, leftAsk, reducedRightAsk, "stable-identity");
+        assertEq(_subtreeQuantity(root), 6);
         assertEq(base.balanceOf(carol), 1_000_001);
         assertEq(quote.balanceOf(address(engine)), _quoteValue(price, 1, false));
     }
@@ -2740,7 +2747,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_subtreeQuantity(engine.askRoot()), 4);
         assertEq(uint256(engine.nextNonce()), uint256(MAX_ORDER_NONCE) - 2);
         assertEq(
-            uint256(vm.load(address(engine), _nextNonceSlot())), (uint256(MAX_ORDER_NONCE) - 2) | ASK_RIGHT_SPINE_DIRTY
+            uint256(vm.load(address(engine), _nextNonceSlot())),
+            (uint256(2) << BRANCH_NONCE_SHIFT) | (uint256(MAX_ORDER_NONCE) - 2) | ASK_RIGHT_SPINE_DIRTY
         );
 
         vm.prank(alice);
@@ -2752,7 +2760,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_subtreeQuantity(engine.askRoot()), 4);
         assertEq(uint256(engine.nextNonce()), uint256(MAX_ORDER_NONCE) - 3);
         assertEq(
-            uint256(vm.load(address(engine), _nextNonceSlot())), (uint256(MAX_ORDER_NONCE) - 3) | ASK_RIGHT_SPINE_DIRTY
+            uint256(vm.load(address(engine), _nextNonceSlot())),
+            (uint256(2) << BRANCH_NONCE_SHIFT) | (uint256(MAX_ORDER_NONCE) - 3) | ASK_RIGHT_SPINE_DIRTY
         );
 
         vm.prank(carol);
@@ -2762,7 +2771,10 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_quantity(engine.askRoot()), 5);
         assertEq(_subtreeQuantity(engine.askRoot()), 5);
         assertEq(uint256(engine.nextNonce()), uint256(MAX_ORDER_NONCE) - 4);
-        assertEq(uint256(vm.load(address(engine), _nextNonceSlot())), uint256(MAX_ORDER_NONCE) - 4);
+        assertEq(
+            uint256(vm.load(address(engine), _nextNonceSlot())),
+            (uint256(3) << BRANCH_NONCE_SHIFT) | (uint256(MAX_ORDER_NONCE) - 4)
+        );
 
         vm.prank(alice);
         (uint256 firstBaseAmount, uint256 firstQuoteAmount) = engine.cancel(firstAsk);
@@ -2804,7 +2816,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_subtreeQuantity(engine.bidRoot()), 4);
         assertEq(uint256(engine.nextNonce()), uint256(MAX_ORDER_NONCE) - 2);
         assertEq(
-            uint256(vm.load(address(engine), _nextNonceSlot())), (uint256(MAX_ORDER_NONCE) - 2) | BID_RIGHT_SPINE_DIRTY
+            uint256(vm.load(address(engine), _nextNonceSlot())),
+            (uint256(2) << BRANCH_NONCE_SHIFT) | (uint256(MAX_ORDER_NONCE) - 2) | BID_RIGHT_SPINE_DIRTY
         );
 
         vm.prank(carol);
@@ -2816,7 +2829,8 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_subtreeQuantity(engine.bidRoot()), 4);
         assertEq(uint256(engine.nextNonce()), uint256(MAX_ORDER_NONCE) - 3);
         assertEq(
-            uint256(vm.load(address(engine), _nextNonceSlot())), (uint256(MAX_ORDER_NONCE) - 3) | BID_RIGHT_SPINE_DIRTY
+            uint256(vm.load(address(engine), _nextNonceSlot())),
+            (uint256(2) << BRANCH_NONCE_SHIFT) | (uint256(MAX_ORDER_NONCE) - 3) | BID_RIGHT_SPINE_DIRTY
         );
 
         vm.prank(alice);
@@ -2826,7 +2840,10 @@ contract RadixMatchingEngineTest is Test {
         assertEq(_quantity(engine.bidRoot()), 5);
         assertEq(_subtreeQuantity(engine.bidRoot()), 5);
         assertEq(uint256(engine.nextNonce()), uint256(MAX_ORDER_NONCE) - 4);
-        assertEq(uint256(vm.load(address(engine), _nextNonceSlot())), uint256(MAX_ORDER_NONCE) - 4);
+        assertEq(
+            uint256(vm.load(address(engine), _nextNonceSlot())),
+            (uint256(3) << BRANCH_NONCE_SHIFT) | (uint256(MAX_ORDER_NONCE) - 4)
+        );
 
         vm.prank(alice);
         (uint256 firstBaseAmount, uint256 firstQuoteAmount) = engine.cancel(firstBid);
@@ -3977,7 +3994,7 @@ contract RadixMatchingEngineTest is Test {
 
         quote.mint(alice, uint256(1) << 200);
 
-        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
+        _forceNextOrderNonce(MAX_ORDER_NONCE);
         vm.prank(alice);
         orders[0] = engine.fill(_order(type(int32).max, 1, 0), true);
 
@@ -3989,13 +4006,13 @@ contract RadixMatchingEngineTest is Test {
             // forge-lint: disable-next-line(unsafe-typecast)
             int32 price = int32(uint32(siblingKey >> 32) ^ 0x80000000);
             // forge-lint: disable-next-line(unsafe-typecast)
-            uint32 nonce = uint32(siblingKey);
+            uint32 nonce = depth < 32 ? MAX_ORDER_NONCE - uint32(depth) - 1 : uint32(siblingKey);
 
-            vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
+            _forceNextOrderNonce(nonce);
             vm.prank(alice);
             orders[depth + 1] = engine.fill(_order(price, 1, 0), true);
 
-            assertEq(_pathKey(orders[depth + 1]), siblingKey);
+            assertEq(_commonPrefix(_pathKey(orders[depth + 1]), targetKey), depth);
             quoteTotal += _quoteValue(price, 1, true);
         }
     }
@@ -4005,7 +4022,7 @@ contract RadixMatchingEngineTest is Test {
         uint64 targetSortKey = type(uint64).max;
         orders = new bytes32[](orderCount);
 
-        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
+        _forceNextOrderNonce(MAX_ORDER_NONCE);
         vm.prank(alice);
         orders[0] = engine.fill(_order(type(int32).min, 1, 0), false);
 
@@ -4016,13 +4033,13 @@ contract RadixMatchingEngineTest is Test {
             uint64 sortKey = targetSortKey ^ uint64(uint256(1) << (63 - depth));
             uint32 sortableTick = type(uint32).max - uint32(sortKey >> 32);
             int32 price = int32(sortableTick ^ 0x80000000);
-            uint32 nonce = uint32(sortKey);
+            uint32 nonce = depth < 32 ? MAX_ORDER_NONCE - uint32(depth) - 1 : uint32(sortKey);
 
-            vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(nonce)));
+            _forceNextOrderNonce(nonce);
             vm.prank(alice);
             orders[depth + 1] = engine.fill(_order(price, 1, 0), false);
 
-            assertEq(_askSortKey(orders[depth + 1]), sortKey);
+            assertEq(_commonPrefix(_askSortKey(orders[depth + 1]), targetSortKey), depth);
             quoteTotal += _quoteValue(price, 1, false);
         }
     }
@@ -4090,7 +4107,8 @@ contract RadixMatchingEngineTest is Test {
     }
 
     function _treeSlot(bytes32 node) internal view returns (bytes32) {
-        return keccak256(abi.encode(node, _treeMappingSlot()));
+        bytes32 key = node == bytes32(0) ? bytes32(0) : bytes32(uint256(_nonce(node)));
+        return keccak256(abi.encode(key, _treeMappingSlot()));
     }
 
     function _assertTreeBranchStorage(bytes32 branch, bytes32 leftNode, bytes32 rightNode, string memory label)
@@ -4114,11 +4132,11 @@ contract RadixMatchingEngineTest is Test {
 
     function _expectedBranchChildren(bytes32 a, bytes32 b, bool isBid)
         internal
-        pure
+        view
         returns (bytes32 left, bytes32 right)
     {
-        uint64 aKey = isBid ? _pathKey(a) : _askSortKey(a);
-        uint64 bKey = isBid ? _pathKey(b) : _askSortKey(b);
+        uint64 aKey = _nodeKey(a, isBid);
+        uint64 bKey = _nodeKey(b, isBid);
         uint8 branchDepth = _commonPrefix(aKey, bKey);
 
         left = a;
@@ -4141,15 +4159,24 @@ contract RadixMatchingEngineTest is Test {
         return _bookSlot();
     }
 
-    function _branchFor(bytes32 a, bytes32 b, bool isBid) internal view returns (bytes32 branch) {
-        uint64 aKey = _pathKey(a);
-        uint64 bKey = _pathKey(b);
-        uint64 boundaryKey = aKey > bKey ? aKey : bKey;
+    function _forceNextOrderNonce(uint32 nonce) internal {
+        bytes32 slot = _nextNonceSlot();
+        uint256 nonceAndFlags = uint256(vm.load(address(engine), slot));
+        vm.store(address(engine), slot, bytes32((nonceAndFlags & ~uint256(type(uint32).max)) | nonce));
+    }
 
-        int32 prefixPrice = int32(uint32(boundaryKey >> 32) ^ 0x80000000);
-        uint32 prefixNonce = uint32(boundaryKey);
+    function _branchFor(bytes32 a, bytes32 b, bool isBid) internal view returns (bytes32 branch) {
+        (bool found, bytes32 existing) = _findBranch(engine.askRoot(), a, b, 0);
+        if (!found) (found, existing) = _findBranch(engine.bidRoot(), a, b, 0);
+        if (found) return existing;
+
+        (bytes32 left,) = _expectedBranchChildren(a, b, isBid);
+        int32 prefixPrice = _price(_leftmostLeaf(left));
+        (bytes32 aLeft,) = engine.tree(a);
+        (bytes32 bLeft,) = engine.tree(b);
+        uint32 branchNonce = aLeft == bytes32(0) && bLeft == bytes32(0) ? 1 : 2;
         uint160 quantity = _quantity(a) + _quantity(b);
-        branch = _order(prefixPrice, quantity, prefixNonce);
+        branch = _order(prefixPrice, quantity, branchNonce);
 
         if (_price(a) == _price(b) && _uniformNode(a) && _uniformNode(b)) {
             uint256 childQuote = _uniformQuote(a, isBid) + _uniformQuote(b, isBid);
@@ -4157,6 +4184,37 @@ contract RadixMatchingEngineTest is Test {
             uint256 correction = isBid ? childQuote - aggregateQuote : aggregateQuote - childQuote;
             branch = bytes32(uint256(branch) | ((correction + 1) << 32));
         }
+    }
+
+    function _findBranch(bytes32 node, bytes32 a, bytes32 b, uint256 depth)
+        internal
+        view
+        returns (bool found, bytes32 branch)
+    {
+        if (node == bytes32(0) || depth > 64) return (false, bytes32(0));
+        (bytes32 left, bytes32 right) = engine.tree(node);
+        if (left == bytes32(0)) return (false, bytes32(0));
+        if ((left == a && right == b) || (left == b && right == a)) return (true, node);
+        if (left != node) {
+            (found, branch) = _findBranch(left, a, b, depth + 1);
+            if (found) return (found, branch);
+        }
+        if (right != node && right != left) return _findBranch(right, a, b, depth + 1);
+        return (false, bytes32(0));
+    }
+
+    function _leftmostLeaf(bytes32 node) internal view returns (bytes32 leaf) {
+        leaf = node;
+        for (uint256 depth; depth < 64; ++depth) {
+            (bytes32 left,) = engine.tree(leaf);
+            if (left == bytes32(0) || left == leaf) return leaf;
+            leaf = left;
+        }
+    }
+
+    function _nodeKey(bytes32 node, bool isBid) internal view returns (uint64) {
+        bytes32 leaf = _leftmostLeaf(node);
+        return isBid ? _pathKey(leaf) : _askSortKey(leaf);
     }
 
     function _uniformNode(bytes32 node) internal view returns (bool) {

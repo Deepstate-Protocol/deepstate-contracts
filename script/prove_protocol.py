@@ -76,6 +76,7 @@ def bind_model_to_source():
         "uint256 private constant _QUANTITY_SHIFT = 64;",
         "uint256 private constant _CORRECTION_SHIFT = 32;",
         "uint256 private constant _NONCE_MASK = type(uint32).max;",
+        "uint256 private constant _BRANCH_NONCE_SHIFT = 64;",
         "uint256 private constant _POOL_EPOCH_MASK = (uint256(1) << 254) - 1;",
         "uint256 private constant _FEE_DELTA_DOMAIN = uint256(1) << 255;",
         "uint256 private constant _INTEGRATOR_FEE_DELTA_DOMAIN = uint256(1) << 254;",
@@ -478,41 +479,38 @@ def prove_keys_and_radix(p):
             *assumptions,
         )
 
-    child_quantity = Int("child_quantity")
-    sibling_quantity = Int("sibling_quantity")
-    p.prove(
-        "R3.ancestor-quantity-distinguishes-address",
-        child_quantity + sibling_quantity > child_quantity,
-        child_quantity >= 1,
-        sibling_quantity >= 1,
-        child_quantity + sibling_quantity <= UINT160_MAX,
-    )
-    boundary_a = Int("branch_boundary_a")
-    boundary_b = Int("branch_boundary_b")
+    price_a = Int("branch_price_a")
+    price_b = Int("branch_price_b")
+    identity_a = Int("branch_identity_a")
+    identity_b = Int("branch_identity_b")
     quantity_a = Int("branch_quantity_a")
     quantity_b = Int("branch_quantity_b")
     correction_a = Int("branch_correction_a")
     correction_b = Int("branch_correction_b")
     packed_a = (
-        (boundary_a / (1 << 32)) * (1 << 224)
+        price_a * (1 << 224)
         + quantity_a * (1 << 64)
         + correction_a * (1 << 32)
-        + boundary_a % (1 << 32)
+        + identity_a
     )
     packed_b = (
-        (boundary_b / (1 << 32)) * (1 << 224)
+        price_b * (1 << 224)
         + quantity_b * (1 << 64)
         + correction_b * (1 << 32)
-        + boundary_b % (1 << 32)
+        + identity_b
     )
     p.prove(
-        "R3.disjoint-boundaries-distinguish-address",
+        "R3.distinct-identities-distinguish-packed-branches",
         packed_a != packed_b,
-        boundary_a >= 0,
-        boundary_a < (1 << 64),
-        boundary_b >= 0,
-        boundary_b < (1 << 64),
-        boundary_a != boundary_b,
+        price_a >= 0,
+        price_a <= UINT32_MAX,
+        price_b >= 0,
+        price_b <= UINT32_MAX,
+        identity_a >= 1,
+        identity_a <= UINT32_MAX,
+        identity_b >= 1,
+        identity_b <= UINT32_MAX,
+        identity_a != identity_b,
         quantity_a >= 1,
         quantity_a <= UINT160_MAX,
         quantity_b >= 1,
@@ -521,6 +519,27 @@ def prove_keys_and_radix(p):
         correction_a <= UINT32_MAX,
         correction_b >= 0,
         correction_b <= UINT32_MAX,
+    )
+
+    branch_index_a = Int("branch_index_a")
+    branch_index_b = Int("branch_index_b")
+    p.prove(
+        "R3.ascending-branch-identities-are-unique",
+        1 + branch_index_a != 1 + branch_index_b,
+        branch_index_a >= 0,
+        branch_index_b >= 0,
+        branch_index_a < UINT32_MAX,
+        branch_index_b < UINT32_MAX,
+        branch_index_a != branch_index_b,
+    )
+    order_index = Int("order_index")
+    branch_index = Int("branch_index")
+    p.prove(
+        "R3.allocation-fronts-keep-branch-and-order-identities-disjoint",
+        1 + branch_index != UINT32_MAX - order_index,
+        branch_index >= 0,
+        order_index >= 0,
+        1 + branch_index < UINT32_MAX - order_index,
     )
 
     old_aggregate = Int("dirty_old_aggregate")
@@ -555,7 +574,26 @@ def prove_nonce_epoch_and_namespaces(p):
         j <= UINT32_MAX - 2,
         i != j,
     )
-    p.prove("N2.exhaustion-after-two", 2 - 1 == 1)
+    p.prove(
+        "N2.assigned-branch-identity-unique",
+        1 + i != 1 + j,
+        i >= 0,
+        j >= 0,
+        i <= UINT32_MAX - 2,
+        j <= UINT32_MAX - 2,
+        i != j,
+    )
+    order_after = Int("next_order_after_rest")
+    branch_after = Int("next_branch_after_rest")
+    p.prove(
+        "N2.crossed-fronts-produce-exhausted-sentinel",
+        If(order_after <= branch_after, 1, order_after) == 1,
+        order_after >= 1,
+        order_after <= UINT32_MAX,
+        branch_after >= 1,
+        branch_after <= UINT32_MAX,
+        order_after <= branch_after,
+    )
 
     address_a = BitVec("address_a", 160)
     address_b = BitVec("address_b", 160)
