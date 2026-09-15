@@ -70,7 +70,8 @@ Consequently, fill partitioning cannot create or destroy quote units.
 
 For `n` same-tick leaves, the encoded correction reconstructs the exact sum of independently rounded
 leaf notionals from the rounded aggregate notional. Its magnitude is at most `n - 1`; since a book
-admits at most `2^32 - 2` leaves, `correction + 1` fits in `uint32`.
+admits at most `2^31` leaves before its order- and branch-identity allocation fronts meet,
+`correction + 1` fits in `uint32`.
 
 **Evidence:** `SMT` binary-merge and inductive-capacity lemmas, plus `BYTECODE` correction proofs.
 
@@ -136,14 +137,13 @@ right key. Recursive insertion and removal advance the split depth, so a key wal
 
 ### R3. Live-node address uniqueness
 
-Assume every live leaf has a unique nonce and every branch quantity sum is representable. Two
-disjoint branches have different maximum descendant path keys. An ancestor and descendant that
-share a maximum path have strictly different positive aggregate quantities. A branch and one of its
-live leaves likewise differ in quantity. Thus no two simultaneously live tree nodes share a
-`bytes32` mapping key. Original order ownership keys may equal historical branch words without
-aliasing because ownership is stored in `orderOf`, not `tree`.
+Order identities descend from `2^32 - 1`, while branch identities ascend from one. Every nonempty
+insertion consumes one fresh branch identity, and the book becomes non-restable before the fronts
+meet. Branches therefore cannot alias leaves, and two live branches cannot alias each other.
+Quantity and correction rewrites preserve the branch identity and continue addressing the same
+`tree[bytes32(branchNonce)]` slot; only topology creation consumes a new branch identity.
 
-**Evidence:** `SMT` local strict-sum lemmas and `INDUCTION` over the tree. Keccak-scoped ownership is
+**Evidence:** `SMT` allocation-front and radix-split lemmas and `INDUCTION` over the tree. Keccak-scoped ownership is
 covered separately by N1.
 
 ### R4. Aggregate quantity and quote correctness
@@ -188,9 +188,11 @@ domains is mathematically impossible.
 
 ### N2. Nonce uniqueness and exhaustion
 
-An initialized book assigns strictly decreasing nonces from `2^32 - 1` through `2`, never assigns
-zero or one, and rotates immediately after assigning nonce two. A nonce-one book stays matchable and
-cancelable but cannot rest an unmatched taker remainder. For every epoch below `2^254 - 1`, rotation
+An initialized book assigns strictly decreasing order nonces from `2^32 - 1` and strictly increasing
+branch nonces from one. A rest into a nonempty side allocates one identity from each front; a rest
+into an empty side allocates only an order identity. The fronts never alias, and the book rotates as
+soon as their next values would meet or cross. A nonce-one book stays matchable and cancelable but
+cannot rest an unmatched taker remainder. For every epoch below `2^254 - 1`, rotation
 increments the epoch without altering either packed hook bit. At `2^254 - 1`, rotation reverts with
 `EpochExhausted`; EVM rollback leaves the book, owner, collateral, nonce, roots, and pool state
 unchanged.
