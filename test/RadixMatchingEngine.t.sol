@@ -411,6 +411,11 @@ contract RadixMatchingEngineTest is Test {
             );
             assertTrue(engine.isBidOrder(firstBid), "bid side");
             _assertTreeBranchStorage(bidBranch, leftNode, rightNode, "bid");
+            assertEq(
+                engine.branchDepth(bidBranch),
+                _commonPrefix(_nodeKey(leftNode, true), _nodeKey(rightNode, true)),
+                "bid branch depth"
+            );
         }
 
         {
@@ -429,6 +434,11 @@ contract RadixMatchingEngineTest is Test {
             );
             assertFalse(engine.isBidOrder(firstAsk), "ask side");
             _assertTreeBranchStorage(askBranch, leftNode, rightNode, "ask");
+            assertEq(
+                engine.branchDepth(askBranch),
+                _commonPrefix(_nodeKey(leftNode, false), _nodeKey(rightNode, false)),
+                "ask branch depth"
+            );
         }
     }
 
@@ -1642,9 +1652,10 @@ contract RadixMatchingEngineTest is Test {
         bytes32 finalSplit = _branchFor(firstBid, secondBid, true);
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(finalSplit);
 
-        assertEq(_nonce(finalSplit), (uint32(1) << 6) | 63);
+        assertEq(_nonce(finalSplit), 1);
         assertTrue(_nonce(finalSplit) != _nonce(firstBid));
         assertEq(_quantity(finalSplit), _quantity(firstBid) + _quantity(secondBid));
+        assertEq(engine.branchDepth(finalSplit), 63);
         assertEq(leftNode, secondBid);
         assertEq(rightNode, firstBid);
     }
@@ -1667,9 +1678,10 @@ contract RadixMatchingEngineTest is Test {
         bytes32 finalSplit = _branchFor(firstAsk, secondAsk, false);
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(finalSplit);
 
-        assertEq(_nonce(finalSplit), (uint32(1) << 6) | 63);
+        assertEq(_nonce(finalSplit), 1);
         assertTrue(_nonce(finalSplit) != _nonce(firstAsk));
         assertEq(_quantity(finalSplit), _quantity(firstAsk) + _quantity(secondAsk));
+        assertEq(engine.branchDepth(finalSplit), 63);
         assertEq(leftNode, secondAsk);
         assertEq(rightNode, firstAsk);
     }
@@ -2685,7 +2697,7 @@ contract RadixMatchingEngineTest is Test {
         int32 price = 50;
         bytes32 leftAsk = _order(price, 2, MAX_ORDER_NONCE - 1);
         bytes32 rightAsk = _order(price, 5, MAX_ORDER_NONCE);
-        bytes32 root = _order(price, 4, 1);
+        bytes32 root = bytes32(uint256(_order(price, 4, 1)) | (uint256(1) << 32));
 
         vm.store(
             address(engine), _nextNonceSlot(), bytes32((uint256(2) << BRANCH_NONCE_SHIFT) | uint256(MAX_ORDER_NONCE))
@@ -2710,7 +2722,7 @@ contract RadixMatchingEngineTest is Test {
         int32 price = 51;
         bytes32 leftAsk = _order(price, 4, MAX_ORDER_NONCE - 1);
         bytes32 rightAsk = _order(price, 5, MAX_ORDER_NONCE - 1);
-        bytes32 root = _order(price, 6, MAX_ORDER_NONCE);
+        bytes32 root = bytes32(uint256(_order(price, 6, MAX_ORDER_NONCE)) | (uint256(1) << 32));
 
         vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE)));
         _storeTreeBranch(root, leftAsk, rightAsk);
@@ -4116,7 +4128,11 @@ contract RadixMatchingEngineTest is Test {
         view
     {
         bytes32 branchSlot = _treeSlot(branch);
-        assertEq(vm.load(address(engine), branchSlot), leftNode, string.concat(label, " tree left slot"));
+        assertEq(
+            vm.load(address(engine), branchSlot),
+            _storedLeftNode(branch, leftNode, rightNode),
+            string.concat(label, " tree left slot")
+        );
         assertEq(
             vm.load(address(engine), bytes32(uint256(branchSlot) + 1)),
             rightNode,
@@ -4126,8 +4142,16 @@ contract RadixMatchingEngineTest is Test {
 
     function _storeTreeBranch(bytes32 branch, bytes32 leftNode, bytes32 rightNode) internal {
         bytes32 branchSlot = _treeSlot(branch);
-        vm.store(address(engine), branchSlot, leftNode);
+        vm.store(address(engine), branchSlot, _storedLeftNode(branch, leftNode, rightNode));
         vm.store(address(engine), bytes32(uint256(branchSlot) + 1), rightNode);
+    }
+
+    function _storedLeftNode(bytes32 branch, bytes32 leftNode, bytes32 rightNode) internal view returns (bytes32) {
+        if (_correctionCode(branch) == 0) return leftNode;
+        uint8 depth = _commonPrefix(_nodeKey(leftNode, true), _nodeKey(rightNode, true));
+        if (depth == 64) depth = 63;
+        uint256 depthMask = uint256(0x1f) << 251;
+        return bytes32((uint256(leftNode) & ~depthMask) | (uint256(depth - 32) << 251));
     }
 
     function _expectedBranchChildren(bytes32 a, bytes32 b, bool isBid)

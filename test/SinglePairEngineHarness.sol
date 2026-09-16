@@ -76,6 +76,10 @@ contract SinglePairEngineHarness is DeepstateV1 {
         return this.tree(this.bookId(BASE_TOKEN, QUOTE_TOKEN, 0), node);
     }
 
+    function branchDepth(bytes32 node) external view returns (uint8) {
+        return _storedBranchDepth(books[this.bookId(BASE_TOKEN, QUOTE_TOKEN, 0)], node);
+    }
+
     function _delegate(bytes memory data) private returns (bytes memory result) {
         bool success;
         (success, result) = address(this).delegatecall(data);

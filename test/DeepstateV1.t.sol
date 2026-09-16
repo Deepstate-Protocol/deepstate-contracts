@@ -111,9 +111,9 @@ contract DeepstateV1Test is Test {
         (bytes32 root,) = engine.roots(address(token0), address(token1), 0);
         (bytes32 leftBranch, bytes32 rightBranch) = engine.tree(id, root);
 
-        assertTrue((uint32(uint256(root)) >> 6) < 4, "root branch serial not separately allocated");
-        assertTrue((uint32(uint256(leftBranch)) >> 6) < 4, "left branch serial not separately allocated");
-        assertTrue((uint32(uint256(rightBranch)) >> 6) < 4, "right branch serial not separately allocated");
+        assertLe(uint32(uint256(root)), 3, "root branch serial not separately allocated");
+        assertLe(uint32(uint256(leftBranch)), 3, "left branch serial not separately allocated");
+        assertLe(uint32(uint256(rightBranch)), 3, "right branch serial not separately allocated");
         assertTrue(uint32(uint256(root)) != uint32(uint256(leftBranch)), "root/left branch nonce collision");
         assertTrue(uint32(uint256(root)) != uint32(uint256(rightBranch)), "root/right branch nonce collision");
         assertTrue(uint32(uint256(leftBranch)) != uint32(uint256(rightBranch)), "left/right branch nonce collision");
@@ -996,7 +996,7 @@ contract DeepstateV1Test is Test {
         engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
 
         bytes32 id = engine.bookId(address(token0), address(token1), 0);
-        uint256 exhaustedBranchSerial = uint256((type(uint32).max >> 6) + 1) << 64;
+        uint256 exhaustedBranchSerial = uint256(type(uint32).max) << 64;
 
         vm.expectRevert(bytes4(keccak256("NonceExhausted()")));
         engine.restBookForTest(id, exhaustedBranchSerial | MAX_ORDER_NONCE, 11, 5, true, alice);
@@ -1007,20 +1007,43 @@ contract DeepstateV1Test is Test {
         engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
 
         bytes32 id = engine.bookId(address(token0), address(token1), 0);
-        // Serial one reserves identities 64..127, so order nonce 127 has already collided.
-        uint256 collidingFronts = (uint256(1) << 64) | 127;
+        // The branch and descending order fronts may not allocate the same identity.
+        uint256 collidingFronts = (uint256(127) << 64) | 127;
 
         vm.expectRevert(bytes4(keccak256("NonceExhausted()")));
         engine.restBookForTest(id, collidingFronts, 11, 5, true, alice);
     }
 
-    function test_RestBookHarnessRotatesBeforeOrderFrontEntersReservedBranchBlock() public {
+    function test_RestBookHarnessRejectsOrderInsideAllocatedBranchRange() public {
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        uint256 crossedFronts = (uint256(3) << 64) | 2;
+
+        vm.expectRevert(bytes4(keccak256("NonceExhausted()")));
+        engine.restBookForTest(id, crossedFronts, 11, 5, true, alice);
+    }
+
+    function test_RestBookHarnessPreservesFullWidthBranchIdentity() public {
         vm.prank(alice);
         engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
 
         bytes32 id = engine.bookId(address(token0), address(token1), 0);
-        // Serial one reserves identities 64..127. Nonce 128 is the final safe order identity.
-        uint256 adjacentFronts = (uint256(1) << 64) | 128;
+        uint32 branchIdentity = uint32(1) << 31;
+        uint256 fullWidthFronts = (uint256(branchIdentity) << 64) | MAX_ORDER_NONCE;
+
+        engine.restBookForTest(id, fullWidthFronts, 11, 5, true, alice);
+
+        (, bytes32 bidRoot) = engine.roots(address(token0), address(token1), 0);
+        assertEq(uint32(uint256(bidRoot)), branchIdentity);
+        assertEq(engine.nextNonce(address(token0), address(token1), 0), MAX_ORDER_NONCE - 1);
+    }
+
+    function test_RestBookHarnessRotatesBeforeOrderFrontEntersAllocatedBranchRange() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        // Branch serial 127 and order nonce 128 are adjacent, so this is the final safe rest.
+        uint256 adjacentFronts = (uint256(127) << 64) | 128;
 
         (bytes32 restingOrder, uint32 nextNonceAfter) = engine.restBookForTest(id, adjacentFronts, 11, 5, true, alice);
 
