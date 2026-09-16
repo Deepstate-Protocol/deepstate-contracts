@@ -88,7 +88,7 @@ def bind_model_to_source():
         "key := or(shl(32, sub(0xffffffff, tickKey)), and(order, 0xffffffff))",
         "prefixLength = uint8(LibBit.clz(differingBits << 192));",
         "one := and(shr(sub(63, depth), key), 1)",
-        "nextNonceAfter = nonce - 1;",
+        "nextOrderNonce = orderNonce - 1;",
         "if (oldEpoch == _POOL_EPOCH_MASK) revert EpochExhausted();",
         "epoch = oldEpoch + 1;",
         "return (poolState & _POOL_HOOK_ACTIVE_MASK) | epoch;",
