@@ -986,6 +986,31 @@ contract RadixMatchingEngineCoverageTest is Test {
         assertEq(_subtreeQuantity(engine.askRoot()), 2);
     }
 
+    function testCoverage_DirtySpinePricesUniformLeftBranchWithoutSentinelLoad() public {
+        bytes32 newestAsk = _order(50, 1, MAX_ORDER_NONCE - 2);
+        bytes32 middleAsk = _order(50, 1, MAX_ORDER_NONCE - 1);
+        bytes32 oldestAsk = _order(50, 1, MAX_ORDER_NONCE);
+
+        bytes32 uniformLeft = _branchFor(newestAsk, middleAsk, false);
+        (bytes32 uniformLeftChild, bytes32 uniformRightChild) = _expectedBranchChildren(newestAsk, middleAsk, false);
+        _storeTreeBranch(uniformLeft, uniformLeftChild, uniformRightChild);
+
+        bytes32 root = _branchFor(uniformLeft, oldestAsk, false);
+        (bytes32 rootLeft, bytes32 rootRight) = _expectedBranchChildren(uniformLeft, oldestAsk, false);
+        assertEq(rootLeft, uniformLeft);
+        assertEq(rootRight, oldestAsk);
+        _storeTreeBranch(root, rootLeft, rootRight);
+        vm.store(address(engine), _askRootSlot(), root);
+        vm.store(address(engine), _nextNonceSlot(), bytes32(uint256(MAX_ORDER_NONCE) | ASK_RIGHT_SPINE_DIRTY));
+        base.mint(address(engine), 3);
+
+        vm.prank(carol);
+        engine.fill(_order(50, 3, 0), true);
+
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(base.balanceOf(carol), 1_000_000_003);
+    }
+
     function testCoverage_DirtySpineRejectsNonuniformRightSubtree() public {
         bytes32 lowAsk = _order(49, 1, MAX_ORDER_NONCE - 2);
         bytes32 highAsk = _order(50, 1, MAX_ORDER_NONCE - 1);
