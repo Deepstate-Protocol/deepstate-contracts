@@ -949,7 +949,7 @@ contract RadixMatchingEngineCoverageTest is Test {
         int32 price = 50;
         bytes32 leftAsk = _order(price, 2, MAX_ORDER_NONCE - 1);
         bytes32 rightAsk = _order(price, 5, MAX_ORDER_NONCE);
-        bytes32 root = _order(price, 4, 1);
+        bytes32 root = bytes32(uint256(_order(price, 4, 1)) | (uint256(1) << 32));
 
         vm.store(
             address(engine), _nextNonceSlot(), bytes32((uint256(2) << BRANCH_NONCE_SHIFT) | uint256(MAX_ORDER_NONCE))
@@ -1055,14 +1055,22 @@ contract RadixMatchingEngineCoverageTest is Test {
 
     function _storeTreeBranch(bytes32 branch, bytes32 leftNode, bytes32 rightNode) internal {
         bytes32 branchSlot = _treeSlot(branch);
-        vm.store(address(engine), branchSlot, leftNode);
+        vm.store(address(engine), branchSlot, _storedLeftNode(branch, leftNode, rightNode));
         vm.store(address(engine), bytes32(uint256(branchSlot) + 1), rightNode);
     }
 
     function _assertTreeBranchStorage(bytes32 branch, bytes32 leftNode, bytes32 rightNode) internal view {
         bytes32 branchSlot = _treeSlot(branch);
-        assertEq(vm.load(address(engine), branchSlot), leftNode);
+        assertEq(vm.load(address(engine), branchSlot), _storedLeftNode(branch, leftNode, rightNode));
         assertEq(vm.load(address(engine), bytes32(uint256(branchSlot) + 1)), rightNode);
+    }
+
+    function _storedLeftNode(bytes32 branch, bytes32 leftNode, bytes32 rightNode) internal view returns (bytes32) {
+        if (_correctionCode(branch) == 0) return leftNode;
+        uint8 depth = _commonPrefix(_nodeKey(leftNode, true), _nodeKey(rightNode, true));
+        if (depth == 64) depth = 63;
+        uint256 depthMask = uint256(0x1f) << 251;
+        return bytes32((uint256(leftNode) & ~depthMask) | (uint256(depth - 32) << 251));
     }
 
     function _branchLeft(bytes32 branch) internal view returns (bytes32 leftNode) {

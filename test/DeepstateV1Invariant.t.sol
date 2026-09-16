@@ -37,7 +37,7 @@ contract DeepstateV1MultiPoolHarness is DeepstateV1 {
         if (branchSerial == 0) branchSerial = 1;
         Branch storage root = books[id].tree[bytes32(0)];
         bool createsBranch = isBid ? root.rightNode != bytes32(0) : root.leftNode != bytes32(0);
-        uint32 orderNonce = createsBranch ? (branchSerial + 1) << 6 : 2;
+        uint32 orderNonce = createsBranch ? branchSerial + 1 : (branchSerial > 1 ? branchSerial : 2);
         books[id].nonceAndFlags = (nonceAndFlags & ~uint256(type(uint32).max)) | uint256(orderNonce);
     }
 }
