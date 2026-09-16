@@ -99,6 +99,65 @@ contract DeepstateV1Test is Test {
         assertEq(token1.balanceOf(address(engine)), _quoteValue(10, 5, true));
     }
 
+    function test_BranchNoncesAreUniqueAndDoNotAliasOrderLeaves() public {
+        bytes32[4] memory orders;
+        for (uint256 i; i < orders.length; ++i) {
+            vm.prank(alice);
+            orders[i] = engine.fill(_fill(0, _order(10, 10, 0), false, false, false));
+            assertEq(uint32(uint256(orders[i])), MAX_ORDER_NONCE - uint32(i), "order nonce sequence");
+        }
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        (bytes32 root,) = engine.roots(address(token0), address(token1), 0);
+        (bytes32 leftBranch, bytes32 rightBranch) = engine.tree(id, root);
+
+        assertLe(uint32(uint256(root)), 3, "root branch serial not separately allocated");
+        assertLe(uint32(uint256(leftBranch)), 3, "left branch serial not separately allocated");
+        assertLe(uint32(uint256(rightBranch)), 3, "right branch serial not separately allocated");
+        assertTrue(uint32(uint256(root)) != uint32(uint256(leftBranch)), "root/left branch nonce collision");
+        assertTrue(uint32(uint256(root)) != uint32(uint256(rightBranch)), "root/right branch nonce collision");
+        assertTrue(uint32(uint256(leftBranch)) != uint32(uint256(rightBranch)), "left/right branch nonce collision");
+
+        for (uint256 i; i < orders.length; ++i) {
+            (bytes32 leafLeft, bytes32 leafRight) = engine.tree(id, orders[i]);
+            assertEq(leafLeft, bytes32(0), "order leaf aliased branch children");
+            assertEq(leafRight, bytes32(0), "order leaf aliased branch children");
+        }
+    }
+
+    function test_PartialFillReusesBranchNonceAndChildSlot() public {
+        for (uint256 i; i < 4; ++i) {
+            vm.prank(alice);
+            engine.fill(_fill(0, _order(10, 10, 0), false, false, false));
+        }
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        (bytes32 oldRoot,) = engine.roots(address(token0), address(token1), 0);
+        (bytes32 oldLeftBranch, bytes32 oldRightBranch) = engine.tree(id, oldRoot);
+        assertTrue(oldLeftBranch != bytes32(0) && oldRightBranch != bytes32(0), "expected balanced branch");
+
+        (bytes32 oldLeftChild, bytes32 oldRightChild) = engine.tree(id, oldLeftBranch);
+
+        // Consume the two best leaves and half of the next one. The former left subtree survives
+        // with a different aggregate quantity and is promoted to the root.
+        vm.prank(bob);
+        engine.fill(_fill(0, _order(10, 25, 0), true, true, false));
+
+        (bytes32 newRoot,) = engine.roots(address(token0), address(token1), 0);
+        assertTrue(newRoot != oldLeftBranch, "aggregate word should change");
+        assertEq(uint32(uint256(newRoot)), uint32(uint256(oldLeftBranch)), "branch identity changed");
+        assertEq(uint160(uint256(newRoot) >> 64), 15, "surviving aggregate quantity");
+
+        (bytes32 newLeftChild, bytes32 newRightChild) = engine.tree(id, newRoot);
+        assertEq(newLeftChild, oldLeftChild, "unchanged child moved");
+        assertTrue(newRightChild != oldRightChild, "partially filled child was not rewritten");
+
+        // The old packed branch word resolves through the same nonce-addressed mapping slot.
+        (bytes32 oldKeyLeft, bytes32 oldKeyRight) = engine.tree(id, oldLeftBranch);
+        assertEq(oldKeyLeft, newLeftChild);
+        assertEq(oldKeyRight, newRightChild);
+    }
+
     function test_InvalidTokenAndHookConfigBranches() public {
         vm.expectRevert(bytes4(keccak256("InvalidToken()")));
         engine.activeBookId(address(token1), address(token0));
@@ -930,6 +989,67 @@ contract DeepstateV1Test is Test {
 
         vm.expectRevert(bytes4(keccak256("NonceExhausted()")));
         engine.restBookForTest(id, 1, 10, 5, true, alice);
+    }
+
+    function test_RestBookHarnessRejectsExhaustedBranchSerial() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        uint256 exhaustedBranchSerial = uint256(type(uint32).max) << 64;
+
+        vm.expectRevert(bytes4(keccak256("NonceExhausted()")));
+        engine.restBookForTest(id, exhaustedBranchSerial | MAX_ORDER_NONCE, 11, 5, true, alice);
+    }
+
+    function test_RestBookHarnessRejectsCollidingIdentityFronts() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        // The branch and descending order fronts may not allocate the same identity.
+        uint256 collidingFronts = (uint256(127) << 64) | 127;
+
+        vm.expectRevert(bytes4(keccak256("NonceExhausted()")));
+        engine.restBookForTest(id, collidingFronts, 11, 5, true, alice);
+    }
+
+    function test_RestBookHarnessRejectsOrderInsideAllocatedBranchRange() public {
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        uint256 crossedFronts = (uint256(3) << 64) | 2;
+
+        vm.expectRevert(bytes4(keccak256("NonceExhausted()")));
+        engine.restBookForTest(id, crossedFronts, 11, 5, true, alice);
+    }
+
+    function test_RestBookHarnessPreservesFullWidthBranchIdentity() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        uint32 branchIdentity = uint32(1) << 31;
+        uint256 fullWidthFronts = (uint256(branchIdentity) << 64) | MAX_ORDER_NONCE;
+
+        engine.restBookForTest(id, fullWidthFronts, 11, 5, true, alice);
+
+        (, bytes32 bidRoot) = engine.roots(address(token0), address(token1), 0);
+        assertEq(uint32(uint256(bidRoot)), branchIdentity);
+        assertEq(engine.nextNonce(address(token0), address(token1), 0), MAX_ORDER_NONCE - 1);
+    }
+
+    function test_RestBookHarnessRotatesBeforeOrderFrontEntersAllocatedBranchRange() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        // Branch serial 127 and order nonce 128 are adjacent, so this is the final safe rest.
+        uint256 adjacentFronts = (uint256(127) << 64) | 128;
+
+        (bytes32 restingOrder, uint32 nextNonceAfter) = engine.restBookForTest(id, adjacentFronts, 11, 5, true, alice);
+
+        assertEq(uint32(uint256(restingOrder)), 128);
+        assertEq(nextNonceAfter, 1);
+        assertEq(engine.nextNonce(address(token0), address(token1), 0), 1);
     }
 
     function testFuzz_IntegratorBidFeeEqualsIndependentProtocolFormula(

@@ -1,7 +1,7 @@
 # Radix Matching
 
 Foundry prototype for a two-sided native-ETH/ERC20 matching engine backed by a single
-`mapping(bytes32 => Branch)` radix tree store.
+`mapping(bytes32 => Branch)` radix tree store addressed by stable node nonce.
 
 ## Order Node Layout
 
@@ -29,28 +29,37 @@ routers must choose ticks that incorporate the decimal relationship of each toke
 
 `FillParams` contains sorted `token0` and `token1` addresses, the book epoch, a packed incoming order,
 the bid/ask side, and `noRest` / `fillOrKill` controls. Incoming orders must leave nonce and correction
-bits empty. Any permitted unmatched remainder receives the next decrementing nonce and rests in the
+bits empty. Any permitted unmatched remainder receives the next decrementing order nonce and rests in the
 appropriate active book.
 
 ## Branch Encoding
 
-The node layout remains one `bytes32`. Branch nodes do not use nonce tags, probes, or a separate namespace.
+The packed node layout remains one `bytes32`, stored in its parent pointer. The low 32-bit nonce is
+the node's unique, stable identity: a branch's child pointers are stored at
+`tree[bytes32(branchNonce)]`, not at a key derived from the full mutable packed word. Price,
+quantity, correction, and nonce all remain in the parent pointer. A partial fill can therefore
+rewrite the branch summary in its parent while its own two children stay in the same mapping slot.
 
-A branch node is addressed with an actual order boundary key from its children:
+Order and branch identities share one collision-free 32-bit namespace with allocation fronts that
+move toward one another:
 
 ```text
-path = price || nonce
-branch_path = max(child_a_path, child_b_path)
+order_nonce  = uint32.max, uint32.max - 1, ...
+branch_nonce = 1, 2, ...
 ```
 
-The branch path is packed back into the same tick and nonce fields, while the quantity field stores
-the exact sum of the child quantities. A uniform-tick branch stores `roundingCorrection + 1` in its
+Each insertion into a nonempty side allocates exactly one new branch identity. The book rotates
+before the two allocation fronts meet, so branch identities cannot alias order leaves. Radix
+routing derives keys from descendant order leaves rather than treating a branch identity as part of
+the path. The quantity field stores the exact sum of the child quantities. A uniform-tick branch
+stores `roundingCorrection + 1` in its
 correction field, allowing aggregate matching to reproduce the exact sum of per-order rounded
 notionals. Mixed-tick branches use correction code zero and recurse when their quote value is needed.
-Because the boundary key is an actual order path, uniqueness comes from the decrementing order nonce
-rather than from a synthetic branch nonce namespace.
+The nonce is a unique node identity and addresses that node's stored child-pointer pair.
 
-Resting orders start at `type(uint32).max` and decrement from there.
+Resting order nonces start at `type(uint32).max` and decrement by one. Branch nonces start at one and
+increment by one. A book epoch remains restable only while the next order identity is above the next
+branch identity.
 
 Higher order nonce still means earlier time priority at the same price.
 
@@ -106,9 +115,9 @@ forge test --force --match-contract '.*RadixMatchingEngineInvariantTest.*' --mat
 FOUNDRY_INVARIANT_RUNS=2048 FOUNDRY_INVARIANT_DEPTH=64 forge test --force --match-contract '.*RadixMatchingEngineInvariantTest.*' --match-test 'invariant_.*'
 INVARIANT_RUNS=2048 INVARIANT_DEPTH=64 INVARIANT_SHARDS=8 INVARIANT_SHARD=1 make invariant-deep-shard
 INVARIANT_RUNS=2048 INVARIANT_DEPTH=64 INVARIANT_SHARDS=8 make invariant-deep-shards
-forge test --isolate --force --match-contract 'RadixMatchingEngine(Gas|HookGas|FeeGas)Test' --gas-report
-forge snapshot --isolate --force --match-contract 'RadixMatchingEngine(Gas|HookGas|FeeGas)Test' --snap .gas-snapshot.runtime
-forge snapshot --isolate --force --match-contract 'RadixMatchingEngine(Gas|HookGas|FeeGas)Test' --check .gas-snapshot.runtime
+forge test --isolate --force --match-contract '(RadixMatchingEngine(Gas|HookGas|FeeGas)Test|DeepstateV1IntegratorFeeGasTest)' --gas-report
+forge snapshot --isolate --force --match-contract '(RadixMatchingEngine(Gas|HookGas|FeeGas)Test|DeepstateV1IntegratorFeeGasTest)' --snap .gas-snapshot.runtime
+forge snapshot --isolate --force --match-contract '(RadixMatchingEngine(Gas|HookGas|FeeGas)Test|DeepstateV1IntegratorFeeGasTest)' --check .gas-snapshot.runtime
 forge build --sizes
 python3 script/check_tick_math.py --check test/TickMath32.t.sol
 uv run --locked --only-group static slither src/DeepstateV1.sol --config-file slither.config.json --exclude-informational

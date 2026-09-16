@@ -23,10 +23,15 @@ For a side `s` and leaf `l`, define:
 - `N_s(t, q)`, the exact integer notional represented by production tick `t`, rounded down for an
   ask and up for a bid.
 
-For a subtree `T`, let `Leaves(T)` be its reachable leaves, `maxP(T)` its maximum raw path, and
-`sumQ(T)` the sum of its live quantities. A clean branch address is the packed word
+For a subtree `T`, let `Leaves(T)` be its reachable leaves, `rep(T)` a descendant leaf used only to
+recover a radix routing key, `sumQ(T)` the sum of its live quantities, and `id(T)` the unique stable
+branch nonce allocated when that internal node is created. A clean branch summary is the packed word
 
-`A(T) = pack(maxP(T), sumQ(T), correction(T))`.
+`A(T) = pack(price(rep(T)), sumQ(T), correction(T), id(T))`.
+
+The branch's identity is independent of the descendant key used for routing;
+`tree[bytes32(id(T))]` stores its two children. Repacking price, quantity, or correction therefore
+does not move those children.
 
 The correction field is zero for a mixed-tick branch. For a uniform branch it is one plus the
 difference between the aggregate-rounded notional and the sum of leaf-rounded notionals, with the
@@ -40,7 +45,7 @@ sign convention stated in the contract.
 2. every branch has exactly two nonzero children;
 3. the children diverge at the branch's Patricia split, every left key is smaller than every right
    key, and every descendant shares the required preceding prefix;
-4. the branch quantity is `sumQ(T)` and its raw boundary is `maxP(T)`;
+4. the branch quantity is `sumQ(T)` and its identity is the stable `id(T)` allocated at creation;
 5. a nonzero correction denotes a uniform-tick subtree and reconstructs exactly
    `sum(N_s(t, Q(l)))`; zero denotes a leaf or mixed branch;
 6. all reachable node addresses are distinct and nonzero; and
@@ -127,7 +132,8 @@ once. Therefore:
 
 Assuming child corrections are exact, adding this local zero/one term yields the exact parent
 correction. If child subtrees contain `m` and `n` leaves, the result is at most
-`(m - 1) + (n - 1) + 1 = m + n - 1`. One book can assign at most `2^32 - 2` leaves, so the stored
+`(m - 1) + (n - 1) + 1 = m + n - 1`. One book can contain at most `2^31` leaves before its opposing
+identity-allocation fronts meet, so the stored
 `correction + 1` fits in `uint32`. This is structural induction on uniform-subtree height.
 
 ## 3. Radix Preservation
@@ -135,8 +141,8 @@ correction. If child subtrees contain `m` and `n` leaves, the result is at most
 ### 3.1 Empty and leaf bases
 
 An empty root satisfies every tree clause vacuously. A newly packed leaf has positive validated
-quantity, zero caller-supplied correction and nonce bits, and a contract-assigned nonce in
-`[2, 2^32 - 1]`; it therefore satisfies `C`.
+quantity, zero caller-supplied correction and nonce bits, and a contract-assigned nonce strictly
+above the ascending branch-allocation front; it therefore satisfies `C`.
 
 ### 3.2 Insertion
 
@@ -148,7 +154,11 @@ Assume `C(T)` after any required dirty-spine materialization.
 3. **Divergence above the root split:** the new parent partitions the new key from every existing
    descendant because all old descendants share the old prefix.
 4. **Divergence below the root split:** recursion enters exactly one child. By induction that child
-   remains clean; rebuilding the parent restores exact quantity, boundary and correction.
+   remains clean; rebuilding the parent restores exact quantity and correction while preserving the
+   existing parent's identity.
+
+Every nonempty insertion adds exactly one internal node and consumes exactly one fresh branch
+identity. Existing internal nodes retain their identities on the recursive unwind.
 
 The depth increases before every recursive call and is at most 64. The SMT split obligations cover
 every possible depth.
@@ -163,31 +173,26 @@ the target leaf, removal returns empty. On unwind:
 - two children are repacked from their exact summaries.
 
 For an off-spine path this proves `C` directly. On the global right path, the optimization may retain
-the old branch address and update only its right pointer, producing `D` as proved in Section 4.
+the old packed branch summary and update only its right pointer, producing `D` as proved in Section 4.
 
 ### 3.4 Live-node uniqueness
 
-Leaf raw paths are unique because nonce assignment is global to the book. For two disjoint
-subtrees, their maximum raw paths are therefore different, so their branch words differ in the path
-fields. If two live subtrees share their maximum leaf, rooted-tree structure makes them nested. The
-ancestor contains at least one additional positive sibling, so its checked aggregate quantity is
-strictly greater than the descendant quantity. The same argument separates a branch from its
-maximum leaf. Bid and ask subtrees are disjoint but use the same globally unique nonce sequence, so
-the disjoint-subtree argument also applies across sides. Positive quantity separates every live node
-from root zero.
-
-These cases exhaust leaf/branch and same-side/cross-side pairs. The exact packing-field injectivity
-and strict-sum steps are SMT obligations.
+Order identities descend from `2^32 - 1`; branch identities ascend from one. Allocation requires
+the current order identity to be strictly above the current branch identity, and rotation disables
+further rests before the fronts meet. Thus every allocated order and branch identity is nonzero,
+globally unique within the book, and disjoint from the other class. Since the low 32 bits of every
+live node contain that identity, distinct live nodes have distinct packed words and distinct branch
+mapping keys. The fixed root key zero cannot alias either class.
 
 ## 4. Dirty Right-Spine Preservation
 
 Assume `D(T)` and modify only the rightmost path.
 
 1. The left child is unchanged and remains clean.
-2. A fill or removal only decreases descendant quantities. A retained anchor's historical quantity
-   was strictly greater than every old proper descendant and is therefore still strictly greater
-   than every new descendant. It cannot alias one. Production additionally falls back to a rebuilt
-   branch if a replacement child equals the anchor or its sibling.
+2. A retained anchor keeps its unique branch nonce. Order and branch allocation fronts are
+   disjoint, and every other live branch has a different allocated nonce, so neither a descendant
+   rewrite nor a quantity change can alias the anchor. Production still rejects a replacement that
+   would create a self-cycle or duplicate child under corrupted state.
 3. Updating the right pointer preserves reachability and key order because the replacement is the
    result of recursively modifying the old right subtree.
 4. Dirty aggregate words are never trusted for mixed-price consumption. `_dirtyRightSpineData`
@@ -236,9 +241,12 @@ guard is held. A failed transfer reverts both deletion and tree mutation atomica
 
 ## 7. Nonces And Epochs
 
-An initialized book starts at nonce `2^32 - 1`. Rest assigns the current nonce and stores one less;
-therefore assignments are exactly `2^32 - 1, ..., 2`, with no repetition. Assigning two leaves one,
-which is the non-restable sentinel, and rotates the active pool epoch.
+An initialized book starts with next order nonce `2^32 - 1` and next branch nonce one. Every rest
+assigns the current order nonce and decrements that front by one. A rest into a nonempty side also
+assigns the current branch nonce to the one new internal node and increments that front by one.
+Before each allocation the order front must be strictly greater than the branch front. If the next
+fronts would meet or cross, the stored order nonce becomes the non-restable sentinel one and the
+active pool epoch rotates. Therefore neither sequence repeats and the two sequences never alias.
 
 For `epoch < 2^254 - 1`, increment is exact and cannot overlap either hook bit. At the terminal epoch,
 the explicit `EpochExhausted` guard reverts the entire attempted rest, so no wrapped epoch, owner,
