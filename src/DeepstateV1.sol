@@ -567,16 +567,17 @@ contract DeepstateV1 is Ownable {
             nonceAndFlags &= ~dirtyFlag;
         }
 
-        bytes32 root = isBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
+        {
+            bytes32 root = isBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
+            uint32 nonce;
+            uint32 newBranchSerial;
+            (nonce, newBranchSerial, nextNonceAfter) = _allocateNodeNonces(book, nonceAndFlags, root != bytes32(0));
 
-        uint32 nonce;
-        uint32 newBranchSerial;
-        (nonce, newBranchSerial, nextNonceAfter) = _allocateNodeNonces(book, nonceAndFlags, root != bytes32(0));
+            restingOrder = _pack(price, quantity, nonce);
+            _insertRestingOrder(book, root, restingOrder, isBid, hookEnabled, newBranchSerial);
+        }
 
-        restingOrder = _pack(price, quantity, nonce);
         orderOf[_orderId(id, restingOrder)] = OrderState({owner: owner, isBid: isBid});
-
-        _insertRestingOrder(book, root, restingOrder, isBid, hookEnabled, newBranchSerial);
 
         emit OrderRested(id, restingOrder, owner, isBid);
     }
