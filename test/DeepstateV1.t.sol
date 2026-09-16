@@ -991,6 +991,44 @@ contract DeepstateV1Test is Test {
         engine.restBookForTest(id, 1, 10, 5, true, alice);
     }
 
+    function test_RestBookHarnessRejectsExhaustedBranchSerial() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        uint256 exhaustedBranchSerial = uint256((type(uint32).max >> 6) + 1) << 64;
+
+        vm.expectRevert(bytes4(keccak256("NonceExhausted()")));
+        engine.restBookForTest(id, exhaustedBranchSerial | MAX_ORDER_NONCE, 11, 5, true, alice);
+    }
+
+    function test_RestBookHarnessRejectsCollidingIdentityFronts() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        // Serial one reserves identities 64..127, so order nonce 127 has already collided.
+        uint256 collidingFronts = (uint256(1) << 64) | 127;
+
+        vm.expectRevert(bytes4(keccak256("NonceExhausted()")));
+        engine.restBookForTest(id, collidingFronts, 11, 5, true, alice);
+    }
+
+    function test_RestBookHarnessRotatesBeforeOrderFrontEntersReservedBranchBlock() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        // Serial one reserves identities 64..127. Nonce 128 is the final safe order identity.
+        uint256 adjacentFronts = (uint256(1) << 64) | 128;
+
+        (bytes32 restingOrder, uint32 nextNonceAfter) = engine.restBookForTest(id, adjacentFronts, 11, 5, true, alice);
+
+        assertEq(uint32(uint256(restingOrder)), 128);
+        assertEq(nextNonceAfter, 1);
+        assertEq(engine.nextNonce(address(token0), address(token1), 0), 1);
+    }
+
     function testFuzz_IntegratorBidFeeEqualsIndependentProtocolFormula(
         uint128 quantitySeed,
         uint8 protocolBpsSeed,
