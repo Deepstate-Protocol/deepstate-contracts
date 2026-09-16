@@ -111,9 +111,9 @@ contract DeepstateV1Test is Test {
         (bytes32 root,) = engine.roots(address(token0), address(token1), 0);
         (bytes32 leftBranch, bytes32 rightBranch) = engine.tree(id, root);
 
-        assertTrue(uint32(uint256(root)) < 4, "root branch identity not separately allocated");
-        assertTrue(uint32(uint256(leftBranch)) < 4, "left branch identity not separately allocated");
-        assertTrue(uint32(uint256(rightBranch)) < 4, "right branch identity not separately allocated");
+        assertTrue((uint32(uint256(root)) >> 6) < 4, "root branch serial not separately allocated");
+        assertTrue((uint32(uint256(leftBranch)) >> 6) < 4, "left branch serial not separately allocated");
+        assertTrue((uint32(uint256(rightBranch)) >> 6) < 4, "right branch serial not separately allocated");
         assertTrue(uint32(uint256(root)) != uint32(uint256(leftBranch)), "root/left branch nonce collision");
         assertTrue(uint32(uint256(root)) != uint32(uint256(rightBranch)), "root/right branch nonce collision");
         assertTrue(uint32(uint256(leftBranch)) != uint32(uint256(rightBranch)), "left/right branch nonce collision");

@@ -15,7 +15,7 @@ import {TickMath32} from "./libraries/TickMath32.sol";
 /// - bits 224-255: signed 32-bit logarithmic tick.
 /// - bits  64-223: 160-bit quantity.
 /// - bits  32-63: 32-bit same-tick branch correction code; zero for leaves/mixed branches.
-/// - bits   0-31: 32-bit node identity (order nonce for leaves, branch nonce for branches).
+/// - bits   0-31: 32-bit node identity (order nonce for leaves; serial/depth identity for branches).
 ///
 /// Tick `t` represents the dimensionless quote/base price `2 ** (96 * t / 2**31)`.
 /// Tick zero is therefore exactly 1:1, the full signed domain spans approximately
@@ -35,9 +35,11 @@ import {TickMath32} from "./libraries/TickMath32.sol";
 ///
 /// Branch nodes are aggregate nodes whose packed word lives in their parent pointer. Their child
 /// pointers are stored in `tree[bytes32(nonce)]`, using the packed node's unique nonce as a stable
-/// identity. Quantity/correction changes therefore rewrite only the parent pointer and never move
-/// the node's children to a new mapping key. A node is a branch when that nonce-addressed slot has
-/// a nonzero left child; otherwise it is a leaf. Ownership and side metadata live in `orderOf`.
+/// identity. A branch identity is `(serial << 6) | splitDepth`: the low six bits cache its Patricia
+/// split depth while the serial makes the identity unique. Quantity/correction changes therefore
+/// rewrite only the parent pointer and never move the node's children to a new mapping key. A node
+/// is a branch when that nonce-addressed slot has a nonzero left child; otherwise it is a leaf.
+/// Ownership and side metadata live in `orderOf`.
 ///
 /// The bid and ask books are conceptual trees that coexist in the same `tree` mapping:
 ///
@@ -91,7 +93,7 @@ contract DeepstateV1 is Ownable {
 
     /// @notice One isolated radix book for one token pair epoch.
     /// @dev The low 32 bits of `nonceAndFlags` are the decrementing order nonce, bits 32-33 are
-    /// per-book right-spine dirty flags, and bits 64-95 are the ascending branch nonce. The zero
+    /// per-book right-spine dirty flags, and bits 64-95 are the ascending branch serial. The zero
     /// node in `tree` is reserved as the root anchor: `leftNode` is the ask root and `rightNode` is
     /// the bid root.
     struct Book {
@@ -120,16 +122,27 @@ contract DeepstateV1 is Ownable {
     uint256 private constant _CORRECTION_MASK = type(uint32).max;
     /// @dev Mask for extracting or validating a 32-bit node nonce.
     uint256 private constant _NONCE_MASK = type(uint32).max;
-    /// @dev Bit offset of the ascending branch-identity counter in `Book.nonceAndFlags`.
+    /// @dev Bit offset of the ascending branch-serial counter in `Book.nonceAndFlags`.
     uint256 private constant _BRANCH_NONCE_SHIFT = 64;
-    /// @dev Mask for replacing the ascending branch-identity counter.
+    /// @dev Mask for replacing the ascending branch-serial counter.
     uint256 private constant _BRANCH_NONCE_MASK = uint256(type(uint32).max) << _BRANCH_NONCE_SHIFT;
+    /// @dev Low bits of a branch identity encode its Patricia split depth (0-63).
+    uint256 private constant _BRANCH_DEPTH_BITS = 6;
+    uint32 private constant _BRANCH_DEPTH_MASK = 0x3f;
+    /// @dev Largest serial that can be shifted into a 32-bit branch identity.
+    uint32 private constant _MAX_BRANCH_SERIAL = type(uint32).max >> _BRANCH_DEPTH_BITS;
     /// @dev Root anchor in every book's tree. `leftNode` is ask root; `rightNode` is bid root.
     bytes32 private constant _ROOT_NODE = bytes32(0);
 
     /// @dev Return the storage key for a packed node's stable nonce identity.
     function _branchKey(bytes32 node) private pure returns (bytes32) {
         return bytes32(uint256(_nonce(node)));
+    }
+
+    /// @dev Decode the Patricia split depth cached in a branch's stable identity.
+    function _branchDepth(bytes32 node) private pure returns (uint8) {
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint8(_nonce(node) & _BRANCH_DEPTH_MASK);
     }
 
     /// @dev Store a branch's two child pointers at the slot selected by its stable nonce identity.
@@ -554,42 +567,57 @@ contract DeepstateV1 is Ownable {
             nonceAndFlags &= ~dirtyFlag;
         }
 
+        bytes32 root = isBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
+
         uint32 nonce;
-        uint32 newBranchNonce;
-        (nonce, newBranchNonce, nextNonceAfter) = _allocateNodeNonces(book, nonceAndFlags, isBid);
+        uint32 newBranchSerial;
+        (nonce, newBranchSerial, nextNonceAfter) = _allocateNodeNonces(book, nonceAndFlags, root != bytes32(0));
 
         restingOrder = _pack(price, quantity, nonce);
         orderOf[_orderId(id, restingOrder)] = OrderState({owner: owner, isBid: isBid});
 
-        _insertRestingOrder(book, restingOrder, isBid, hookEnabled, newBranchNonce);
+        _insertRestingOrder(book, root, restingOrder, isBid, hookEnabled, newBranchSerial);
 
         emit OrderRested(id, restingOrder, owner, isBid);
     }
 
-    /// @dev Allocate one order identity and, for insertion into a nonempty side, one branch identity.
-    function _allocateNodeNonces(Book storage book, uint256 nonceAndFlags, bool isBid)
+    /// @dev Allocate one order identity and, for insertion into a nonempty side, one branch serial.
+    function _allocateNodeNonces(Book storage book, uint256 nonceAndFlags, bool createsBranch)
         private
-        returns (uint32 orderNonce, uint32 newBranchNonce, uint32 nextOrderNonce)
+        returns (uint32 orderNonce, uint32 newBranchSerial, uint32 nextOrderNonce)
     {
-        // Order identities descend from uint32.max while branch identities ascend from one. They
-        // share one namespace and the book rotates before the two allocation fronts can collide.
+        // Order identities descend from uint32.max while branch serials ascend from one. Each
+        // serial reserves 64 identities, one for every possible radix depth, and the book rotates
+        // before the order front can enter a reserved branch-identity block.
         // forge-lint: disable-next-line(unsafe-typecast)
         orderNonce = uint32(nonceAndFlags & _NONCE_MASK);
-        uint32 nextBranchNonce = _nextBranchNonce(nonceAndFlags);
-        if (orderNonce <= nextBranchNonce) revert NonceExhausted();
-
-        bool createsBranch =
-            isBid ? book.tree[_ROOT_NODE].rightNode != bytes32(0) : book.tree[_ROOT_NODE].leftNode != bytes32(0);
-        if (createsBranch) newBranchNonce = nextBranchNonce;
+        if (orderNonce <= 1) revert NonceExhausted();
+        uint32 nextBranchSerial = _nextBranchSerial(nonceAndFlags);
+        if (createsBranch) {
+            if (nextBranchSerial > _MAX_BRANCH_SERIAL) revert NonceExhausted();
+            // Reserve the entire 64-value identity block for this serial. The actual low six bits
+            // are filled with the Patricia split depth when the new branch is constructed.
+            uint256 branchIdentityCeiling = (uint256(nextBranchSerial) << _BRANCH_DEPTH_BITS) | _BRANCH_DEPTH_MASK;
+            if (branchIdentityCeiling >= orderNonce) revert NonceExhausted();
+            newBranchSerial = nextBranchSerial;
+        }
 
         unchecked {
             nextOrderNonce = orderNonce - 1;
-            if (createsBranch) ++nextBranchNonce;
+            if (createsBranch) ++nextBranchSerial;
         }
-        if (nextOrderNonce <= nextBranchNonce) nextOrderNonce = 1;
+        // Rotate before the descending order front can enter the identity block already reserved
+        // by an allocated branch serial. `nextBranchSerial` names the next unused block.
+        if (nextBranchSerial > 1) {
+            uint256 allocatedBranchCeiling = (uint256(nextBranchSerial - 1) << _BRANCH_DEPTH_BITS) | _BRANCH_DEPTH_MASK;
+            if (uint256(nextOrderNonce) <= allocatedBranchCeiling) nextOrderNonce = 1;
+        }
 
-        book.nonceAndFlags = (nonceAndFlags & ~(_NONCE_MASK | _BRANCH_NONCE_MASK)) | uint256(nextOrderNonce)
-            | (uint256(nextBranchNonce) << _BRANCH_NONCE_SHIFT);
+        uint256 updated = (nonceAndFlags & ~_NONCE_MASK) | uint256(nextOrderNonce);
+        if (createsBranch) {
+            updated = (updated & ~_BRANCH_NONCE_MASK) | (uint256(nextBranchSerial) << _BRANCH_NONCE_SHIFT);
+        }
+        book.nonceAndFlags = updated;
     }
 
     /// @notice Insert an already nonce-assigned resting order into the selected side tree.
@@ -599,19 +627,19 @@ contract DeepstateV1 is Ownable {
     /// @param hookEnabled True to record a top-order change if insertion improves the book.
     function _insertRestingOrder(
         Book storage book,
+        bytes32 root,
         bytes32 restingOrder,
         bool isBid,
         bool hookEnabled,
-        uint32 newBranchNonce
+        uint32 newBranchSerial
     ) private {
         if (isBid) {
-            bytes32 root = book.tree[_ROOT_NODE].rightNode;
-            book.tree[_ROOT_NODE].rightNode =
-                _insertBid(book, root, restingOrder, _bidSortKey(restingOrder), hookEnabled, newBranchNonce);
+            book.tree[_ROOT_NODE].rightNode = _insertBid(
+                book, root, restingOrder, _bidSortKey(restingOrder), hookEnabled, newBranchSerial
+            );
         } else {
-            bytes32 root = book.tree[_ROOT_NODE].leftNode;
             book.tree[_ROOT_NODE].leftNode =
-                _insertAsk(book, root, restingOrder, _askSortKey(restingOrder), hookEnabled, newBranchNonce);
+                _insertAsk(book, root, restingOrder, _askSortKey(restingOrder), hookEnabled, newBranchSerial);
         }
     }
 
@@ -1015,37 +1043,36 @@ contract DeepstateV1 is Ownable {
         bytes32 node,
         uint64 nodeKey,
         bool hookEnabled,
-        uint32 newBranchNonce
+        uint32 newBranchSerial
     ) private returns (bytes32 newRoot) {
         if (root == bytes32(0)) {
             if (hookEnabled) _recordTopOrderChange(bytes32(0), _nonce(node));
             return node;
         }
 
-        bytes32 leftNode = book.tree[_branchKey(root)].leftNode;
-        if (leftNode == bytes32(0)) {
+        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, root);
+        if (rightNode == bytes32(0)) {
             uint64 rootKey = _bidSortKey(root);
             if (hookEnabled && nodeKey > rootKey) {
                 _recordTopOrderChange(root, _nonce(node));
             }
-            return _storeBranch(book, root, node, rootKey, nodeKey, true, newBranchNonce);
+            return _storeBranch(book, root, node, rootKey, nodeKey, true, newBranchSerial);
         }
 
-        bytes32 rightNode = book.tree[_branchKey(root)].rightNode;
-        uint64 leftKey = _bidNodeKey(book, leftNode);
-        uint64 rightKey = _bidNodeKey(book, rightNode);
-        uint8 branchDepth = _commonPrefix(leftKey, rightKey);
+        bytes32 leftNode = _leftNodeAt(branchSlot);
+        uint8 branchDepth = _branchDepth(root);
+        uint64 leftKey = branchDepth < 32 ? _bidSortKey(root) : _bidNodeKey(book, leftNode);
         if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
             if (hookEnabled && _bit(nodeKey, _commonPrefix(nodeKey, leftKey))) {
                 _recordTopOrderChange(_rightmostLeaf(book, root), _nonce(node));
             }
-            return _storeBranch(book, root, node, leftKey, nodeKey, true, newBranchNonce);
+            return _storeBranch(book, root, node, leftKey, nodeKey, true, newBranchSerial);
         }
 
         if (_bit(nodeKey, branchDepth)) {
-            rightNode = _insertBid(book, rightNode, node, nodeKey, hookEnabled, newBranchNonce);
+            rightNode = _insertBid(book, rightNode, node, nodeKey, hookEnabled, newBranchSerial);
         } else {
-            leftNode = _insertBid(book, leftNode, node, nodeKey, false, newBranchNonce);
+            leftNode = _insertBid(book, leftNode, node, nodeKey, false, newBranchSerial);
         }
 
         return _replaceBranch(book, root, leftNode, rightNode, true);
@@ -1064,37 +1091,36 @@ contract DeepstateV1 is Ownable {
         bytes32 node,
         uint64 nodeKey,
         bool hookEnabled,
-        uint32 newBranchNonce
+        uint32 newBranchSerial
     ) private returns (bytes32 newRoot) {
         if (root == bytes32(0)) {
             if (hookEnabled) _recordTopOrderChange(bytes32(0), _nonce(node));
             return node;
         }
 
-        bytes32 leftNode = book.tree[_branchKey(root)].leftNode;
-        if (leftNode == bytes32(0)) {
+        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, root);
+        if (rightNode == bytes32(0)) {
             uint64 rootKey = _askSortKey(root);
             if (hookEnabled && nodeKey > rootKey) {
                 _recordTopOrderChange(root, _nonce(node));
             }
-            return _storeBranch(book, root, node, rootKey, nodeKey, false, newBranchNonce);
+            return _storeBranch(book, root, node, rootKey, nodeKey, false, newBranchSerial);
         }
 
-        bytes32 rightNode = book.tree[_branchKey(root)].rightNode;
-        uint64 leftKey = _askNodeKey(book, leftNode);
-        uint64 rightKey = _askNodeKey(book, rightNode);
-        uint8 branchDepth = _commonPrefix(leftKey, rightKey);
+        bytes32 leftNode = _leftNodeAt(branchSlot);
+        uint8 branchDepth = _branchDepth(root);
+        uint64 leftKey = branchDepth < 32 ? _askSortKey(root) : _askNodeKey(book, leftNode);
         if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
             if (hookEnabled && _bit(nodeKey, _commonPrefix(nodeKey, leftKey))) {
                 _recordTopOrderChange(_rightmostLeaf(book, root), _nonce(node));
             }
-            return _storeBranch(book, root, node, leftKey, nodeKey, false, newBranchNonce);
+            return _storeBranch(book, root, node, leftKey, nodeKey, false, newBranchSerial);
         }
 
         if (_bit(nodeKey, branchDepth)) {
-            rightNode = _insertAsk(book, rightNode, node, nodeKey, hookEnabled, newBranchNonce);
+            rightNode = _insertAsk(book, rightNode, node, nodeKey, hookEnabled, newBranchSerial);
         } else {
-            leftNode = _insertAsk(book, leftNode, node, nodeKey, false, newBranchNonce);
+            leftNode = _insertAsk(book, leftNode, node, nodeKey, false, newBranchSerial);
         }
 
         return _replaceBranch(book, root, leftNode, rightNode, false);
@@ -1115,16 +1141,14 @@ contract DeepstateV1 is Ownable {
         private
         returns (bytes32 newRoot, bytes32 removed, bool dirtyChanged, bool removedTop)
     {
-        bytes32 leftNode = book.tree[_branchKey(root)].leftNode;
-        if (leftNode == bytes32(0)) {
+        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, root);
+        if (rightNode == bytes32(0)) {
             return
                 _bidSortKey(root) == targetKey ? (bytes32(0), root, false, rightmost) : (root, bytes32(0), false, false);
         }
 
-        bytes32 rightNode = book.tree[_branchKey(root)].rightNode;
-        uint64 leftKey = _bidNodeKey(book, leftNode);
-        uint8 branchDepth = _commonPrefix(leftKey, _bidNodeKey(book, rightNode));
-        if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0), false, false);
+        bytes32 leftNode = _leftNodeAt(branchSlot);
+        uint8 branchDepth = _branchDepth(root);
 
         bool goRight = _bit(targetKey, branchDepth);
         if (goRight) {
@@ -1155,16 +1179,14 @@ contract DeepstateV1 is Ownable {
         private
         returns (bytes32 newRoot, bytes32 removed, bool dirtyChanged, bool removedTop)
     {
-        bytes32 leftNode = book.tree[_branchKey(root)].leftNode;
-        if (leftNode == bytes32(0)) {
+        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, root);
+        if (rightNode == bytes32(0)) {
             return
                 _askSortKey(root) == targetKey ? (bytes32(0), root, false, rightmost) : (root, bytes32(0), false, false);
         }
 
-        bytes32 rightNode = book.tree[_branchKey(root)].rightNode;
-        uint64 leftKey = _askNodeKey(book, leftNode);
-        uint8 branchDepth = _commonPrefix(leftKey, _askNodeKey(book, rightNode));
-        if (_commonPrefix(targetKey, leftKey) < branchDepth) return (root, bytes32(0), false, false);
+        bytes32 leftNode = _leftNodeAt(branchSlot);
+        uint8 branchDepth = _branchDepth(root);
 
         bool goRight = _bit(targetKey, branchDepth);
         if (goRight) {
@@ -1447,7 +1469,7 @@ contract DeepstateV1 is Ownable {
         uint64 aKey,
         uint64 bKey,
         bool isBid,
-        uint32 branchNonce
+        uint32 branchSerial
     ) private returns (bytes32 branchNode) {
         uint8 branchDepth = _commonPrefix(aKey, bKey);
         if (branchDepth == 64) revert DuplicateOrder();
@@ -1459,6 +1481,7 @@ contract DeepstateV1 is Ownable {
             rightNode = a;
         }
 
+        uint32 branchNonce = uint32((uint256(branchSerial) << _BRANCH_DEPTH_BITS) | uint256(branchDepth));
         branchNode = _branchNodeForChildren(book, leftNode, rightNode, isBid, branchNonce);
         // Walkers use leftNode as the branch sentinel, so stored branches are always two-child.
         _setBranchChildren(book, branchNode, leftNode, rightNode);
@@ -1467,7 +1490,7 @@ contract DeepstateV1 is Ownable {
     /// @notice Compute a branch summary for two children while preserving its stable identity.
     /// @param a First child.
     /// @param b Second child.
-    /// @param branchNonce Stable identity allocated exclusively to this branch.
+    /// @param branchNonce Stable serial/depth identity allocated exclusively to this branch.
     /// @return Branch node whose quantity is the child sum and whose nonce is stable across rewrites.
     function _branchNodeForChildren(Book storage book, bytes32 a, bytes32 b, bool isBid, uint32 branchNonce)
         private
@@ -1475,7 +1498,9 @@ contract DeepstateV1 is Ownable {
         returns (bytes32)
     {
         uint160 quantity = _quantity(a) + _quantity(b);
-        int32 tick = _price(_leftmostLeaf(book, a));
+        // Branches retain the tick of their leftmost representative, so no descendant walk is
+        // needed when rebuilding an aggregate summary.
+        int32 tick = _price(a);
         uint32 correctionCode = 0;
 
         if (_price(a) == _price(b) && _uniformNode(book, a) && _uniformNode(book, b)) {
@@ -1870,8 +1895,8 @@ contract DeepstateV1 is Ownable {
         return uint32(book.nonceAndFlags & _NONCE_MASK);
     }
 
-    /// @dev Return the next ascending branch identity encoded in a packed book word.
-    function _nextBranchNonce(uint256 nonceAndFlags) private pure returns (uint32 nonce) {
+    /// @dev Return the next ascending branch serial encoded in a packed book word.
+    function _nextBranchSerial(uint256 nonceAndFlags) private pure returns (uint32 nonce) {
         // A zero field is accepted for test harnesses and legacy-empty books; identity zero remains
         // reserved for the root anchor, so allocation begins at one.
         // forge-lint: disable-next-line(unsafe-typecast)

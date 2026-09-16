@@ -29,12 +29,15 @@ contract MultiPoolInvariantERC20 is ERC20 {
 }
 
 contract DeepstateV1MultiPoolHarness is DeepstateV1 {
-    function forceIdentityFrontsToExhaust(address token0, address token1, uint256 epoch) external {
+    function forceIdentityFrontsToExhaust(address token0, address token1, uint256 epoch, bool isBid) external {
         bytes32 id = bookId(token0, token1, epoch);
         uint256 nonceAndFlags = books[id].nonceAndFlags;
         // forge-lint: disable-next-line(unsafe-typecast)
-        uint32 branchNonce = uint32(nonceAndFlags >> 64);
-        uint32 orderNonce = branchNonce == 0 ? 2 : branchNonce + 1;
+        uint32 branchSerial = uint32(nonceAndFlags >> 64);
+        if (branchSerial == 0) branchSerial = 1;
+        Branch storage root = books[id].tree[bytes32(0)];
+        bool createsBranch = isBid ? root.rightNode != bytes32(0) : root.leftNode != bytes32(0);
+        uint32 orderNonce = createsBranch ? (branchSerial + 1) << 6 : 2;
         books[id].nonceAndFlags = (nonceAndFlags & ~uint256(type(uint32).max)) | uint256(orderNonce);
     }
 }
@@ -381,7 +384,7 @@ contract DeepstateV1MultiPoolHandler is Test {
         (address lower, address upper,,) = _pair(poolIndex);
         bytes32 oldBook = ENGINE.bookId(lower, upper, oldEpoch);
 
-        ENGINE.forceIdentityFrontsToExhaust(lower, upper, oldEpoch);
+        ENGINE.forceIdentityFrontsToExhaust(lower, upper, oldEpoch, isBid);
         int32 tick = isBid ? type(int32).min : type(int32).max;
         DeepstateV1.FillParams memory params = _fillParams(poolIndex, oldEpoch, tick, 1, isBid, false);
         _performSingle(actorIndex, params);

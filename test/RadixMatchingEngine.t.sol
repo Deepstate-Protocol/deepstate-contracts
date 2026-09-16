@@ -1642,7 +1642,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 finalSplit = _branchFor(firstBid, secondBid, true);
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(finalSplit);
 
-        assertEq(_nonce(finalSplit), 1);
+        assertEq(_nonce(finalSplit), (uint32(1) << 6) | 63);
         assertTrue(_nonce(finalSplit) != _nonce(firstBid));
         assertEq(_quantity(finalSplit), _quantity(firstBid) + _quantity(secondBid));
         assertEq(leftNode, secondBid);
@@ -1667,7 +1667,7 @@ contract RadixMatchingEngineTest is Test {
         bytes32 finalSplit = _branchFor(firstAsk, secondAsk, false);
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(finalSplit);
 
-        assertEq(_nonce(finalSplit), 1);
+        assertEq(_nonce(finalSplit), (uint32(1) << 6) | 63);
         assertTrue(_nonce(finalSplit) != _nonce(firstAsk));
         assertEq(_quantity(finalSplit), _quantity(firstAsk) + _quantity(secondAsk));
         assertEq(leftNode, secondAsk);
