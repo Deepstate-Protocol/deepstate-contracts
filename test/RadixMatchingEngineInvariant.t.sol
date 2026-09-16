@@ -1731,7 +1731,9 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
 
     function _branchDepth(bytes32 branchNode, bool isBidTree) private view returns (uint8) {
         (bytes32 leftNode, bytes32 rightNode) = engine.tree(branchNode);
-        return _commonPrefix(_nodeKey(leftNode, isBidTree), _nodeKey(rightNode, isBidTree));
+        uint8 computed = _commonPrefix(_nodeKey(leftNode, isBidTree), _nodeKey(rightNode, isBidTree));
+        assertEq(uint8(_nonce(branchNode) & 0x3f), computed, "cached branch depth");
+        return computed;
     }
 
     function _nodeKey(bytes32 node, bool isBidTree) private view returns (uint64) {
