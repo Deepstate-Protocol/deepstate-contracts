@@ -554,32 +554,42 @@ contract DeepstateV1 is Ownable {
             nonceAndFlags &= ~dirtyFlag;
         }
 
-        bytes32 root = isBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
-        bool createsBranch = root != bytes32(0);
-
-        // Order identities descend from uint32.max while branch identities ascend from one. They
-        // share one namespace and the book rotates before the two allocation fronts can collide.
-        // forge-lint: disable-next-line(unsafe-typecast)
-        uint32 nonce = uint32(nonceAndFlags & _NONCE_MASK);
-        uint32 branchNonce = _nextBranchNonce(nonceAndFlags);
-        if (nonce <= branchNonce) revert NonceExhausted();
-
-        uint32 nextBranchNonce = branchNonce;
-        unchecked {
-            nextNonceAfter = nonce - 1;
-            if (createsBranch) nextBranchNonce = branchNonce + 1;
-        }
-        if (nextNonceAfter <= nextBranchNonce) nextNonceAfter = 1;
-
-        book.nonceAndFlags = (nonceAndFlags & ~(_NONCE_MASK | _BRANCH_NONCE_MASK)) | uint256(nextNonceAfter)
-            | (uint256(nextBranchNonce) << _BRANCH_NONCE_SHIFT);
+        uint32 nonce;
+        uint32 newBranchNonce;
+        (nonce, newBranchNonce, nextNonceAfter) = _allocateNodeNonces(book, nonceAndFlags, isBid);
 
         restingOrder = _pack(price, quantity, nonce);
         orderOf[_orderId(id, restingOrder)] = OrderState({owner: owner, isBid: isBid});
 
-        _insertRestingOrder(book, restingOrder, isBid, hookEnabled, createsBranch ? branchNonce : 0);
+        _insertRestingOrder(book, restingOrder, isBid, hookEnabled, newBranchNonce);
 
         emit OrderRested(id, restingOrder, owner, isBid);
+    }
+
+    /// @dev Allocate one order identity and, for insertion into a nonempty side, one branch identity.
+    function _allocateNodeNonces(Book storage book, uint256 nonceAndFlags, bool isBid)
+        private
+        returns (uint32 orderNonce, uint32 newBranchNonce, uint32 nextOrderNonce)
+    {
+        // Order identities descend from uint32.max while branch identities ascend from one. They
+        // share one namespace and the book rotates before the two allocation fronts can collide.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        orderNonce = uint32(nonceAndFlags & _NONCE_MASK);
+        uint32 nextBranchNonce = _nextBranchNonce(nonceAndFlags);
+        if (orderNonce <= nextBranchNonce) revert NonceExhausted();
+
+        bool createsBranch =
+            isBid ? book.tree[_ROOT_NODE].rightNode != bytes32(0) : book.tree[_ROOT_NODE].leftNode != bytes32(0);
+        if (createsBranch) newBranchNonce = nextBranchNonce;
+
+        unchecked {
+            nextOrderNonce = orderNonce - 1;
+            if (createsBranch) ++nextBranchNonce;
+        }
+        if (nextOrderNonce <= nextBranchNonce) nextOrderNonce = 1;
+
+        book.nonceAndFlags = (nonceAndFlags & ~(_NONCE_MASK | _BRANCH_NONCE_MASK)) | uint256(nextOrderNonce)
+            | (uint256(nextBranchNonce) << _BRANCH_NONCE_SHIFT);
     }
 
     /// @notice Insert an already nonce-assigned resting order into the selected side tree.
