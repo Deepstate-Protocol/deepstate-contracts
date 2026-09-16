@@ -151,18 +151,6 @@ contract DeepstateV1 is Ownable {
         branch.rightNode = rightNode;
     }
 
-    /// @dev Rewrite an existing stable branch while retaining its cached same-price split depth.
-    function _rewriteBranchChildren(Book storage book, bytes32 node, bytes32 leftNode, bytes32 rightNode) private {
-        Branch storage branch = book.tree[_branchKey(node)];
-        if (_correctionCode(node) != 0) {
-            uint8 depth = 32 + uint8(uint256(branch.leftNode) >> _CACHED_DEPTH_SHIFT);
-            branch.leftNode = _encodeStoredLeftNode(node, leftNode, depth);
-        } else {
-            branch.leftNode = leftNode;
-        }
-        branch.rightNode = rightNode;
-    }
-
     /// @dev Encode only same-price branch children. Mixed-price depths are recoverable from the
     /// child ticks and therefore require no persistent metadata.
     function _encodeStoredLeftNode(bytes32 branchNode, bytes32 leftNode, uint8 depth)
@@ -332,19 +320,41 @@ contract DeepstateV1 is Ownable {
     /// @return remaining Incoming base quantity left unmatched.
     /// @return baseFilled Base quantity matched.
     /// @return quoteAmount Quote value matched.
-    function _matchBook(bytes32 id, Book storage book, bytes32 order, bool isBid, bool hookEnabled)
+    function _matchBook(
+        bytes32 id,
+        Book storage book,
+        bytes32 order,
+        bool isBid,
+        bool hookEnabled,
+        uint256 nonceAndFlags
+    )
         internal
-        returns (int32 limitPrice, uint160 remaining, uint160 baseFilled, uint256 quoteAmount)
+        returns (
+            int32 limitPrice,
+            uint160 remaining,
+            uint160 baseFilled,
+            uint256 quoteAmount,
+            uint256 updatedNonceAndFlags
+        )
     {
         (limitPrice, remaining) = _validateIncomingOrder(order);
+        updatedNonceAndFlags = nonceAndFlags;
 
         _beginMatchBuffer();
 
+        bool markDirty;
         if (isBid) {
-            (remaining, baseFilled, quoteAmount) = _matchIncomingBid(id, book, limitPrice, remaining, hookEnabled);
+            bool dirty = _rightSpineDirty(nonceAndFlags, false);
+            (remaining, baseFilled, quoteAmount, markDirty) =
+                _matchIncomingBid(id, book, limitPrice, remaining, hookEnabled, dirty);
+            if (markDirty && !dirty) updatedNonceAndFlags |= _ASK_RIGHT_SPINE_DIRTY;
         } else {
-            (remaining, baseFilled, quoteAmount) = _matchIncomingAsk(id, book, limitPrice, remaining, hookEnabled);
+            bool dirty = _rightSpineDirty(nonceAndFlags, true);
+            (remaining, baseFilled, quoteAmount, markDirty) =
+                _matchIncomingAsk(id, book, limitPrice, remaining, hookEnabled, dirty);
+            if (markDirty && !dirty) updatedNonceAndFlags |= _BID_RIGHT_SPINE_DIRTY;
         }
+        if (updatedNonceAndFlags != nonceAndFlags) book.nonceAndFlags = updatedNonceAndFlags;
 
         _emitBufferedMatches(id, !isBid);
     }
@@ -359,14 +369,18 @@ contract DeepstateV1 is Ownable {
     /// @return baseFilled Base quantity bought.
     /// @return quoteAmount Quote paid at resting ask prices.
     /// @dev The ask root lives in `tree[0].leftNode`.
-    function _matchIncomingBid(bytes32 id, Book storage book, int32 limitPrice, uint160 remaining, bool hookEnabled)
-        private
-        returns (uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
-    {
+    function _matchIncomingBid(
+        bytes32 id,
+        Book storage book,
+        int32 limitPrice,
+        uint160 remaining,
+        bool hookEnabled,
+        bool dirty
+    ) private returns (uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount, bool markDirty) {
         bytes32 root = book.tree[_ROOT_NODE].leftNode;
-        if (root == bytes32(0)) return (remaining, 0, 0);
+        if (root == bytes32(0)) return (remaining, 0, 0, false);
 
-        if (!_rightSpineDirty(book, false) && limitPrice == type(int32).max && _quantity(root) <= remaining) {
+        if (!dirty && limitPrice == type(int32).max && _quantity(root) <= remaining) {
             baseFilled = _quantity(root);
             if (hookEnabled) _recordTopOrderChange(_rightmostLeaf(book, root), 0);
             quoteAmount = _consumeSubtree(id, book, root, false);
@@ -374,12 +388,12 @@ contract DeepstateV1 is Ownable {
             unchecked {
                 newRemaining = remaining - baseFilled;
             }
-            return (newRemaining, baseFilled, quoteAmount);
+            return (newRemaining, baseFilled, quoteAmount, false);
         }
 
         bytes32 newRoot;
         bytes32 matchChange;
-        uint256 matchFlags = _rightSpineDirty(book, false) ? _MATCH_DIRTY : 0;
+        uint256 matchFlags = dirty ? _MATCH_DIRTY : 0;
         if (hookEnabled) matchFlags |= _MATCH_HOOK;
         (newRoot, baseFilled, quoteAmount, matchChange) =
             _matchAskRightSpine(id, book, root, limitPrice, remaining, matchFlags);
@@ -387,7 +401,7 @@ contract DeepstateV1 is Ownable {
             newRemaining = remaining - baseFilled;
         }
         if (newRoot != root) book.tree[_ROOT_NODE].leftNode = newRoot;
-        if (_matchChangeDirty(matchChange) && newRoot != bytes32(0)) _setRightSpineDirty(book, false);
+        markDirty = _matchChangeDirty(matchChange) && newRoot != bytes32(0);
     }
 
     /// @notice Match an incoming ask against the bid root.
@@ -400,14 +414,18 @@ contract DeepstateV1 is Ownable {
     /// @return baseFilled Base quantity sold.
     /// @return quoteAmount Quote received at resting bid prices.
     /// @dev The bid root lives in `tree[0].rightNode`.
-    function _matchIncomingAsk(bytes32 id, Book storage book, int32 limitPrice, uint160 remaining, bool hookEnabled)
-        private
-        returns (uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
-    {
+    function _matchIncomingAsk(
+        bytes32 id,
+        Book storage book,
+        int32 limitPrice,
+        uint160 remaining,
+        bool hookEnabled,
+        bool dirty
+    ) private returns (uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount, bool markDirty) {
         bytes32 root = book.tree[_ROOT_NODE].rightNode;
-        if (root == bytes32(0)) return (remaining, 0, 0);
+        if (root == bytes32(0)) return (remaining, 0, 0, false);
 
-        if (!_rightSpineDirty(book, true) && limitPrice == type(int32).min && _quantity(root) <= remaining) {
+        if (!dirty && limitPrice == type(int32).min && _quantity(root) <= remaining) {
             baseFilled = _quantity(root);
             if (hookEnabled) _recordTopOrderChange(_rightmostLeaf(book, root), 0);
             quoteAmount = _consumeSubtree(id, book, root, true);
@@ -415,12 +433,12 @@ contract DeepstateV1 is Ownable {
             unchecked {
                 newRemaining = remaining - baseFilled;
             }
-            return (newRemaining, baseFilled, quoteAmount);
+            return (newRemaining, baseFilled, quoteAmount, false);
         }
 
         bytes32 newRoot;
         bytes32 matchChange;
-        uint256 matchFlags = _rightSpineDirty(book, true) ? _MATCH_DIRTY : 0;
+        uint256 matchFlags = dirty ? _MATCH_DIRTY : 0;
         if (hookEnabled) matchFlags |= _MATCH_HOOK;
         (newRoot, baseFilled, quoteAmount, matchChange) =
             _matchBidRightSpine(id, book, root, limitPrice, remaining, matchFlags);
@@ -428,7 +446,7 @@ contract DeepstateV1 is Ownable {
             newRemaining = remaining - baseFilled;
         }
         if (newRoot != root) book.tree[_ROOT_NODE].rightNode = newRoot;
-        if (_matchChangeDirty(matchChange) && newRoot != bytes32(0)) _setRightSpineDirty(book, true);
+        markDirty = _matchChangeDirty(matchChange) && newRoot != bytes32(0);
     }
 
     /// @notice Cancel an open order or claim a filled order.
@@ -452,15 +470,19 @@ contract DeepstateV1 is Ownable {
     ///
     /// The order state is deleted before payout. If a token transfer reverts, the whole transaction
     /// reverts and the claim remains live.
-    function _cancelBook(bytes32 id, Book storage book, bytes32 order, address caller, uint256 hookFlags)
-        internal
-        returns (address owner, bool isBid, uint256 baseAmount, uint256 quoteAmount)
-    {
+    function _cancelBook(
+        bytes32 id,
+        Book storage book,
+        bytes32 order,
+        address caller,
+        uint256 hookFlags,
+        uint256 nonceAndFlags
+    ) internal returns (address owner, bool isBid, uint256 baseAmount, uint256 quoteAmount) {
         bytes32 orderKey = _orderId(id, order);
         OrderState storage state = orderOf[orderKey];
         owner = state.owner;
         if (owner != caller) {
-            if (_nextNonce(book) == 0) revert InvalidBook();
+            if (nonceAndFlags & _NONCE_MASK == 0) revert InvalidBook();
             if (_quantity(order) == 0) revert InvalidOrder();
             revert NotOrderOwner();
         }
@@ -470,7 +492,7 @@ contract DeepstateV1 is Ownable {
         isBid = state.isBid;
         bool hookEnabled = hookFlags & (isBid ? _CANCEL_HOOK_BID : _CANCEL_HOOK_ASK) != 0;
 
-        bytes32 removed = _removeOrderFromBook(book, order, isBid, hookEnabled);
+        bytes32 removed = _removeOrderFromBook(book, order, isBid, hookEnabled, nonceAndFlags);
 
         (baseAmount, quoteAmount) = _cancelAmounts(order, removed, isBid, originalQuantity);
 
@@ -520,7 +542,7 @@ contract DeepstateV1 is Ownable {
     /// @param isBid True to remove from the bid tree, false from the ask tree.
     /// @param hookEnabled True to record a top-order change when the removed leaf was best.
     /// @return removed Live leaf removed from the tree, or zero if the order was already absent.
-    function _removeOrderFromBook(Book storage book, bytes32 order, bool isBid, bool hookEnabled)
+    function _removeOrderFromBook(Book storage book, bytes32 order, bool isBid, bool hookEnabled, uint256 nonceAndFlags)
         private
         returns (bytes32 removed)
     {
@@ -534,7 +556,7 @@ contract DeepstateV1 is Ownable {
                 if (removed != bytes32(0) && newRoot != root) {
                     book.tree[_ROOT_NODE].rightNode = newRoot;
                 }
-                if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, true);
+                if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, true, nonceAndFlags);
                 if (hookEnabled && removedTop) {
                     _recordTopOrderChange(removed, _replacementTopNonce(book, newRoot));
                 }
@@ -549,7 +571,7 @@ contract DeepstateV1 is Ownable {
                 if (removed != bytes32(0) && newRoot != root) {
                     book.tree[_ROOT_NODE].leftNode = newRoot;
                 }
-                if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, false);
+                if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, false, nonceAndFlags);
                 if (hookEnabled && removedTop) {
                     _recordTopOrderChange(removed, _replacementTopNonce(book, newRoot));
                 }
@@ -902,7 +924,9 @@ contract DeepstateV1 is Ownable {
             (newLeftNode, fillQuantity, quoteAmount) = _matchAskSubtree(id, book, leftNode, limitPrice, remaining);
         }
 
-        newNode = _replaceBranch(book, node, newLeftNode, newRightNode, false);
+        newNode = fillQuantity == 0
+            ? _replaceBranchAfterSingleChildChange(book, node, newLeftNode, newRightNode, false, false)
+            : _replaceBranch(book, node, newLeftNode, newRightNode, false);
         unchecked {
             fillQuantity += rightFillQuantity;
             quoteAmount += rightQuoteAmount;
@@ -1045,7 +1069,9 @@ contract DeepstateV1 is Ownable {
             (newLeftNode, fillQuantity, quoteAmount) = _matchBidSubtree(id, book, leftNode, limitPrice, remaining);
         }
 
-        newNode = _replaceBranch(book, node, newLeftNode, newRightNode, true);
+        newNode = fillQuantity == 0
+            ? _replaceBranchAfterSingleChildChange(book, node, newLeftNode, newRightNode, true, false)
+            : _replaceBranch(book, node, newLeftNode, newRightNode, true);
         unchecked {
             fillQuantity += rightFillQuantity;
             quoteAmount += rightQuoteAmount;
@@ -1095,11 +1121,11 @@ contract DeepstateV1 is Ownable {
 
         if (_bit(nodeKey, branchDepth)) {
             rightNode = _insertBid(book, rightNode, node, nodeKey, hookEnabled, newBranchSerial);
+            return _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, true, false);
         } else {
             leftNode = _insertBid(book, leftNode, node, nodeKey, false, newBranchSerial);
+            return _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, true, true);
         }
-
-        return _replaceBranch(book, root, leftNode, rightNode, true);
     }
 
     /// @notice Insert a leaf or branch into the ask tree.
@@ -1142,11 +1168,11 @@ contract DeepstateV1 is Ownable {
 
         if (_bit(nodeKey, branchDepth)) {
             rightNode = _insertAsk(book, rightNode, node, nodeKey, hookEnabled, newBranchSerial);
+            return _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, false, false);
         } else {
             leftNode = _insertAsk(book, leftNode, node, nodeKey, false, newBranchSerial);
+            return _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, false, true);
         }
-
-        return _replaceBranch(book, root, leftNode, rightNode, false);
     }
 
     /// @notice Remove one bid leaf by exact bid sort key.
@@ -1185,7 +1211,12 @@ contract DeepstateV1 is Ownable {
             (newRoot, branchDirty) = _replaceRightmostRightChild(book, root, leftNode, rightNode, true);
             return (newRoot, removed, dirtyChanged || branchDirty, removedTop);
         }
-        return (_replaceBranch(book, root, leftNode, rightNode, true), removed, dirtyChanged, removedTop);
+        return (
+            _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, true, !goRight),
+            removed,
+            dirtyChanged,
+            removedTop
+        );
     }
 
     /// @notice Remove one ask leaf by exact ask sort key.
@@ -1222,7 +1253,12 @@ contract DeepstateV1 is Ownable {
             (newRoot, branchDirty) = _replaceRightmostRightChild(book, root, leftNode, rightNode, false);
             return (newRoot, removed, dirtyChanged || branchDirty, removedTop);
         }
-        return (_replaceBranch(book, root, leftNode, rightNode, false), removed, dirtyChanged, removedTop);
+        return (
+            _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, false, !goRight),
+            removed,
+            dirtyChanged,
+            removedTop
+        );
     }
 
     /// @notice Update a right-spine branch after only its right child changed.
@@ -1272,11 +1308,54 @@ contract DeepstateV1 is Ownable {
             newBranch = leftNode;
         } else {
             newBranch = _branchNodeForChildren(book, leftNode, rightNode, isBid, _nonce(oldBranch));
-            // Replacement callers preserve left/right ordering from an existing valid branch.
-            _rewriteBranchChildren(book, newBranch, leftNode, rightNode);
+            // Right-first matching can leave both children alive only when the left child was not
+            // touched. The duplicate-child corruption guard also arrives here after changing only
+            // the right child, so the existing left slot and its cached split depth stay valid.
+            _rewriteSingleBranchChild(book, newBranch, leftNode, rightNode, false);
         }
 
         return newBranch;
+    }
+
+    /// @dev Rebuild an existing branch after exactly one logical child changed. A surviving
+    /// branch's Patricia split class is fixed by its topology, so the unchanged child slot needs no
+    /// SSTORE. Same-price left-child rewrites preserve the cached split depth already stored there.
+    function _replaceBranchAfterSingleChildChange(
+        Book storage book,
+        bytes32 oldBranch,
+        bytes32 leftNode,
+        bytes32 rightNode,
+        bool isBid,
+        bool leftChanged
+    ) private returns (bytes32 newBranch) {
+        if (leftNode == bytes32(0)) return rightNode;
+        if (rightNode == bytes32(0)) return leftNode;
+
+        newBranch = _branchNodeForChildren(book, leftNode, rightNode, isBid, _nonce(oldBranch));
+        _rewriteSingleBranchChild(book, newBranch, leftNode, rightNode, leftChanged);
+    }
+
+    /// @dev Persist the only child pointer changed by a stable-identity branch rewrite.
+    function _rewriteSingleBranchChild(
+        Book storage book,
+        bytes32 branchNode,
+        bytes32 leftNode,
+        bytes32 rightNode,
+        bool leftChanged
+    ) private {
+        Branch storage branch = book.tree[_branchKey(branchNode)];
+        if (leftChanged) {
+            if (_correctionCode(branchNode) != 0) {
+                // Only five cached bits survive the shift.
+                // forge-lint: disable-next-line(unsafe-typecast)
+                uint8 depth = 32 + uint8(uint256(branch.leftNode) >> _CACHED_DEPTH_SHIFT);
+                branch.leftNode = _encodeStoredLeftNode(branchNode, leftNode, depth);
+            } else {
+                branch.leftNode = leftNode;
+            }
+        } else {
+            branch.rightNode = rightNode;
+        }
     }
 
     /// @notice Partially consume a clean same-tick subtree while decoding its tick only once.
@@ -1301,18 +1380,20 @@ contract DeepstateV1 is Ownable {
         uint16 shift
     ) private returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount) {
         uint160 nodeQuantity = _quantity(node);
-        bytes32 leftNode = _leftNode(book, node);
+        uint32 correctionCode = _correctionCode(node);
 
         if (nodeQuantity <= remaining) {
-            quoteAmount = leftNode == bytes32(0)
-                ? _quoteAtFactor(factor, shift, nodeQuantity, restingIsBid)
-                : _uniformNodeQuoteAtFactor(book, node, restingIsBid, factor, shift);
-            bytes32 eventNode = leftNode == bytes32(0) ? _withQuantityAndCorrection(node, nodeQuantity, 1) : node;
+            quoteAmount = _quoteAtFactor(factor, shift, nodeQuantity, restingIsBid);
+            if (correctionCode != 0) {
+                uint256 correction = uint256(correctionCode) - 1;
+                quoteAmount = restingIsBid ? quoteAmount + correction : quoteAmount - correction;
+            }
+            bytes32 eventNode = correctionCode == 0 ? _withQuantityAndCorrection(node, nodeQuantity, 1) : node;
             _recordMatch(eventNode);
             return (bytes32(0), nodeQuantity, quoteAmount);
         }
 
-        if (leftNode == bytes32(0)) {
+        if (correctionCode == 0) {
             uint160 newQuantity;
             unchecked {
                 newQuantity = nodeQuantity - remaining;
@@ -1325,6 +1406,7 @@ contract DeepstateV1 is Ownable {
             return (_withQuantity(node, newQuantity), remaining, quoteAmount);
         }
 
+        bytes32 leftNode = _leftNode(book, node);
         bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
         uint160 rightFillQuantity;
         uint256 rightQuoteAmount;
@@ -1383,7 +1465,9 @@ contract DeepstateV1 is Ownable {
         // fewer than 2^32 live nodes, so correction + 1 is strictly representable in uint32.
         // forge-lint: disable-next-line(unsafe-typecast)
         newNode = _branchNode(_price(oldNode), newQuantity, uint32(correction + 1), _nonce(oldNode));
-        _rewriteBranchChildren(book, newNode, leftNode, rightNode);
+        // A surviving uniform branch cannot have changed its left child: matching is right-first,
+        // and reaching the left child requires consuming the right child and collapsing the branch.
+        _rewriteSingleBranchChild(book, newNode, leftNode, rightNode, false);
     }
 
     /// @notice Rebuild a previously optimized right spine back into exact aggregate branches.
@@ -1399,7 +1483,7 @@ contract DeepstateV1 is Ownable {
         if (leftNode == bytes32(0)) return node;
 
         bytes32 rightNode = _materializeRightSpine(book, book.tree[_branchKey(node)].rightNode, isBid);
-        return _replaceBranch(book, node, leftNode, rightNode, isBid);
+        return _replaceBranchAfterSingleChildChange(book, node, leftNode, rightNode, isBid, false);
     }
 
     /// @notice Return the aggregate quantity for a fully crossing same-price subtree on the global right spine.
@@ -1559,14 +1643,14 @@ contract DeepstateV1 is Ownable {
 
     /// @notice Return whether a node represents one tick exactly.
     function _uniformNode(Book storage book, bytes32 node) private view returns (bool) {
-        return book.tree[_branchKey(node)].leftNode == bytes32(0) || _correctionCode(node) != 0;
+        return _correctionCode(node) != 0 || book.tree[_branchKey(node)].leftNode == bytes32(0);
     }
 
     /// @notice Return the exact sum of leaf-level rounded notionals for a uniform-tick node.
-    function _uniformNodeQuote(Book storage book, bytes32 node, bool isBid) private view returns (uint256 quoteAmount) {
+    function _uniformNodeQuote(Book storage, bytes32 node, bool isBid) private pure returns (uint256 quoteAmount) {
         uint160 quantity = _quantity(node);
         quoteAmount = _quoteValue(_price(node), quantity, isBid);
-        if (book.tree[_branchKey(node)].leftNode == bytes32(0)) return quoteAmount;
+        if (_correctionCode(node) == 0) return quoteAmount;
 
         return _applyUniformCorrection(node, quoteAmount, isBid);
     }
@@ -1584,13 +1668,13 @@ contract DeepstateV1 is Ownable {
     }
 
     /// @dev Uniform-node quote using a price factor already decoded for the node's tick.
-    function _uniformNodeQuoteAtFactor(Book storage book, bytes32 node, bool isBid, uint256 factor, uint16 shift)
+    function _uniformNodeQuoteAtFactor(Book storage, bytes32 node, bool isBid, uint256 factor, uint16 shift)
         private
-        view
+        pure
         returns (uint256 quoteAmount)
     {
         quoteAmount = _quoteAtFactor(factor, shift, _quantity(node), isBid);
-        if (book.tree[_branchKey(node)].leftNode == bytes32(0)) return quoteAmount;
+        if (_correctionCode(node) == 0) return quoteAmount;
 
         uint256 correction = uint256(_correctionCode(node)) - 1;
         quoteAmount = isBid ? quoteAmount + correction : quoteAmount - correction;
@@ -1860,13 +1944,13 @@ contract DeepstateV1 is Ownable {
         returns (uint256 quoteAmount)
     {
         uint160 quantity = _quantity(node);
+        if (_correctionCode(node) != 0) {
+            return _uniformBranchQuote(node, restingIsBid);
+        }
+
         bytes32 leftNode = _leftNode(book, node);
         if (leftNode == bytes32(0)) {
             return _quoteValue(_price(node), quantity, restingIsBid);
-        }
-
-        if (_correctionCode(node) != 0) {
-            return _uniformNodeQuote(book, node, restingIsBid);
         }
 
         quoteAmount = _subtreeQuote(book, book.tree[_branchKey(node)].rightNode, restingIsBid);
@@ -1939,16 +2023,15 @@ contract DeepstateV1 is Ownable {
     /// @notice Return whether a side has optimized right-spine anchors that need materialization before insert.
     /// @param isBid True for the bid tree, false for the ask tree.
     /// @return dirty True if the side's right spine contains stale branch aggregate words.
-    function _rightSpineDirty(Book storage book, bool isBid) private view returns (bool dirty) {
+    function _rightSpineDirty(uint256 nonceAndFlags, bool isBid) private pure returns (bool dirty) {
         uint256 flag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
-        dirty = book.nonceAndFlags & flag != 0;
+        dirty = nonceAndFlags & flag != 0;
     }
 
     /// @notice Mark a side's right spine dirty.
     /// @param isBid True for the bid tree, false for the ask tree.
-    function _setRightSpineDirty(Book storage book, bool isBid) private {
+    function _setRightSpineDirty(Book storage book, bool isBid, uint256 nonceAndFlags) private {
         uint256 flag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
-        uint256 nonceAndFlags = book.nonceAndFlags;
         if (nonceAndFlags & flag == 0) {
             book.nonceAndFlags = nonceAndFlags | flag;
         }
@@ -2605,8 +2688,9 @@ contract DeepstateV1 is Ownable {
 
         bool isBid;
         address owner;
-        uint256 hookFlags = _cancelHookFlags(book.nonceAndFlags);
-        (owner, isBid, baseAmount, quoteAmount) = _cancelBook(id, book, order, msg.sender, hookFlags);
+        uint256 nonceAndFlags = book.nonceAndFlags;
+        uint256 hookFlags = _cancelHookFlags(nonceAndFlags);
+        (owner, isBid, baseAmount, quoteAmount) = _cancelBook(id, book, order, msg.sender, hookFlags, nonceAndFlags);
         if (_cancelHookEnabled(hookFlags, isBid)) _executeTopOrderHook(token0, token1, id, isBid);
 
         if (baseAmount != 0) _safeTransferOut(token0, owner, baseAmount);
@@ -2752,7 +2836,7 @@ contract DeepstateV1 is Ownable {
         uint160 baseFilled;
         uint256 quoteAmount;
 
-        (limitPrice, remaining, baseFilled, quoteAmount) =
+        (limitPrice, remaining, baseFilled, quoteAmount, routedNonceAndFlags) =
             _matchOrValidate(params, routedBookId, routedBook, routedNonceAndFlags);
 
         // Rotation initializes the successor as soon as the order- and branch-identity allocation
@@ -2774,6 +2858,7 @@ contract DeepstateV1 is Ownable {
                     routedBookId,
                     routedBook,
                     routedNonce == 0,
+                    routedNonceAndFlags,
                     limitPrice,
                     remaining,
                     true
@@ -2794,6 +2879,7 @@ contract DeepstateV1 is Ownable {
                     routedBookId,
                     routedBook,
                     routedNonce == 0,
+                    routedNonceAndFlags,
                     limitPrice,
                     remaining,
                     false
@@ -2875,7 +2961,17 @@ contract DeepstateV1 is Ownable {
         bytes32 routedBookId,
         Book storage routedBook,
         uint256 routedNonceAndFlags
-    ) private returns (int32 limitPrice, uint160 remaining, uint160 baseFilled, uint256 quoteAmount) {
+    )
+        private
+        returns (
+            int32 limitPrice,
+            uint160 remaining,
+            uint160 baseFilled,
+            uint256 quoteAmount,
+            uint256 updatedNonceAndFlags
+        )
+    {
+        updatedNonceAndFlags = routedNonceAndFlags;
         // forge-lint: disable-next-line(unsafe-typecast)
         uint32 routedNonce = uint32(routedNonceAndFlags);
         if (routedNonce == 0) {
@@ -2883,8 +2979,8 @@ contract DeepstateV1 is Ownable {
             (limitPrice, remaining) = _validateIncomingOrder(params.order);
         } else {
             bool hookEnabled = _bookHookEnabled(routedNonceAndFlags, !params.isBid);
-            (limitPrice, remaining, baseFilled, quoteAmount) =
-                _matchBook(routedBookId, routedBook, params.order, params.isBid, hookEnabled);
+            (limitPrice, remaining, baseFilled, quoteAmount, updatedNonceAndFlags) =
+                _matchBook(routedBookId, routedBook, params.order, params.isBid, hookEnabled, routedNonceAndFlags);
             if (hookEnabled) _executeTopOrderHook(params.token0, params.token1, routedBookId, !params.isBid);
         }
     }
@@ -2911,6 +3007,7 @@ contract DeepstateV1 is Ownable {
         bytes32 routedBookId,
         Book storage routedBook,
         bool routedBookWasEmpty,
+        uint256 routedNonceAndFlags,
         int32 limitPrice,
         uint160 remaining,
         bool isBid
@@ -2921,7 +3018,7 @@ contract DeepstateV1 is Ownable {
         if (routedBookWasEmpty) {
             restNonceAndFlags = _initializeRoutedBook(token0, token1, routedEpoch, routedBookId);
         } else {
-            restNonceAndFlags = routedBook.nonceAndFlags;
+            restNonceAndFlags = routedNonceAndFlags;
         }
         uint32 nextNonceAfter;
         bool hookEnabled = _bookHookEnabled(restNonceAndFlags, isBid);
