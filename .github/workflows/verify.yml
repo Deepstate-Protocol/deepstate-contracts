@@ -159,6 +159,29 @@ jobs:
           GAS_CONTRACT: ${{ matrix.contract }}
         run: make snapshot-runtime-check GAS_CONTRACTS="$GAS_CONTRACT"
 
+  solar:
+    name: Solar Compilation and Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          submodules: recursive
+
+      - name: Install Solar-enabled Foundry
+        uses: foundry-rs/foundry-toolchain@b00af27efadbc7b4ca8b82abbd903b17cc874d2a # v1.9.0
+        with:
+          version: v1.9.0
+
+      - name: Compiler Versions
+        run: |
+          forge --version
+          solar --version
+
+      - name: Solar Build, Behavioral Tests, Invariants, and Gas Snapshot
+        run: make verify-solar
+
   coverage:
     name: Coverage
     runs-on: ubuntu-24.04
@@ -239,6 +262,7 @@ jobs:
       - tests
       - invariants
       - snapshots
+      - solar
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -248,13 +272,15 @@ jobs:
           TESTS_RESULT: ${{ needs.tests.result }}
           INVARIANTS_RESULT: ${{ needs.invariants.result }}
           SNAPSHOTS_RESULT: ${{ needs.snapshots.result }}
+          SOLAR_RESULT: ${{ needs.solar.result }}
         run: |
-          printf 'quality=%s tests=%s invariants=%s snapshots=%s\n' \
-            "$QUALITY_RESULT" "$TESTS_RESULT" "$INVARIANTS_RESULT" "$SNAPSHOTS_RESULT"
+          printf 'quality=%s tests=%s invariants=%s snapshots=%s solar=%s\n' \
+            "$QUALITY_RESULT" "$TESTS_RESULT" "$INVARIANTS_RESULT" "$SNAPSHOTS_RESULT" "$SOLAR_RESULT"
           [[ "$QUALITY_RESULT" == "success" ]]
           [[ "$TESTS_RESULT" == "success" ]]
           [[ "$INVARIANTS_RESULT" == "success" ]]
           [[ "$SNAPSHOTS_RESULT" == "success" ]]
+          [[ "$SOLAR_RESULT" == "success" ]]
 
   security:
     name: Coverage and Formal

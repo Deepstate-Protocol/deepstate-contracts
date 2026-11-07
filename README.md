@@ -65,7 +65,7 @@ Higher order nonce still means earlier time priority at the same price.
 
 ## Security Assumptions
 
-- Builds are pinned to Solidity `0.8.28` with Foundry compiler auto-detection disabled and optimizer enabled. Do not deploy bytecode built with a different compiler/profile without rerunning the full test and invariant suite.
+- Default builds are pinned to Solidity `0.8.28` with Foundry compiler auto-detection disabled and optimizer enabled. Do not deploy bytecode built with a different compiler/profile without rerunning the full test and invariant suite.
 - `evm_version = "cancun"` is required because the reentrancy guard uses transient storage opcodes.
 - `address(0)` denotes native ETH and is valid only as sorted token0. Native settlement requires enough `msg.value` to cover the caller's net ETH debit and refunds all excess after outputs and fees. Every nonzero token must be a standard exact-balance ERC20 selected by deployment configuration. Every ERC20 transfer is assumed to debit the source and credit the recipient by exactly the requested amount. Fee-on-transfer, rebasing, mint-on-transfer, or otherwise inexact tokens are out of scope for this contract and must be excluded before deployment.
 - Filled resting orders are claimed through `cancel(token0, token1, epoch, order)`, which also withdraws any unfilled remainder.
@@ -128,6 +128,7 @@ make formal-halmos
 
 `gas-runtime` and `snapshot-runtime` use a fixed harness that pauses setup gas and meters one target `fill` or `cancel` call per test. Deployment-heavy negative-token and reentrancy tests remain in `make verify`, but they are intentionally outside the runtime gas profile.
 `make verify` runs the invariant contract through its dedicated `invariant` target, so the regular `test` target excludes that contract to avoid duplicate invariant execution.
+
 `invariant-deep-shard` and `invariant-deep-shards` split the deep invariant suite into deterministic batches with `INVARIANT_SHARDS` and `INVARIANT_SHARD`, which makes long 2048-run profiles easier to audit and retry.
 `make verify` and `make verify-deep` include `snapshot-runtime-check` so runtime gas drift is reviewed instead of silently accepted.
 Pull requests run the components of `make verify` as parallel jobs, plus coverage, SMT, and Halmos
@@ -157,3 +158,33 @@ Deploy script:
 ```sh
 forge script script/DeepstateV1.s.sol:DeepstateV1Script --rpc-url <rpc> --private-key <key> --broadcast
 ```
+
+## Experimental Solar Compilation
+
+The opt-in `solar` profile compiles bytecode with Solar instead of solc. Use Foundry **v1.9.0**
+(`6056c5845d34205a83cf7108042adb137325c9df`), which includes Solar **0.3.0**
+(`e7a91fc70f29dc8d0c236d56a2aa7706dc2555cf`). Both executables must be on `PATH`.
+
+```sh
+make build-solar
+make test-solar
+make invariant-solar
+make snapshot-solar-check
+make verify-solar
+```
+
+`SOLAR_FORGE=/path/to/forge` selects a separate Forge installation. Solar output and cache live in
+`out-solar/` and `cache-solar/`; its isolated runtime snapshot is `.gas-snapshot.solar`. Run
+`make snapshot-solar` to refresh that snapshot with the pinned toolchain. Dynamic test linking is
+disabled for these targets to keep the gas harness consistent.
+
+Solar 0.3.0 is experimental and its maintainers advise against production deployment. It implements
+Solidity 0.8.38 and warns about this repository's exact 0.8.28 pragmas. Those pragmas remain unchanged;
+the Solar build is a compiler-compatibility experiment, not a Solidity 0.8.28-equivalent release.
+See the [Solar release notes](https://github.com/paradigmxyz/solar/blob/main/CHANGELOG.md).
+
+The default build, production verification, coverage, formal checks, and `.gas-snapshot.runtime`
+remain on solc 0.8.28 and the existing CI-pinned Forge. A separate CI job runs Solar behavioral tests,
+stateful invariants, and its gas snapshot. For a compiler gas comparison, run both compilers with the
+**same Forge version and harness**; the two committed snapshots use different Forge versions and
+must not be compared directly as a compiler-only delta.
