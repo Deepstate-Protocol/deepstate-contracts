@@ -160,11 +160,16 @@ one/two-maker paths, and stateful model invariants.
 Only right-child rewrites can make a right-spine anchor stale. Its child pointers remain valid, every
 left subtree remains exact, and matching never treats a stale mixed-price aggregate as exact. The
 dirty same-tick recovery recursively adds exact left summaries and the right suffix. Materialization
-rebuilds the right child before its parent. Hence dirty execution preserves membership, priority,
-quantity, and quote accounting; same-side insertion restores clean aggregates first.
+rebuilds the right child before its parent. Same-side insertion shares the dirty traversal while it
+follows right children, rebuilding each shared ancestor only once. Before insertion diverges into
+an exact left subtree, it materializes the untouched right tail and persists its repaired summary.
+Before creating a new parent above a dirty subtree, it materializes that subtree. Empty roots and
+leaves require no repair. Thus every child is exact before its parent is rebuilt, and insertion
+returns a clean tree without changing membership, priority, quantity, or quote accounting.
 
 **Evidence:** `INDUCTION` over the dirty suffix length, production formal dirty-spine paths, corruption
-regressions, and stateful right-spine invariants.
+regressions, deterministic bid/ask divergence tests checking every aggregate, payout, and top hook,
+and stateful right-spine invariants.
 
 ### R6. Best-price matching
 

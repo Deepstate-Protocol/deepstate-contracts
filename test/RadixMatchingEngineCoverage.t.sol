@@ -1060,6 +1060,91 @@ contract RadixMatchingEngineCoverageTest is Test {
         assertEq(engine.askRoot(), bytes32(0));
     }
 
+    function testCoverage_DirtySpineInsertionRepairsEveryDivergence() public {
+        CoverageHook hook = new CoverageHook();
+        engine.setPoolHookConfig(address(base), address(quote), address(hook), true, true);
+        int32[8] memory prices = [int32(0), 63, 64, 65, 70, 71, 72, 128];
+        for (uint256 side; side < 2; ++side) {
+            bool isBid = side != 0;
+            for (uint256 mode; mode < prices.length; ++mode) {
+                _assertDirtySpineInsertion(isBid, prices[mode], hook);
+            }
+        }
+    }
+
+    function _assertDirtySpineInsertion(bool isBid, int32 insertPrice, CoverageHook hook) private {
+        bytes32[8] memory orders;
+        vm.startPrank(alice);
+        for (uint256 i; i < orders.length; ++i) {
+            orders[i] = engine.fill(_order(int32(int256(64 + i)), 5, 0), isBid);
+        }
+        vm.stopPrank();
+        int32 topPrice = isBid ? int32(71) : int32(64);
+        vm.startPrank(carol);
+        engine.fill(_order(topPrice, 1, 0), !isBid);
+        engine.fill(_order(topPrice, 1, 0), !isBid);
+        vm.stopPrank();
+        uint256 hookCalls = hook.calls();
+
+        vm.prank(bob);
+        bytes32 inserted = engine.fill(_order(insertPrice, 7, 0), isBid);
+        bool improvesTop = isBid ? insertPrice > topPrice : insertPrice < topPrice;
+        assertEq(hook.calls(), hookCalls + (improvesTop ? 1 : 0));
+        if (improvesTop) assertEq(hook.lastIncomingNonce(), _nonce(inserted));
+        uint256 dirtyFlag = isBid ? BID_RIGHT_SPINE_DIRTY : ASK_RIGHT_SPINE_DIRTY;
+        assertEq(uint256(vm.load(address(engine), _nextNonceSlot())) & dirtyFlag, 0);
+        (uint160 quantity,,,) = _assertExactSubtree(isBid ? engine.bidRoot() : engine.askRoot(), isBid);
+        assertEq(quantity, 45);
+
+        for (uint256 i; i < orders.length; ++i) {
+            bool wasTop = isBid ? i == 7 : i == 0;
+            uint160 remaining = wasTop ? 3 : 5;
+            int32 price = int32(int256(64 + i));
+            vm.prank(alice);
+            (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(orders[i]);
+            assertEq(baseAmount, isBid ? 5 - remaining : remaining);
+            assertEq(
+                quoteAmount,
+                isBid
+                    ? _quoteValue(price, remaining, true)
+                    : _quoteValue(price, 5, false) - _quoteValue(price, remaining, false)
+            );
+        }
+        vm.prank(bob);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(inserted);
+        assertEq(baseAmount, isBid ? 0 : 7);
+        assertEq(quoteAmount, isBid ? _quoteValue(insertPrice, 7, true) : 0);
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+    }
+
+    function _assertExactSubtree(bytes32 node, bool isBid)
+        private
+        view
+        returns (uint160 quantity, uint256 quoteAmount, bool uniform, int32 price)
+    {
+        (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
+        if (leftNode == bytes32(0)) {
+            return (_quantity(node), _quoteValue(_price(node), _quantity(node), isBid), true, _price(node));
+        }
+        (uint160 leftQuantity, uint256 leftQuote, bool leftUniform, int32 leftPrice) =
+            _assertExactSubtree(leftNode, isBid);
+        (uint160 rightQuantity, uint256 rightQuote, bool rightUniform, int32 rightPrice) =
+            _assertExactSubtree(rightNode, isBid);
+        quantity = leftQuantity + rightQuantity;
+        quoteAmount = leftQuote + rightQuote;
+        uniform = leftUniform && rightUniform && leftPrice == rightPrice;
+        price = leftPrice;
+        assertEq(_quantity(node), quantity);
+        assertEq(_price(node), price);
+        uint256 correctionCode;
+        if (uniform) {
+            uint256 aggregateQuote = _quoteValue(price, quantity, isBid);
+            correctionCode = (isBid ? quoteAmount - aggregateQuote : aggregateQuote - quoteAmount) + 1;
+        }
+        assertEq(_correctionCode(node), correctionCode);
+    }
+
     function _fundAndApprove(address account) internal {
         base.mint(account, 1_000_000_000);
         quote.mint(account, 1_000_000_000);

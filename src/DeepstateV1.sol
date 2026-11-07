@@ -58,8 +58,8 @@ import {TickMath32} from "./libraries/TickMath32.sol";
 /// Right-spine optimization: fills and cancels near the best price often mutate only the rightmost
 /// path. Nonce-addressed child slots remain stable while the packed node is rewritten in its parent.
 /// The branch word can then have a stale aggregate quantity/path, so the corresponding book flag is
-/// set. Same-side insertion materializes the right spine back into exact aggregate nodes before
-/// adding a new leaf. Matching can still safely consume same-price dirty subtrees by recomputing
+/// set. Same-side insertion repairs shared ancestors as it adds the new leaf, materializing any
+/// untouched dirty tail before divergence. Matching can consume same-price dirty subtrees by recomputing
 /// their live quantity from child pointers.
 ///
 /// Pools use sorted token addresses, and each pool epoch derives an isolated book id. `fillRoute`
@@ -591,11 +591,10 @@ contract DeepstateV1 is Ownable {
     /// @return restingOrder Packed resting order with assigned nonce.
     /// @return nextNonceAfter The book nonce after assigning `restingOrder`.
     /// @dev
-    /// Right-spine dirty flags are materialized before insertion on the same side. This preserves
-    /// exact branch quantities for the insertion path while allowing earlier best-price fills to
-    /// avoid rewriting ancestors. A side that becomes empty may conservatively retain its dirty
-    /// flag. `_materializeRightSpine` treats its zero root as an empty subtree, then the flag clear
-    /// is folded into the nonce decrement written below instead of consuming a standalone SSTORE.
+    /// Dirty-spine repair shares the insertion traversal, rebuilding common ancestors only once.
+    /// If insertion diverges from the right spine, its remaining dirty tail is repaired first.
+    /// Empty roots need no repair, even when they conservatively retain a dirty flag. Clearing
+    /// that flag is folded into nonce allocation instead of consuming a standalone SSTORE.
     function _restBook(
         bytes32 id,
         Book storage book,
@@ -609,12 +608,9 @@ contract DeepstateV1 is Ownable {
         _validateRestingQuoteDomain(price, quantity, isBid);
 
         uint256 dirtyFlag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
+        uint256 insertFlags = hookEnabled ? _MATCH_HOOK : 0;
         if (nonceAndFlags & dirtyFlag != 0) {
-            if (isBid) {
-                book.tree[_ROOT_NODE].rightNode = _materializeRightSpine(book, book.tree[_ROOT_NODE].rightNode, true);
-            } else {
-                book.tree[_ROOT_NODE].leftNode = _materializeRightSpine(book, book.tree[_ROOT_NODE].leftNode, false);
-            }
+            insertFlags |= _MATCH_DIRTY;
             nonceAndFlags &= ~dirtyFlag;
         }
 
@@ -625,7 +621,7 @@ contract DeepstateV1 is Ownable {
             (nonce, newBranchSerial, nextNonceAfter) = _allocateNodeNonces(book, nonceAndFlags, root != bytes32(0));
 
             restingOrder = _pack(price, quantity, nonce);
-            _insertRestingOrder(book, root, restingOrder, isBid, hookEnabled, newBranchSerial);
+            _insertRestingOrder(book, root, restingOrder, isBid, insertFlags, newBranchSerial);
         }
 
         orderOf[_orderId(id, restingOrder)] = OrderState({owner: owner, isBid: isBid});
@@ -671,22 +667,22 @@ contract DeepstateV1 is Ownable {
     /// @param book Book storage containing both side roots.
     /// @param restingOrder Packed leaf to insert.
     /// @param isBid True for bid tree, false for ask tree.
-    /// @param hookEnabled True to record a top-order change if insertion improves the book.
+    /// @param insertFlags Hook tracking and dirty right-spine flags for this insertion.
     function _insertRestingOrder(
         Book storage book,
         bytes32 root,
         bytes32 restingOrder,
         bool isBid,
-        bool hookEnabled,
+        uint256 insertFlags,
         uint32 newBranchSerial
     ) private {
         if (isBid) {
             book.tree[_ROOT_NODE].rightNode = _insertBid(
-                book, root, restingOrder, _bidSortKey(restingOrder), hookEnabled, newBranchSerial
+                book, root, restingOrder, _bidSortKey(restingOrder), insertFlags, newBranchSerial
             );
         } else {
             book.tree[_ROOT_NODE].leftNode =
-                _insertAsk(book, root, restingOrder, _askSortKey(restingOrder), hookEnabled, newBranchSerial);
+                _insertAsk(book, root, restingOrder, _askSortKey(restingOrder), insertFlags, newBranchSerial);
         }
     }
 
@@ -1082,29 +1078,30 @@ contract DeepstateV1 is Ownable {
     /// @param root Current subtree root.
     /// @param node Node to insert.
     /// @param nodeKey Bid sort key for `node`.
-    /// @param hookEnabled True while this recursive frame can still affect the bid-side best order.
+    /// @param insertFlags Hook tracking and dirty right-spine flags for this recursive frame.
     /// @return newRoot Updated subtree root.
     /// @dev
     /// Insertion follows Patricia/radix-tree rules. If the new key diverges before the current
     /// branch split, a new parent branch is created above `root`. Otherwise recursion continues
-    /// into the child selected by the branch split bit.
+    /// into the child selected by the branch split bit. A dirty right spine shares this traversal;
+    /// insertion into its left subtree repairs the right tail before rebuilding the parent.
     function _insertBid(
         Book storage book,
         bytes32 root,
         bytes32 node,
         uint64 nodeKey,
-        bool hookEnabled,
+        uint256 insertFlags,
         uint32 newBranchSerial
     ) private returns (bytes32 newRoot) {
         if (root == bytes32(0)) {
-            if (hookEnabled) _recordTopOrderChange(bytes32(0), _nonce(node));
+            if (insertFlags & _MATCH_HOOK != 0) _recordTopOrderChange(bytes32(0), _nonce(node));
             return node;
         }
 
         (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, root);
         if (rightNode == bytes32(0)) {
             uint64 rootKey = _bidSortKey(root);
-            if (hookEnabled && nodeKey > rootKey) {
+            if (insertFlags & _MATCH_HOOK != 0 && nodeKey > rootKey) {
                 _recordTopOrderChange(root, _nonce(node));
             }
             return _storeBranch(book, root, node, rootKey, nodeKey, true, newBranchSerial);
@@ -1113,17 +1110,26 @@ contract DeepstateV1 is Ownable {
         (bytes32 leftNode, uint8 branchDepth) = _leftNodeAndDepthAt(branchSlot, root, rightNode);
         uint64 leftKey = branchDepth < 32 ? _bidSortKey(root) : _bidNodeKey(book, leftNode);
         if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
-            if (hookEnabled && _bit(nodeKey, _commonPrefix(nodeKey, leftKey))) {
+            if (insertFlags & _MATCH_DIRTY != 0) root = _materializeRightSpine(book, root, true);
+            if (insertFlags & _MATCH_HOOK != 0 && _bit(nodeKey, _commonPrefix(nodeKey, leftKey))) {
                 _recordTopOrderChange(_rightmostLeaf(book, root), _nonce(node));
             }
             return _storeBranch(book, root, node, leftKey, nodeKey, true, newBranchSerial);
         }
 
         if (_bit(nodeKey, branchDepth)) {
-            rightNode = _insertBid(book, rightNode, node, nodeKey, hookEnabled, newBranchSerial);
+            rightNode = _insertBid(book, rightNode, node, nodeKey, insertFlags, newBranchSerial);
             return _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, true, false);
         } else {
-            leftNode = _insertBid(book, leftNode, node, nodeKey, false, newBranchSerial);
+            // The left subtree is exact, but the untouched right tail may still be stale.
+            if (insertFlags & _MATCH_DIRTY != 0) {
+                bytes32 repairedRight = _materializeRightSpine(book, rightNode, true);
+                if (repairedRight != rightNode) {
+                    _rewriteSingleBranchChild(book, root, leftNode, repairedRight, false);
+                }
+                rightNode = repairedRight;
+            }
+            leftNode = _insertBid(book, leftNode, node, nodeKey, 0, newBranchSerial);
             return _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, true, true);
         }
     }
@@ -1132,7 +1138,7 @@ contract DeepstateV1 is Ownable {
     /// @param root Current subtree root.
     /// @param node Node to insert.
     /// @param nodeKey Ask sort key for `node`.
-    /// @param hookEnabled True while this recursive frame can still affect the ask-side best order.
+    /// @param insertFlags Hook tracking and dirty right-spine flags for this recursive frame.
     /// @return newRoot Updated subtree root.
     /// @dev Same insertion algorithm as bids, but callers provide inverted-price ask keys.
     function _insertAsk(
@@ -1140,18 +1146,18 @@ contract DeepstateV1 is Ownable {
         bytes32 root,
         bytes32 node,
         uint64 nodeKey,
-        bool hookEnabled,
+        uint256 insertFlags,
         uint32 newBranchSerial
     ) private returns (bytes32 newRoot) {
         if (root == bytes32(0)) {
-            if (hookEnabled) _recordTopOrderChange(bytes32(0), _nonce(node));
+            if (insertFlags & _MATCH_HOOK != 0) _recordTopOrderChange(bytes32(0), _nonce(node));
             return node;
         }
 
         (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, root);
         if (rightNode == bytes32(0)) {
             uint64 rootKey = _askSortKey(root);
-            if (hookEnabled && nodeKey > rootKey) {
+            if (insertFlags & _MATCH_HOOK != 0 && nodeKey > rootKey) {
                 _recordTopOrderChange(root, _nonce(node));
             }
             return _storeBranch(book, root, node, rootKey, nodeKey, false, newBranchSerial);
@@ -1160,17 +1166,26 @@ contract DeepstateV1 is Ownable {
         (bytes32 leftNode, uint8 branchDepth) = _leftNodeAndDepthAt(branchSlot, root, rightNode);
         uint64 leftKey = branchDepth < 32 ? _askSortKey(root) : _askNodeKey(book, leftNode);
         if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
-            if (hookEnabled && _bit(nodeKey, _commonPrefix(nodeKey, leftKey))) {
+            if (insertFlags & _MATCH_DIRTY != 0) root = _materializeRightSpine(book, root, false);
+            if (insertFlags & _MATCH_HOOK != 0 && _bit(nodeKey, _commonPrefix(nodeKey, leftKey))) {
                 _recordTopOrderChange(_rightmostLeaf(book, root), _nonce(node));
             }
             return _storeBranch(book, root, node, leftKey, nodeKey, false, newBranchSerial);
         }
 
         if (_bit(nodeKey, branchDepth)) {
-            rightNode = _insertAsk(book, rightNode, node, nodeKey, hookEnabled, newBranchSerial);
+            rightNode = _insertAsk(book, rightNode, node, nodeKey, insertFlags, newBranchSerial);
             return _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, false, false);
         } else {
-            leftNode = _insertAsk(book, leftNode, node, nodeKey, false, newBranchSerial);
+            // Repair the dirty tail before insertion takes the exact left subtree.
+            if (insertFlags & _MATCH_DIRTY != 0) {
+                bytes32 repairedRight = _materializeRightSpine(book, rightNode, false);
+                if (repairedRight != rightNode) {
+                    _rewriteSingleBranchChild(book, root, leftNode, repairedRight, false);
+                }
+                rightNode = repairedRight;
+            }
+            leftNode = _insertAsk(book, leftNode, node, nodeKey, 0, newBranchSerial);
             return _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, false, true);
         }
     }
@@ -1474,11 +1489,9 @@ contract DeepstateV1 is Ownable {
     /// @param node Current subtree root.
     /// @return Exact subtree root.
     /// @dev Only the right spine can contain stable anchors. Left subtrees remain exact because the
-    /// optimization is used only for right-child updates. Node zero is the shared root anchor, not
-    /// a branch; treating it as an empty subtree prevents one side from aliasing the other root.
+    /// optimization is used only for right-child updates. Callers pass nonempty subtrees; empty
+    /// insertion roots are handled before traversal and branch children are always nonzero.
     function _materializeRightSpine(Book storage book, bytes32 node, bool isBid) private returns (bytes32) {
-        if (node == bytes32(0)) return bytes32(0);
-
         bytes32 leftNode = _leftNode(book, node);
         if (leftNode == bytes32(0)) return node;
 
