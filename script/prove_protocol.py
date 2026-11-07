@@ -89,6 +89,9 @@ def bind_model_to_source():
         "prefixLength = uint8(LibBit.clz(differingBits << 192));",
         "one := and(shr(sub(63, depth), key), 1)",
         "nextOrderNonce = orderNonce - 1;",
+        "_dirtyRightSpineData(book, node, isBid, remaining);",
+        "if (leftQuantity >= budget) return (false, 0, 0, 0, 0, 0, 0);",
+        "_dirtyRightSpineDataWithFactor(book, rightNode, isBid, budget - leftQuantity);",
         "if (rotation.epoch == _POOL_EPOCH_MASK) revert EpochExhausted();",
         "++rotation.epoch;",
         "return (poolState & _POOL_HOOK_ACTIVE_MASK) | epoch;",
@@ -714,6 +717,25 @@ def prove_tree_transition_summaries(p):
     )
 
     old_right_quantity = Int("dirty_old_right_quantity")
+    fill_budget = Int("dirty_fill_budget")
+    budget_domain = (
+        left_quantity >= 1,
+        right_quantity >= 1,
+        left_quantity + right_quantity <= UINT160_MAX,
+        fill_budget >= 1,
+        fill_budget <= UINT160_MAX,
+    )
+    p.prove(
+        "R5.left-budget-rejection-cannot-discard-fitting-subtree",
+        Implies(left_quantity >= fill_budget, left_quantity + right_quantity > fill_budget),
+        *budget_domain,
+    )
+    p.prove(
+        "R5.residual-budget-exactly-characterizes-full-subtree-fit",
+        (left_quantity + right_quantity <= fill_budget)
+        == And(left_quantity < fill_budget, right_quantity <= fill_budget - left_quantity),
+        *budget_domain,
+    )
     new_right_quantity = Int("dirty_new_right_quantity")
     removed_right_quantity = old_right_quantity - new_right_quantity
     stale_anchor_quantity = left_quantity + old_right_quantity

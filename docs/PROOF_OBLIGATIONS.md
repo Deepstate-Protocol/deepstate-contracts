@@ -167,6 +167,13 @@ Before creating a new parent above a dirty subtree, it materializes that subtree
 leaves require no repair. Thus every child is exact before its parent is rebuilt, and insertion
 returns a clean tree without changing membership, priority, quantity, or quote accounting.
 
+Recovery of a uniform dirty subtree is bounded by the incoming quantity. Its exact left subtree
+and nonempty right subtree cannot fit when the left quantity alone meets or exceeds the budget.
+Otherwise, the right subtree receives precisely the budget minus the left quantity. A rejected
+recovery falls back to ordinary right-first matching; it never discards executable liquidity.
+Successful recovery propagates the rightmost leaf's price factor upward, applying each child's
+existing rounding correction without decoding the same tick again.
+
 **Evidence:** `INDUCTION` over the dirty suffix length, production formal dirty-spine paths, corruption
 regressions, deterministic bid/ask divergence tests checking every aggregate, payout, and top hook,
 and stateful right-spine invariants.

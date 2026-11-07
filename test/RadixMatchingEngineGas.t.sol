@@ -558,6 +558,124 @@ contract RadixMatchingEngineGasTest is Test {
         vm.stopPrank();
     }
 
+    function testGas_DirtyBidSmallFill16Orders() public {
+        _measureDirtySamePriceFill(true, 16, false, 1);
+    }
+
+    function testGas_DirtyAskSmallFill16Orders() public {
+        _measureDirtySamePriceFill(false, 16, false, 1);
+    }
+
+    function testGas_DirtyBidSmallFill64Orders() public {
+        _measureDirtySamePriceFill(true, 64, false, 1);
+    }
+
+    function testGas_DirtyAskSmallFill64Orders() public {
+        _measureDirtySamePriceFill(false, 64, false, 1);
+    }
+
+    function testGas_DirtyBidSmallFillNonceComb() public {
+        _measureDirtySamePriceFill(true, 33, true, 1);
+    }
+
+    function testGas_DirtyAskSmallFillNonceComb() public {
+        _measureDirtySamePriceFill(false, 33, true, 1);
+    }
+
+    function testGas_DirtyBidCrossLeafNonceComb() public {
+        _measureDirtySamePriceFill(true, 33, true, 12);
+    }
+
+    function testGas_DirtyAskCrossLeafNonceComb() public {
+        _measureDirtySamePriceFill(false, 33, true, 12);
+    }
+
+    function testGas_DirtyBidWholeNonceComb() public {
+        _measureDirtySamePriceFill(true, 33, true, 329);
+    }
+
+    function testGas_DirtyAskWholeNonceComb() public {
+        _measureDirtySamePriceFill(false, 33, true, 329);
+    }
+
+    function testGas_DirtyBidHalfNonceComb() public {
+        _measureDirtySamePriceFill(true, 33, true, 160);
+    }
+
+    function testGas_DirtyAskHalfNonceComb() public {
+        _measureDirtySamePriceFill(false, 33, true, 160);
+    }
+
+    function testGas_DirtyBidNearlyWholeNonceComb() public {
+        _measureDirtySamePriceFill(true, 33, true, 320);
+    }
+
+    function testGas_DirtyAskNearlyWholeNonceComb() public {
+        _measureDirtySamePriceFill(false, 33, true, 320);
+    }
+
+    function _measureDirtySamePriceFill(bool restingIsBid, uint256 count, bool comb, uint160 take) private {
+        vm.pauseGasMetering();
+        for (uint256 i; i < count; ++i) {
+            if (comb && i != 0) {
+                uint32 nonce = MAX_ORDER_NONCE ^ uint32(uint256(1) << (32 - i));
+                _forceNextOrderNonce(nonce);
+            }
+            vm.prank(alice);
+            _fill(_order(50, 10, 0), restingIsBid);
+        }
+        vm.prank(carol);
+        _fill(_order(50, 1, 0), !restingIsBid);
+        uint256 beforeBase = base.balanceOf(carol);
+        uint256 beforeQuote = quote.balanceOf(carol);
+        uint160 remainder = take;
+        uint256 expectedQuote;
+        for (uint256 i; i < count && remainder != 0; ++i) {
+            uint160 liveQuantity = i == 0 ? 9 : 10;
+            uint160 fill = remainder < liveQuantity ? remainder : liveQuantity;
+            expectedQuote += _quoteValue(50, liveQuantity, restingIsBid)
+            - _quoteValue(50, liveQuantity - fill, restingIsBid);
+            remainder -= fill;
+        }
+        assertEq(remainder, 0);
+        (, uint16 feeBps) = engine.feeConfig();
+        uint256 netBase = restingIsBid ? take : take - (uint256(take) * feeBps) / 10_000;
+        uint256 netQuote = restingIsBid ? expectedQuote - (expectedQuote * feeBps) / 10_000 : expectedQuote;
+
+        vm.prank(carol);
+        vm.resumeGasMetering();
+        bytes32 rested = _fill(_order(50, take, 0), !restingIsBid);
+        vm.pauseGasMetering();
+
+        assertEq(rested, bytes32(0));
+        assertEq(base.balanceOf(carol), restingIsBid ? beforeBase - take : beforeBase + netBase);
+        assertEq(quote.balanceOf(carol), restingIsBid ? beforeQuote + netQuote : beforeQuote - expectedQuote);
+        bytes32 top = restingIsBid ? _bidRoot() : _askRoot();
+        while (top != bytes32(0)) {
+            (, bytes32 right) = _tree(top);
+            if (right == bytes32(0)) break;
+            top = right;
+        }
+        if (take == count * 10 - 1) {
+            assertEq(top, bytes32(0));
+        } else {
+            uint256 index;
+            uint160 liveQuantity = 9;
+            remainder = take;
+            while (remainder >= liveQuantity) {
+                remainder -= liveQuantity;
+                ++index;
+                liveQuantity = 10;
+            }
+            uint32 topNonce = comb && index != 0
+                ? MAX_ORDER_NONCE - uint32(uint256(1) << (index - 1))
+                : MAX_ORDER_NONCE - uint32(index);
+            assertEq(_quantity(top), liveQuantity - remainder);
+            assertEq(uint32(uint256(top)), topNonce);
+        }
+        vm.resumeGasMetering();
+    }
+
     function _fill(bytes32 order, bool isBid) internal returns (bytes32 restingOrder) {
         restingOrder = engine.fill(
             DeepstateV1.FillParams({

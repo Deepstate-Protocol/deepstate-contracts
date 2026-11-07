@@ -444,10 +444,10 @@ contract RadixMatchingEngineCoverageTest is Test {
         assertEq(_quantity(restingBid), 3);
 
         vm.prank(carol);
-        bytes32 nonCrossingBid = engine.fill(_order(5, 1, 0), true);
+        bytes32 nonCrossingBid = engine.fill(_order(5, 2, 0), true);
 
         assertEq(_subtreeQuantity(engine.askRoot()), 2);
-        assertEq(_quantity(nonCrossingBid), 1);
+        assertEq(_quantity(nonCrossingBid), 2);
     }
 
     function testCoverage_BidUniformSubtreeStopsAtLimit() public {
@@ -463,6 +463,12 @@ contract RadixMatchingEngineCoverageTest is Test {
 
         assertEq(_subtreeQuantity(engine.bidRoot()), 2);
         assertEq(_quantity(restingAsk), 3);
+
+        vm.prank(carol);
+        bytes32 nonCrossingAsk = engine.fill(_order(90, 2, 0), false);
+
+        assertEq(_subtreeQuantity(engine.bidRoot()), 2);
+        assertEq(_quantity(nonCrossingAsk), 2);
     }
 
     function testCoverage_DirtyBidTopCancelRetainsBook() public {
@@ -980,10 +986,10 @@ contract RadixMatchingEngineCoverageTest is Test {
         base.mint(address(engine), 3);
 
         vm.prank(carol);
-        engine.fill(_order(50, 1, 0), true);
+        engine.fill(_order(50, 3, 0), true);
 
-        assertNotEq(engine.askRoot(), bytes32(0));
-        assertEq(_subtreeQuantity(engine.askRoot()), 2);
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(base.balanceOf(carol), 1_000_000_003);
     }
 
     function testCoverage_DirtySpinePricesUniformLeftBranchWithoutSentinelLoad() public {
@@ -1025,10 +1031,10 @@ contract RadixMatchingEngineCoverageTest is Test {
         base.mint(address(engine), 3);
 
         vm.prank(carol);
-        engine.fill(_order(50, 1, 0), true);
+        engine.fill(_order(50, 3, 0), true);
 
-        assertNotEq(engine.askRoot(), bytes32(0));
-        assertEq(_subtreeQuantity(engine.askRoot()), 2);
+        assertEq(engine.askRoot(), bytes32(0));
+        assertEq(base.balanceOf(carol), 1_000_000_003);
     }
 
     function testCoverage_DirtySamePricePartialFillsRetainFIFO() public {
@@ -1056,6 +1062,77 @@ contract RadixMatchingEngineCoverageTest is Test {
             vm.prank(bob);
             engine.cancel(second);
         }
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+    }
+
+    function testCoverage_DirtyRecoveryBudgetAndPriceBoundaries() public {
+        int32[4] memory ticks = [int32(0), 50, type(int32).min, type(int32).max];
+        uint160[4] memory amounts = [uint160(1), 12, 20, 39];
+        for (uint256 side; side < 2; ++side) {
+            for (uint256 price; price < ticks.length; ++price) {
+                for (uint256 fill; fill < amounts.length; ++fill) {
+                    _assertDirtyRecovery(side != 0, ticks[price], 4, 10, amounts[fill], true);
+                }
+            }
+        }
+    }
+
+    function testFuzz_DirtyRecoveryPreservesFIFOQuotesAndHooks(
+        bool isBid,
+        int32 tick,
+        uint8 countSeed,
+        uint8 quantitySeed,
+        uint16 takeSeed,
+        bool hooks
+    ) public {
+        uint256 count = bound(countSeed, 2, 8);
+        uint160 quantity = uint160(bound(quantitySeed, 2, 100));
+        uint160 take = uint160(bound(takeSeed, 1, count * uint256(quantity) - 1));
+        _assertDirtyRecovery(isBid, tick, count, quantity, take, hooks);
+    }
+
+    function _assertDirtyRecovery(bool isBid, int32 tick, uint256 count, uint160 quantity, uint160 take, bool hooks)
+        private
+    {
+        quote.mint(alice, uint256(1) << 220);
+        quote.mint(carol, uint256(1) << 220);
+        CoverageHook hook;
+        if (hooks) {
+            hook = new CoverageHook();
+            engine.setPoolHookConfig(address(base), address(quote), address(hook), true, true);
+        }
+        bytes32[] memory orders = new bytes32[](count);
+        for (uint256 i; i < count; ++i) {
+            vm.prank(alice);
+            orders[i] = engine.fill(_order(tick, quantity, 0), isBid);
+        }
+        vm.startPrank(carol);
+        engine.fill(_order(tick, 1, 0), !isBid);
+        engine.fill(_order(tick, take, 0), !isBid);
+        vm.stopPrank();
+        if (hooks) {
+            uint256 nextIndex = (uint256(take) + 1) / quantity;
+            assertEq(hook.lastIncomingNonce(), nextIndex == count ? 0 : _nonce(orders[nextIndex]));
+            assertEq(hook.lastToken(), isBid ? address(quote) : address(base));
+            assertEq(hook.lastOutgoingAmount(), isBid ? _quoteValue(tick, quantity - 1, true) : quantity - 1);
+        }
+        uint160 remainingFill = take + 1;
+        for (uint256 i; i < count; ++i) {
+            uint160 filled = remainingFill < quantity ? remainingFill : quantity;
+            remainingFill -= filled;
+            uint160 remaining = quantity - filled;
+            vm.prank(alice);
+            (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(orders[i]);
+            assertEq(baseAmount, isBid ? filled : remaining);
+            assertEq(
+                quoteAmount,
+                isBid
+                    ? _quoteValue(tick, remaining, true)
+                    : _quoteValue(tick, quantity, false) - _quoteValue(tick, remaining, false)
+            );
+        }
+        assertEq(remainingFill, 0);
         assertEq(engine.bidRoot(), bytes32(0));
         assertEq(engine.askRoot(), bytes32(0));
     }

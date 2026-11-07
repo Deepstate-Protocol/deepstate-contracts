@@ -1522,7 +1522,8 @@ contract DeepstateV1 is Ownable {
         int32 price;
         bool uniform;
         if (matchFlags & _MATCH_DIRTY != 0) {
-            (uniform, price, fillQuantity, quoteAmount, outgoingTopOrder) = _dirtyRightSpineData(book, node, isBid);
+            (uniform, price, fillQuantity, quoteAmount, outgoingTopOrder) =
+                _dirtyRightSpineData(book, node, isBid, remaining);
         } else {
             uniform = _correctionCode(node) != 0;
             price = _price(node);
@@ -1536,36 +1537,63 @@ contract DeepstateV1 is Ownable {
         if (matchFlags & _MATCH_RESTING_BID != 0 ? price < limitPrice : price > limitPrice) {
             return (0, 0, bytes32(0));
         }
-        if (fillQuantity > remaining) return (0, 0, bytes32(0));
     }
 
-    /// @notice Recover exact same-tick quantity and quote value from a stale global right spine.
+    /// @notice Recover an exact same-tick aggregate only if it fits the incoming quantity budget.
     /// @dev Only right children can themselves be stale. Every left child is an exact off-spine
     /// subtree, so its packed correction gives its exact rounded quote value in O(1). Recursing
-    /// solely through right children keeps recovery bounded by the 64-bit radix depth.
-    function _dirtyRightSpineData(Book storage book, bytes32 node, bool isBid)
+    /// solely through right children keeps recovery bounded by the 64-bit radix depth. A nonempty
+    /// right child makes a left quantity at least equal to the budget a definitive rejection.
+    /// The rightmost leaf's decoded price factor is reused while rebuilding exact rounded quotes.
+    function _dirtyRightSpineData(Book storage book, bytes32 node, bool isBid, uint160 budget)
         private
         view
         returns (bool uniform, int32 tick, uint160 quantity, uint256 quoteAmount, bytes32 rightmostOrder)
     {
+        (uniform, tick, quantity, quoteAmount, rightmostOrder,,) =
+            _dirtyRightSpineDataWithFactor(book, node, isBid, budget);
+    }
+
+    function _dirtyRightSpineDataWithFactor(Book storage book, bytes32 node, bool isBid, uint160 budget)
+        private
+        view
+        returns (
+            bool uniform,
+            int32 tick,
+            uint160 quantity,
+            uint256 quoteAmount,
+            bytes32 rightmostOrder,
+            uint256 factor,
+            uint16 shift
+        )
+    {
         bytes32 leftNode = _leftNode(book, node);
         if (leftNode == bytes32(0)) {
+            tick = _price(node);
             quantity = _quantity(node);
-            return (true, _price(node), quantity, _quoteValue(_price(node), quantity, isBid), node);
+            if (quantity > budget) return (false, 0, 0, 0, 0, 0, 0);
+            (factor, shift) = TickMath32.getPriceFactorAtTick(tick);
+            quoteAmount = tick == 0 ? quantity : _quoteAtFactor(factor, shift, quantity, isBid);
+            return (true, tick, quantity, quoteAmount, node, factor, shift);
         }
 
         bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
+        uint160 leftQuantity = _quantity(leftNode);
+        if (leftQuantity >= budget) return (false, 0, 0, 0, 0, 0, 0);
         bool leftUniform = book.tree[_branchKey(leftNode)].leftNode == bytes32(0) || _correctionCode(leftNode) != 0;
-        if (!leftUniform) return (false, 0, 0, 0, 0);
+        if (!leftUniform) return (false, 0, 0, 0, 0, 0, 0);
 
-        (bool rightUniform, int32 rightTick, uint160 rightQuantity, uint256 rightQuote, bytes32 rightmostLeaf) =
-            _dirtyRightSpineData(book, rightNode, isBid);
-        if (!rightUniform || _price(leftNode) != rightTick) return (false, 0, 0, 0, bytes32(0));
+        bool rightUniform;
+        int32 rightTick;
+        uint160 rightQuantity;
+        uint256 rightQuote;
+        (rightUniform, rightTick, rightQuantity, rightQuote, rightmostOrder, factor, shift) =
+            _dirtyRightSpineDataWithFactor(book, rightNode, isBid, budget - leftQuantity);
+        if (!rightUniform || _price(leftNode) != rightTick) return (false, 0, 0, 0, bytes32(0), 0, 0);
 
         tick = rightTick;
         quantity = _quantity(leftNode) + rightQuantity;
-        quoteAmount = _uniformNodeQuote(book, leftNode, isBid) + rightQuote;
-        rightmostOrder = rightmostLeaf;
+        quoteAmount = _uniformNodeQuoteAtFactor(book, leftNode, isBid, factor, shift) + rightQuote;
         uniform = true;
     }
 
@@ -1657,15 +1685,6 @@ contract DeepstateV1 is Ownable {
     /// @notice Return whether a node represents one tick exactly.
     function _uniformNode(Book storage book, bytes32 node) private view returns (bool) {
         return _correctionCode(node) != 0 || _nonce(node) >= _nextBranchSerial(book.nonceAndFlags);
-    }
-
-    /// @notice Return the exact sum of leaf-level rounded notionals for a uniform-tick node.
-    function _uniformNodeQuote(Book storage, bytes32 node, bool isBid) private pure returns (uint256 quoteAmount) {
-        uint160 quantity = _quantity(node);
-        quoteAmount = _quoteValue(_price(node), quantity, isBid);
-        if (_correctionCode(node) == 0) return quoteAmount;
-
-        return _applyUniformCorrection(node, quoteAmount, isBid);
     }
 
     /// @dev Return a uniform branch's exact rounded quote when branch status is already known.
