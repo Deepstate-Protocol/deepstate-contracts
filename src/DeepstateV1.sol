@@ -55,12 +55,10 @@ import {TickMath32} from "./libraries/TickMath32.sol";
 /// every leaf. Makers later claim proceeds by calling `cancel` on their original order. This
 /// decouples matching from per-maker execution while preserving price-time priority.
 ///
-/// Right-spine optimization: fills and cancels near the best price often mutate only the rightmost
-/// path. Nonce-addressed child slots remain stable while the packed node is rewritten in its parent.
-/// The branch word can then have a stale aggregate quantity/path, so the corresponding book flag is
-/// set. Same-side insertion repairs shared ancestors as it adds the new leaf, materializing any
-/// untouched dirty tail before divergence. Matching can consume same-price dirty subtrees by recomputing
-/// their live quantity from child pointers.
+/// Branch quantities and worst prices are always exact. Mixed-price branches additionally cache
+/// their leaf-rounded quote sum. Matching consumes whole crossing subtrees in constant work and
+/// expands only one boundary path, at most 64 branch levels for the 32-bit tick and 32-bit nonce.
+/// Insertion and cancellation also descend a single path; no mutation leaves stale summaries.
 ///
 /// Pools use sorted token addresses, and each pool epoch derives an isolated book id. `fillRoute`
 /// mutates every selected book before settling one net transient delta per touched token. Optional
@@ -82,6 +80,8 @@ contract DeepstateV1 is Ownable {
         bytes32 leftNode;
         /// @notice Child whose sort key has a one bit at the branch split depth.
         bytes32 rightNode;
+        /// @notice Exact sum of leaf-rounded quote values for a mixed-price branch.
+        uint256 quoteTotal;
     }
 
     /// @notice Owner and side metadata for one original resting order.
@@ -94,8 +94,8 @@ contract DeepstateV1 is Ownable {
     }
 
     /// @notice One isolated radix book for one token pair epoch.
-    /// @dev The low 32 bits of `nonceAndFlags` are the decrementing order nonce, bits 32-33 are
-    /// per-book right-spine dirty flags, and bits 64-95 are the ascending branch serial. The zero
+    /// @dev The low 32 bits of `nonceAndFlags` are the decrementing order nonce, bits 32-63 are
+    /// reserved, and bits 64-95 are the ascending branch serial. The zero
     /// node in `tree` is reserved as the root anchor: `leftNode` is the ask root and `rightNode` is
     /// the bid root.
     struct Book {
@@ -169,23 +169,12 @@ contract DeepstateV1 is Ownable {
         leftNode = bytes32((uint256(storedLeftNode) & ~_CACHED_DEPTH_MASK) | (uint256(branchNode) & _CACHED_DEPTH_MASK));
     }
 
-    /// @dev Dirty bit stored above the 32-bit `nextNonce` field when bid right-spine anchors are stale.
-    uint256 private constant _BID_RIGHT_SPINE_DIRTY = uint256(1) << 32;
-    /// @dev Dirty bit stored above the 32-bit `nextNonce` field when ask right-spine anchors are stale.
-    uint256 private constant _ASK_RIGHT_SPINE_DIRTY = uint256(1) << 33;
-    /// @dev Internal matcher flag indicating stale right-spine aggregate words.
-    uint256 private constant _MATCH_DIRTY = 1;
-    /// @dev Internal matcher flag indicating top-change hooks should be tracked.
+    /// @dev Internal insertion flag indicating top-change hooks should be tracked.
     uint256 private constant _MATCH_HOOK = 2;
-    /// @dev Internal matcher flag indicating the resting subtree is from the bid side.
-    uint256 private constant _MATCH_RESTING_BID = 4;
     /// @dev Cancel hook flag for bid-side top changes.
     uint256 internal constant _CANCEL_HOOK_BID = 1;
     /// @dev Cancel hook flag for ask-side top changes.
     uint256 internal constant _CANCEL_HOOK_ASK = 2;
-    /// @dev High bit in packed match-change metadata indicating a retained dirty right-spine anchor.
-    uint256 private constant _MATCH_CHANGE_DIRTY = uint256(1) << 255;
-
     /// @dev Transient slot carrying the complete displaced top-order leaf back to the router.
     bytes32 private constant _TOP_CHANGE_OUTGOING_ORDER_SLOT =
         0x64b7215baea1c17e16f66db8b03af21431032e2e221c15ac43b0752d82a69b31;
@@ -342,111 +331,24 @@ contract DeepstateV1 is Ownable {
 
         _beginMatchBuffer();
 
-        bool markDirty;
-        if (isBid) {
-            bool dirty = _rightSpineDirty(nonceAndFlags, false);
-            (remaining, baseFilled, quoteAmount, markDirty) =
-                _matchIncomingBid(id, book, limitPrice, remaining, hookEnabled, dirty);
-            if (markDirty && !dirty) updatedNonceAndFlags |= _ASK_RIGHT_SPINE_DIRTY;
-        } else {
-            bool dirty = _rightSpineDirty(nonceAndFlags, true);
-            (remaining, baseFilled, quoteAmount, markDirty) =
-                _matchIncomingAsk(id, book, limitPrice, remaining, hookEnabled, dirty);
-            if (markDirty && !dirty) updatedNonceAndFlags |= _BID_RIGHT_SPINE_DIRTY;
+        bool restingIsBid = !isBid;
+        bytes32 root = restingIsBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
+        if (root != bytes32(0)) {
+            bytes32 oldTop;
+            if (hookEnabled) oldTop = _rightmostLeaf(book, root);
+            bytes32 newRoot;
+            (newRoot, baseFilled, quoteAmount) = _matchSubtree(id, book, root, limitPrice, remaining, restingIsBid);
+            remaining -= baseFilled;
+            if (newRoot != root) {
+                if (restingIsBid) book.tree[_ROOT_NODE].rightNode = newRoot;
+                else book.tree[_ROOT_NODE].leftNode = newRoot;
+            }
+            if (hookEnabled && baseFilled != 0) {
+                _recordTopOrderChange(oldTop, _replacementTopNonce(book, newRoot));
+            }
         }
-        if (updatedNonceAndFlags != nonceAndFlags) book.nonceAndFlags = updatedNonceAndFlags;
 
         _emitBufferedMatches(id, !isBid);
-    }
-
-    /// @notice Match an incoming bid against the ask root.
-    /// @param id Book id whose ask tree is being consumed.
-    /// @param book Book storage selected by `id`.
-    /// @param limitPrice Highest ask price the bid will accept.
-    /// @param remaining Incoming bid quantity before matching.
-    /// @param hookEnabled True to record top-ask changes for the routing hook.
-    /// @return newRemaining Bid quantity left unmatched.
-    /// @return baseFilled Base quantity bought.
-    /// @return quoteAmount Quote paid at resting ask prices.
-    /// @dev The ask root lives in `tree[0].leftNode`.
-    function _matchIncomingBid(
-        bytes32 id,
-        Book storage book,
-        int32 limitPrice,
-        uint160 remaining,
-        bool hookEnabled,
-        bool dirty
-    ) private returns (uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount, bool markDirty) {
-        bytes32 root = book.tree[_ROOT_NODE].leftNode;
-        if (root == bytes32(0)) return (remaining, 0, 0, false);
-
-        if (!dirty && limitPrice == type(int32).max && _quantity(root) <= remaining) {
-            baseFilled = _quantity(root);
-            if (hookEnabled) _recordTopOrderChange(_rightmostLeaf(book, root), 0);
-            quoteAmount = _consumeSubtree(id, book, root, false);
-            book.tree[_ROOT_NODE].leftNode = bytes32(0);
-            unchecked {
-                newRemaining = remaining - baseFilled;
-            }
-            return (newRemaining, baseFilled, quoteAmount, false);
-        }
-
-        bytes32 newRoot;
-        bytes32 matchChange;
-        uint256 matchFlags = dirty ? _MATCH_DIRTY : 0;
-        if (hookEnabled) matchFlags |= _MATCH_HOOK;
-        (newRoot, baseFilled, quoteAmount, matchChange) =
-            _matchAskRightSpine(id, book, root, limitPrice, remaining, matchFlags);
-        unchecked {
-            newRemaining = remaining - baseFilled;
-        }
-        if (newRoot != root) book.tree[_ROOT_NODE].leftNode = newRoot;
-        markDirty = _matchChangeDirty(matchChange) && newRoot != bytes32(0);
-    }
-
-    /// @notice Match an incoming ask against the bid root.
-    /// @param id Book id whose bid tree is being consumed.
-    /// @param book Book storage selected by `id`.
-    /// @param limitPrice Lowest bid price the ask will accept.
-    /// @param remaining Incoming ask quantity before matching.
-    /// @param hookEnabled True to record top-bid changes for the routing hook.
-    /// @return newRemaining Ask quantity left unmatched.
-    /// @return baseFilled Base quantity sold.
-    /// @return quoteAmount Quote received at resting bid prices.
-    /// @dev The bid root lives in `tree[0].rightNode`.
-    function _matchIncomingAsk(
-        bytes32 id,
-        Book storage book,
-        int32 limitPrice,
-        uint160 remaining,
-        bool hookEnabled,
-        bool dirty
-    ) private returns (uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount, bool markDirty) {
-        bytes32 root = book.tree[_ROOT_NODE].rightNode;
-        if (root == bytes32(0)) return (remaining, 0, 0, false);
-
-        if (!dirty && limitPrice == type(int32).min && _quantity(root) <= remaining) {
-            baseFilled = _quantity(root);
-            if (hookEnabled) _recordTopOrderChange(_rightmostLeaf(book, root), 0);
-            quoteAmount = _consumeSubtree(id, book, root, true);
-            book.tree[_ROOT_NODE].rightNode = bytes32(0);
-            unchecked {
-                newRemaining = remaining - baseFilled;
-            }
-            return (newRemaining, baseFilled, quoteAmount, false);
-        }
-
-        bytes32 newRoot;
-        bytes32 matchChange;
-        uint256 matchFlags = dirty ? _MATCH_DIRTY : 0;
-        if (hookEnabled) matchFlags |= _MATCH_HOOK;
-        (newRoot, baseFilled, quoteAmount, matchChange) =
-            _matchBidRightSpine(id, book, root, limitPrice, remaining, matchFlags);
-        unchecked {
-            newRemaining = remaining - baseFilled;
-        }
-        if (newRoot != root) book.tree[_ROOT_NODE].rightNode = newRoot;
-        markDirty = _matchChangeDirty(matchChange) && newRoot != bytes32(0);
     }
 
     /// @notice Cancel an open order or claim a filled order.
@@ -550,13 +452,11 @@ contract DeepstateV1 is Ownable {
             bytes32 root = book.tree[_ROOT_NODE].rightNode;
             bytes32 newRoot;
             if (root != bytes32(0)) {
-                bool dirtyChanged;
                 bool removedTop;
-                (newRoot, removed, dirtyChanged, removedTop) = _removeBidByKey(book, root, _bidSortKey(order), true);
+                (newRoot, removed, removedTop) = _removeByKey(book, root, _bidSortKey(order), true, true);
                 if (removed != bytes32(0) && newRoot != root) {
                     book.tree[_ROOT_NODE].rightNode = newRoot;
                 }
-                if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, true, nonceAndFlags);
                 if (hookEnabled && removedTop) {
                     _recordTopOrderChange(removed, _replacementTopNonce(book, newRoot));
                 }
@@ -565,13 +465,11 @@ contract DeepstateV1 is Ownable {
             bytes32 root = book.tree[_ROOT_NODE].leftNode;
             bytes32 newRoot;
             if (root != bytes32(0)) {
-                bool dirtyChanged;
                 bool removedTop;
-                (newRoot, removed, dirtyChanged, removedTop) = _removeAskByKey(book, root, _askSortKey(order), true);
+                (newRoot, removed, removedTop) = _removeByKey(book, root, _askSortKey(order), false, true);
                 if (removed != bytes32(0) && newRoot != root) {
                     book.tree[_ROOT_NODE].leftNode = newRoot;
                 }
-                if (dirtyChanged && newRoot != bytes32(0)) _setRightSpineDirty(book, false, nonceAndFlags);
                 if (hookEnabled && removedTop) {
                     _recordTopOrderChange(removed, _replacementTopNonce(book, newRoot));
                 }
@@ -582,7 +480,7 @@ contract DeepstateV1 is Ownable {
     /// @notice Rest unmatched quantity in one book.
     /// @param id Globally unique book id.
     /// @param book Book storage selected by `id`.
-    /// @param nonceAndFlags Current packed nonce and right-spine flags for `book`.
+    /// @param nonceAndFlags Current packed order nonce and branch serial for `book`.
     /// @param price Limit price.
     /// @param quantity Unfilled base quantity to rest.
     /// @param isBid True to rest a bid, false to rest an ask.
@@ -590,11 +488,7 @@ contract DeepstateV1 is Ownable {
     /// @param hookEnabled True to record a top-order change if the new order becomes best.
     /// @return restingOrder Packed resting order with assigned nonce.
     /// @return nextNonceAfter The book nonce after assigning `restingOrder`.
-    /// @dev
-    /// Dirty-spine repair shares the insertion traversal, rebuilding common ancestors only once.
-    /// If insertion diverges from the right spine, its remaining dirty tail is repaired first.
-    /// Empty roots need no repair, even when they conservatively retain a dirty flag. Clearing
-    /// that flag is folded into nonce allocation instead of consuming a standalone SSTORE.
+    /// @dev Insertion and summary rebuilding share a single price/nonce path.
     function _restBook(
         bytes32 id,
         Book storage book,
@@ -607,12 +501,8 @@ contract DeepstateV1 is Ownable {
     ) internal returns (bytes32 restingOrder, uint32 nextNonceAfter) {
         _validateRestingQuoteDomain(price, quantity, isBid);
 
-        uint256 dirtyFlag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
         uint256 insertFlags = hookEnabled ? _MATCH_HOOK : 0;
-        if (nonceAndFlags & dirtyFlag != 0) {
-            insertFlags |= _MATCH_DIRTY;
-            nonceAndFlags &= ~dirtyFlag;
-        }
+        nonceAndFlags &= ~(uint256(3) << 32);
 
         {
             bytes32 root = isBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
@@ -667,7 +557,7 @@ contract DeepstateV1 is Ownable {
     /// @param book Book storage containing both side roots.
     /// @param restingOrder Packed leaf to insert.
     /// @param isBid True for bid tree, false for ask tree.
-    /// @param insertFlags Hook tracking and dirty right-spine flags for this insertion.
+    /// @param insertFlags Hook tracking flags for this insertion.
     function _insertRestingOrder(
         Book storage book,
         bytes32 root,
@@ -676,13 +566,23 @@ contract DeepstateV1 is Ownable {
         uint256 insertFlags,
         uint32 newBranchSerial
     ) private {
-        if (isBid) {
-            book.tree[_ROOT_NODE].rightNode = _insertBid(
-                book, root, restingOrder, _bidSortKey(restingOrder), insertFlags, newBranchSerial
-            );
-        } else {
-            book.tree[_ROOT_NODE].leftNode =
-                _insertAsk(book, root, restingOrder, _askSortKey(restingOrder), insertFlags, newBranchSerial);
+        bytes32 oldTop;
+        if (insertFlags & _MATCH_HOOK != 0 && root != bytes32(0)) oldTop = _rightmostLeaf(book, root);
+        bytes32 newRoot = restingOrder;
+        if (root != bytes32(0)) {
+            uint64 key = isBid ? _bidSortKey(restingOrder) : _askSortKey(restingOrder);
+            uint64 witness;
+            uint8 split;
+            (newRoot, witness, split) = _insertPath(book, root, restingOrder, key, isBid, newBranchSerial);
+            if (split != 255) {
+                newRoot = _storeBranch(book, newRoot, restingOrder, witness, key, isBid, newBranchSerial);
+            }
+        }
+        if (isBid) book.tree[_ROOT_NODE].rightNode = newRoot;
+        else book.tree[_ROOT_NODE].leftNode = newRoot;
+        if (insertFlags & _MATCH_HOOK != 0) {
+            uint32 newTop = _replacementTopNonce(book, newRoot);
+            if (newTop != _nonce(oldTop)) _recordTopOrderChange(oldTop, newTop);
         }
     }
 
@@ -762,574 +662,108 @@ contract DeepstateV1 is Ownable {
         }
     }
 
-    /// @notice Emit an ask match event from the right-spine matcher.
-    /// @dev
-    /// Dirty branch words may have stale quantity fields. For aggregate same-price fills, the event
-    /// node is rewritten with the actual fill quantity so offchain consumers see the consumed
-    /// amount even when the stored branch anchor was intentionally stale.
-    function _emitAskRightSpineMatch(bytes32 node, uint160 fillQuantity, uint256 quoteAmount, uint256 matchFlags)
-        private
-    {
-        _recordMatch(
-            matchFlags & _MATCH_DIRTY != 0 ? _aggregateMatchEventNode(node, fillQuantity, quoteAmount, false) : node
-        );
-    }
-
-    /// @notice Emit a bid match event from the right-spine matcher.
-    /// @dev Mirrors `_emitAskRightSpineMatch` for bid-side same-price aggregate fills.
-    function _emitBidRightSpineMatch(bytes32 node, uint160 fillQuantity, uint256 quoteAmount, uint256 matchFlags)
-        private
-    {
-        _recordMatch(
-            matchFlags & _MATCH_DIRTY != 0 ? _aggregateMatchEventNode(node, fillQuantity, quoteAmount, true) : node
-        );
-    }
-
-    /// @notice Recursively match an incoming bid against an ask subtree.
-    /// @param node Ask leaf or branch to inspect.
-    /// @param limitPrice Bid limit price.
-    /// @param remaining Incoming bid quantity available to spend in this subtree.
-    /// @return newNode Replacement node for this subtree after matching.
-    /// @return fillQuantity Base quantity consumed from this subtree.
-    /// @return quoteAmount Quote value consumed from this subtree.
-    /// @return matchChange Packed metadata for whether optimized right-spine anchors were retained.
-    /// @dev
-    /// The ask tree's rightmost path is best because ask prices are inverted in the sort key.
-    /// Right-spine branch words may be stale after previous optimized updates, so this function
-    /// only aggregate-consumes same-price right-spine subtrees. Mixed-price aggregate consumption
-    /// remains reserved for exact off-spine subtrees to avoid reintroducing the branch rewrite
-    /// cascade this path is designed to skip.
-    function _matchAskRightSpine(
+    /// @dev Whole crossing subtrees are consumed from their exact summaries. Only the boundary
+    /// child can require expansion: a surviving right child exhausts quantity or stops at the
+    /// limit, so the left child is visited only after the right child was consumed in O(1).
+    function _matchSubtree(
         bytes32 id,
         Book storage book,
         bytes32 node,
         int32 limitPrice,
         uint160 remaining,
-        uint256 matchFlags
-    ) private returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount, bytes32 matchChange) {
-        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, node);
-        if (rightNode == bytes32(0)) {
-            (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(node, limitPrice, remaining);
-            if (matchFlags & _MATCH_HOOK != 0 && fillQuantity != 0) {
-                _recordTopOrderChange(node, newNode == bytes32(0) ? 0 : _nonce(newNode));
-            }
-            return (newNode, fillQuantity, quoteAmount, matchChange);
+        bool restingIsBid
+    ) private returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount) {
+        uint32 correction = _correctionCode(node);
+        if (correction != 0) {
+            int32 tick = _price(node);
+            if (restingIsBid ? tick < limitPrice : tick > limitPrice) return (node, 0, 0);
+            return _matchUniformSubtree(book, node, remaining, restingIsBid, tick);
         }
-
-        bytes32 newRightNode;
-        uint160 rightFillQuantity;
-        uint256 rightQuoteAmount;
-        bytes32 leftNode = bytes32(0);
-        {
-            bool samePrice = _correctionCode(node) != 0;
-            if (matchFlags & _MATCH_DIRTY != 0) {
-                leftNode = _leftNodeAt(branchSlot, node);
-                samePrice = _price(leftNode) == _price(rightNode);
-            }
-            if (samePrice && (matchFlags & _MATCH_DIRTY != 0 || _quantity(node) <= remaining)) {
-                bytes32 outgoingTopOrder;
-                (fillQuantity, quoteAmount, outgoingTopOrder) =
-                    _samePriceRightSpineFillQuantity(book, node, limitPrice, remaining, matchFlags);
-                if (fillQuantity != 0) {
-                    if (matchFlags & _MATCH_HOOK != 0) {
-                        _recordTopOrderChange(outgoingTopOrder, 0);
-                    }
-                    _emitAskRightSpineMatch(node, fillQuantity, quoteAmount, matchFlags);
-                    return (bytes32(0), fillQuantity, quoteAmount, matchChange);
-                }
-            }
-
-            (newRightNode, rightFillQuantity, rightQuoteAmount, matchChange) =
-                _matchAskRightSpine(id, book, rightNode, limitPrice, remaining, matchFlags);
-        }
-        if (rightFillQuantity == 0) return (node, 0, 0, bytes32(0));
-
-        if (leftNode == bytes32(0)) leftNode = _leftNodeAt(branchSlot, node);
-        bytes32 newLeftNode = leftNode;
-        unchecked {
-            remaining -= rightFillQuantity;
-        }
-
-        if (remaining != 0) {
-            (newLeftNode, fillQuantity, quoteAmount) = _matchAskSubtree(id, book, leftNode, limitPrice, remaining);
-        }
-
-        if (fillQuantity == 0) {
-            bool branchDirty;
-            (newNode, branchDirty) = _replaceRightmostRightChild(book, node, newLeftNode, newRightNode, false);
-            if (branchDirty) matchChange = _markMatchDirty(matchChange);
-        } else {
-            newNode = _replaceBranch(book, node, newLeftNode, newRightNode, false);
-        }
-        unchecked {
-            fillQuantity += rightFillQuantity;
-            quoteAmount += rightQuoteAmount;
-        }
-        if (matchFlags & _MATCH_HOOK != 0) _refreshRecordedTopNonce(book, newNode);
-    }
-
-    /// @notice Recursively match an incoming bid against an exact ask subtree.
-    /// @param node Ask leaf or exact aggregate branch to inspect.
-    /// @param limitPrice Bid limit price.
-    /// @param remaining Incoming bid quantity available to spend in this subtree.
-    /// @return newNode Replacement node for this subtree after matching.
-    /// @return fillQuantity Base quantity consumed from this subtree.
-    /// @return quoteAmount Quote value consumed from this subtree.
-    /// @dev
-    /// Off-spine subtrees are exact because the right-spine optimization only preserves stale
-    /// anchors along the global best path. This lets the function aggregate-consume mixed-price
-    /// branches when the worst leaf still crosses and the whole quantity fits.
-    function _matchAskSubtree(bytes32 id, Book storage book, bytes32 node, int32 limitPrice, uint160 remaining)
-        private
-        returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount)
-    {
-        bytes32 leftNode = _leftNode(book, node);
-        if (leftNode == bytes32(0)) {
-            (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(node, limitPrice, remaining);
+        if (_nonce(node) >= _nextBranchSerial(book.nonceAndFlags)) {
+            if (restingIsBid) (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(node, limitPrice, remaining);
+            else (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(node, limitPrice, remaining);
             return (newNode, fillQuantity, quoteAmount);
         }
 
-        if (_correctionCode(node) != 0) {
-            int32 tick = _price(node);
-            if (tick > limitPrice) return (node, 0, 0);
-            return _matchUniformSubtree(book, node, remaining, false, tick);
+        uint160 quantity = _quantity(node);
+        int32 worstPrice = _price(node);
+        if (quantity <= remaining && (restingIsBid ? worstPrice >= limitPrice : worstPrice <= limitPrice)) {
+            quoteAmount = _consumeSubtree(id, book, node, restingIsBid);
+            return (bytes32(0), quantity, quoteAmount);
         }
 
-        uint160 nodeQuantity = _quantity(node);
-        if (nodeQuantity <= remaining && _leftmostLeafPrice(book, node) <= limitPrice) {
-            quoteAmount = _consumeSubtree(id, book, node, false);
-            return (bytes32(0), nodeQuantity, quoteAmount);
-        }
-
-        bytes32 newRightNode;
-        uint160 rightFillQuantity;
-        uint256 rightQuoteAmount;
-        {
-            bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
-            (newRightNode, rightFillQuantity, rightQuoteAmount) =
-                _matchAskSubtree(id, book, rightNode, limitPrice, remaining);
-        }
-        if (rightFillQuantity == 0) return (node, 0, 0);
-
-        bytes32 newLeftNode = leftNode;
-        unchecked {
-            remaining -= rightFillQuantity;
-        }
-
-        if (remaining != 0) {
-            (newLeftNode, fillQuantity, quoteAmount) = _matchAskSubtree(id, book, leftNode, limitPrice, remaining);
-        }
-
-        newNode = fillQuantity == 0
-            ? _replaceBranchAfterSingleChildChange(book, node, newLeftNode, newRightNode, false, false)
-            : _replaceBranch(book, node, newLeftNode, newRightNode, false);
-        unchecked {
-            fillQuantity += rightFillQuantity;
-            quoteAmount += rightQuoteAmount;
-        }
-    }
-
-    /// @notice Recursively match an incoming ask against a bid subtree.
-    /// @param node Bid leaf or branch to inspect.
-    /// @param limitPrice Ask limit price.
-    /// @param remaining Incoming ask quantity available to sell in this subtree.
-    /// @return newNode Replacement node for this subtree after matching.
-    /// @return fillQuantity Base quantity consumed from this subtree.
-    /// @return quoteAmount Quote value consumed from this subtree.
-    /// @return matchChange Packed metadata for whether optimized right-spine anchors were retained.
-    /// @dev
-    /// The bid tree's rightmost path is best because higher prices sort later. Right-spine branch
-    /// words may be stale after previous optimized updates, so this function only aggregate-consumes
-    /// same-price right-spine subtrees. Mixed-price aggregate consumption remains reserved for exact
-    /// off-spine subtrees to avoid reintroducing the branch rewrite cascade this path is designed
-    /// to skip.
-    function _matchBidRightSpine(
-        bytes32 id,
-        Book storage book,
-        bytes32 node,
-        int32 limitPrice,
-        uint160 remaining,
-        uint256 matchFlags
-    ) private returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount, bytes32 matchChange) {
-        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, node);
-        if (rightNode == bytes32(0)) {
-            (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(node, limitPrice, remaining);
-            if (matchFlags & _MATCH_HOOK != 0 && fillQuantity != 0) {
-                _recordTopOrderChange(node, newNode == bytes32(0) ? 0 : _nonce(newNode));
-            }
-            return (newNode, fillQuantity, quoteAmount, matchChange);
-        }
-
-        bytes32 newRightNode;
-        uint160 rightFillQuantity;
-        uint256 rightQuoteAmount;
-        bytes32 leftNode = bytes32(0);
-        {
-            bool samePrice = _correctionCode(node) != 0;
-            if (matchFlags & _MATCH_DIRTY != 0) {
-                leftNode = _leftNodeAt(branchSlot, node);
-                samePrice = _price(leftNode) == _price(rightNode);
-            }
-            if (samePrice && (matchFlags & _MATCH_DIRTY != 0 || _quantity(node) <= remaining)) {
-                bytes32 outgoingTopOrder;
-                (fillQuantity, quoteAmount, outgoingTopOrder) = _samePriceRightSpineFillQuantity(
-                    book, node, limitPrice, remaining, matchFlags | _MATCH_RESTING_BID
-                );
-                if (fillQuantity != 0) {
-                    if (matchFlags & _MATCH_HOOK != 0) {
-                        _recordTopOrderChange(outgoingTopOrder, 0);
-                    }
-                    _emitBidRightSpineMatch(node, fillQuantity, quoteAmount, matchFlags);
-                    return (bytes32(0), fillQuantity, quoteAmount, matchChange);
-                }
-            }
-
-            (newRightNode, rightFillQuantity, rightQuoteAmount, matchChange) =
-                _matchBidRightSpine(id, book, rightNode, limitPrice, remaining, matchFlags);
-        }
-        if (rightFillQuantity == 0) return (node, 0, 0, bytes32(0));
-
-        if (leftNode == bytes32(0)) leftNode = _leftNodeAt(branchSlot, node);
-        bytes32 newLeftNode = leftNode;
-        unchecked {
-            remaining -= rightFillQuantity;
-        }
-
-        if (remaining != 0) {
-            (newLeftNode, fillQuantity, quoteAmount) = _matchBidSubtree(id, book, leftNode, limitPrice, remaining);
-        }
-
-        if (fillQuantity == 0) {
-            bool branchDirty;
-            (newNode, branchDirty) = _replaceRightmostRightChild(book, node, newLeftNode, newRightNode, true);
-            if (branchDirty) matchChange = _markMatchDirty(matchChange);
-        } else {
-            newNode = _replaceBranch(book, node, newLeftNode, newRightNode, true);
-        }
-        unchecked {
-            fillQuantity += rightFillQuantity;
-            quoteAmount += rightQuoteAmount;
-        }
-        if (matchFlags & _MATCH_HOOK != 0) _refreshRecordedTopNonce(book, newNode);
-    }
-
-    /// @notice Recursively match an incoming ask against an exact bid subtree.
-    /// @param node Bid leaf or exact aggregate branch to inspect.
-    /// @param limitPrice Ask limit price.
-    /// @param remaining Incoming ask quantity available to sell in this subtree.
-    /// @return newNode Replacement node for this subtree after matching.
-    /// @return fillQuantity Base quantity consumed from this subtree.
-    /// @return quoteAmount Quote value consumed from this subtree.
-    /// @dev
-    /// Off-spine bid subtrees are exact for the same reason as ask subtrees. If the subtree's
-    /// lowest bid price still crosses the ask limit and quantity fits, the whole branch can be
-    /// consumed without walking every leaf.
-    function _matchBidSubtree(bytes32 id, Book storage book, bytes32 node, int32 limitPrice, uint160 remaining)
-        private
-        returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount)
-    {
+        _observeTreeWalk(0);
         bytes32 leftNode = _leftNode(book, node);
-        if (leftNode == bytes32(0)) {
-            (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(node, limitPrice, remaining);
-            return (newNode, fillQuantity, quoteAmount);
+        bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
+        uint160 rightFill;
+        uint256 rightQuote;
+        (rightNode, rightFill, rightQuote) = _matchSubtree(id, book, rightNode, limitPrice, remaining, restingIsBid);
+        if (rightFill == 0) return (node, 0, 0);
+        remaining -= rightFill;
+        if (rightNode == bytes32(0) && remaining != 0) {
+            (leftNode, fillQuantity, quoteAmount) =
+                _matchSubtree(id, book, leftNode, limitPrice, remaining, restingIsBid);
         }
-
-        if (_correctionCode(node) != 0) {
-            int32 tick = _price(node);
-            if (tick < limitPrice) return (node, 0, 0);
-            return _matchUniformSubtree(book, node, remaining, true, tick);
-        }
-
-        uint160 nodeQuantity = _quantity(node);
-        if (nodeQuantity <= remaining && _leftmostLeafPrice(book, node) >= limitPrice) {
-            quoteAmount = _consumeSubtree(id, book, node, true);
-            return (bytes32(0), nodeQuantity, quoteAmount);
-        }
-
-        bytes32 newRightNode;
-        uint160 rightFillQuantity;
-        uint256 rightQuoteAmount;
-        {
-            bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
-            (newRightNode, rightFillQuantity, rightQuoteAmount) =
-                _matchBidSubtree(id, book, rightNode, limitPrice, remaining);
-        }
-        if (rightFillQuantity == 0) return (node, 0, 0);
-
-        bytes32 newLeftNode = leftNode;
-        unchecked {
-            remaining -= rightFillQuantity;
-        }
-
-        if (remaining != 0) {
-            (newLeftNode, fillQuantity, quoteAmount) = _matchBidSubtree(id, book, leftNode, limitPrice, remaining);
-        }
-
-        newNode = fillQuantity == 0
-            ? _replaceBranchAfterSingleChildChange(book, node, newLeftNode, newRightNode, true, false)
-            : _replaceBranch(book, node, newLeftNode, newRightNode, true);
-        unchecked {
-            fillQuantity += rightFillQuantity;
-            quoteAmount += rightQuoteAmount;
-        }
+        newNode = _replaceBranchAfterSingleChildChange(book, node, leftNode, rightNode, restingIsBid, false);
+        fillQuantity += rightFill;
+        quoteAmount += rightQuote;
     }
 
-    /// @notice Insert a leaf or branch into the bid tree.
-    /// @param root Current subtree root.
-    /// @param node Node to insert.
-    /// @param nodeKey Bid sort key for `node`.
-    /// @param insertFlags Hook tracking and dirty right-spine flags for this recursive frame.
-    /// @return newRoot Updated subtree root.
-    /// @dev
-    /// Insertion follows Patricia/radix-tree rules. If the new key diverges before the current
-    /// branch split, a new parent branch is created above `root`. Otherwise recursion continues
-    /// into the child selected by the branch split bit. A dirty right spine shares this traversal;
-    /// insertion into its left subtree repairs the right tail before rebuilding the parent.
-    function _insertBid(
-        Book storage book,
-        bytes32 root,
-        bytes32 node,
-        uint64 nodeKey,
-        uint256 insertFlags,
-        uint32 newBranchSerial
-    ) private returns (bytes32 newRoot) {
-        if (root == bytes32(0)) {
-            if (insertFlags & _MATCH_HOOK != 0) _recordTopOrderChange(bytes32(0), _nonce(node));
-            return node;
-        }
-
-        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, root);
-        if (rightNode == bytes32(0)) {
-            uint64 rootKey = _bidSortKey(root);
-            if (insertFlags & _MATCH_HOOK != 0 && nodeKey > rootKey) {
-                _recordTopOrderChange(root, _nonce(node));
-            }
-            return _storeBranch(book, root, node, rootKey, nodeKey, true, newBranchSerial);
-        }
-
-        (bytes32 leftNode, uint8 branchDepth) = _leftNodeAndDepthAt(branchSlot, root, rightNode);
-        uint64 leftKey = branchDepth < 32 ? _bidSortKey(root) : _bidNodeKey(book, leftNode);
-        if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
-            if (insertFlags & _MATCH_DIRTY != 0) root = _materializeRightSpine(book, root, true);
-            if (insertFlags & _MATCH_HOOK != 0 && _bit(nodeKey, _commonPrefix(nodeKey, leftKey))) {
-                _recordTopOrderChange(_rightmostLeaf(book, root), _nonce(node));
-            }
-            return _storeBranch(book, root, node, leftKey, nodeKey, true, newBranchSerial);
-        }
-
-        if (_bit(nodeKey, branchDepth)) {
-            rightNode = _insertBid(book, rightNode, node, nodeKey, insertFlags, newBranchSerial);
-            return _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, true, false);
-        } else {
-            // The left subtree is exact, but the untouched right tail may still be stale.
-            if (insertFlags & _MATCH_DIRTY != 0) {
-                bytes32 repairedRight = _materializeRightSpine(book, rightNode, true);
-                if (repairedRight != rightNode) {
-                    _rewriteSingleBranchChild(book, root, leftNode, repairedRight, false);
-                }
-                rightNode = repairedRight;
-            }
-            leftNode = _insertBid(book, leftNode, node, nodeKey, 0, newBranchSerial);
-            return _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, true, true);
-        }
-    }
-
-    /// @notice Insert a leaf or branch into the ask tree.
-    /// @param root Current subtree root.
-    /// @param node Node to insert.
-    /// @param nodeKey Ask sort key for `node`.
-    /// @param insertFlags Hook tracking and dirty right-spine flags for this recursive frame.
-    /// @return newRoot Updated subtree root.
-    /// @dev Same insertion algorithm as bids, but callers provide inverted-price ask keys.
-    function _insertAsk(
-        Book storage book,
-        bytes32 root,
-        bytes32 node,
-        uint64 nodeKey,
-        uint256 insertFlags,
-        uint32 newBranchSerial
-    ) private returns (bytes32 newRoot) {
-        if (root == bytes32(0)) {
-            if (insertFlags & _MATCH_HOOK != 0) _recordTopOrderChange(bytes32(0), _nonce(node));
-            return node;
-        }
-
-        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, root);
-        if (rightNode == bytes32(0)) {
-            uint64 rootKey = _askSortKey(root);
-            if (insertFlags & _MATCH_HOOK != 0 && nodeKey > rootKey) {
-                _recordTopOrderChange(root, _nonce(node));
-            }
-            return _storeBranch(book, root, node, rootKey, nodeKey, false, newBranchSerial);
-        }
-
-        (bytes32 leftNode, uint8 branchDepth) = _leftNodeAndDepthAt(branchSlot, root, rightNode);
-        uint64 leftKey = branchDepth < 32 ? _askSortKey(root) : _askNodeKey(book, leftNode);
-        if (_commonPrefix(nodeKey, leftKey) < branchDepth) {
-            if (insertFlags & _MATCH_DIRTY != 0) root = _materializeRightSpine(book, root, false);
-            if (insertFlags & _MATCH_HOOK != 0 && _bit(nodeKey, _commonPrefix(nodeKey, leftKey))) {
-                _recordTopOrderChange(_rightmostLeaf(book, root), _nonce(node));
-            }
-            return _storeBranch(book, root, node, leftKey, nodeKey, false, newBranchSerial);
-        }
-
-        if (_bit(nodeKey, branchDepth)) {
-            rightNode = _insertAsk(book, rightNode, node, nodeKey, insertFlags, newBranchSerial);
-            return _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, false, false);
-        } else {
-            // Repair the dirty tail before insertion takes the exact left subtree.
-            if (insertFlags & _MATCH_DIRTY != 0) {
-                bytes32 repairedRight = _materializeRightSpine(book, rightNode, false);
-                if (repairedRight != rightNode) {
-                    _rewriteSingleBranchChild(book, root, leftNode, repairedRight, false);
-                }
-                rightNode = repairedRight;
-            }
-            leftNode = _insertAsk(book, leftNode, node, nodeKey, 0, newBranchSerial);
-            return _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, false, true);
-        }
-    }
-
-    /// @notice Remove one bid leaf by exact bid sort key.
-    /// @param root Current subtree root.
-    /// @param targetKey Bid sort key for the original order.
-    /// @param rightmost True if this frame is still on the bid-side best path.
-    /// @return newRoot Updated subtree root.
-    /// @return removed Live leaf that was removed, or zero if absent.
-    /// @return dirtyChanged True if a right-spine anchor was retained with a changed right child.
-    /// @return removedTop True if the removed leaf was the top bid.
-    /// @dev
-    /// Cancel searches by price/nonce, not by full order word, because a partially filled live leaf
-    /// has the same price/nonce as the original order but a smaller quantity.
-    function _removeBidByKey(Book storage book, bytes32 root, uint64 targetKey, bool rightmost)
+    /// @dev Descend once to a witness leaf, then place the new Patricia split while unwinding.
+    /// A pending split above this frame is returned unchanged. 255 means it was already inserted.
+    function _insertPath(Book storage book, bytes32 root, bytes32 node, uint64 nodeKey, bool isBid, uint32 serial)
         private
-        returns (bytes32 newRoot, bytes32 removed, bool dirtyChanged, bool removedTop)
+        returns (bytes32 newRoot, uint64 witness, uint8 split)
     {
-        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, root);
+        (bytes32 rightNode, uint256 slot) = _rightNodeAndBranchSlot(book, root);
         if (rightNode == bytes32(0)) {
-            return
-                _bidSortKey(root) == targetKey ? (bytes32(0), root, false, rightmost) : (root, bytes32(0), false, false);
+            witness = isBid ? _bidSortKey(root) : _askSortKey(root);
+            split = _commonPrefix(nodeKey, witness);
+            if (split == 64) revert DuplicateOrder();
+            return (root, witness, split);
         }
-
-        (bytes32 leftNode, uint8 branchDepth) = _leftNodeAndDepthAt(branchSlot, root, rightNode);
-
-        bool goRight = _bit(targetKey, branchDepth);
-        if (goRight) {
-            (rightNode, removed, dirtyChanged, removedTop) = _removeBidByKey(book, rightNode, targetKey, rightmost);
-        } else {
-            (leftNode, removed, dirtyChanged, removedTop) = _removeBidByKey(book, leftNode, targetKey, false);
+        _observeTreeWalk(1);
+        (bytes32 leftNode, uint8 depth) = _leftNodeAndDepthAt(slot, root, rightNode);
+        bool goRight = _bit(nodeKey, depth);
+        bytes32 child = goRight ? rightNode : leftNode;
+        (child, witness, split) = _insertPath(book, child, node, nodeKey, isBid, serial);
+        if (split != 255) {
+            if (split < depth) return (root, witness, split);
+            child = _storeBranch(book, child, node, witness, nodeKey, isBid, serial);
+            split = 255;
         }
-
-        if (removed == bytes32(0)) return (root, bytes32(0), false, false);
-        if (rightmost && goRight) {
-            bool branchDirty;
-            (newRoot, branchDirty) = _replaceRightmostRightChild(book, root, leftNode, rightNode, true);
-            return (newRoot, removed, dirtyChanged || branchDirty, removedTop);
-        }
-        return (
-            _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, true, !goRight),
-            removed,
-            dirtyChanged,
-            removedTop
-        );
+        if (goRight) rightNode = child;
+        else leftNode = child;
+        newRoot = _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, isBid, !goRight);
     }
 
-    /// @notice Remove one ask leaf by exact ask sort key.
-    /// @param root Current subtree root.
-    /// @param targetKey Ask sort key for the original order.
-    /// @param rightmost True if this frame is still on the ask-side best path.
-    /// @return newRoot Updated subtree root.
-    /// @return removed Live leaf that was removed, or zero if absent.
-    /// @return dirtyChanged True if a right-spine anchor was retained with a changed right child.
-    /// @return removedTop True if the removed leaf was the top ask.
-    /// @dev Mirrors `_removeBidByKey` using inverted-price ask keys.
-    function _removeAskByKey(Book storage book, bytes32 root, uint64 targetKey, bool rightmost)
+    /// @dev Test harnesses override this observer; the empty production body is optimized away.
+    /// Phases: 0 matching boundary, 1 insertion path, 2 cancellation path.
+    function _observeTreeWalk(uint8) internal virtual {}
+
+    /// @dev Cancellation follows one price/nonce path. Unwinding updates exact summaries and
+    /// promotes a surviving sibling when its parent loses a child.
+    function _removeByKey(Book storage book, bytes32 root, uint64 targetKey, bool isBid, bool rightmost)
         private
-        returns (bytes32 newRoot, bytes32 removed, bool dirtyChanged, bool removedTop)
+        returns (bytes32 newRoot, bytes32 removed, bool removedTop)
     {
-        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, root);
+        (bytes32 rightNode, uint256 slot) = _rightNodeAndBranchSlot(book, root);
         if (rightNode == bytes32(0)) {
-            return
-                _askSortKey(root) == targetKey ? (bytes32(0), root, false, rightmost) : (root, bytes32(0), false, false);
+            uint64 key = isBid ? _bidSortKey(root) : _askSortKey(root);
+            return key == targetKey ? (bytes32(0), root, rightmost) : (root, bytes32(0), false);
         }
-
-        (bytes32 leftNode, uint8 branchDepth) = _leftNodeAndDepthAt(branchSlot, root, rightNode);
-
-        bool goRight = _bit(targetKey, branchDepth);
-        if (goRight) {
-            (rightNode, removed, dirtyChanged, removedTop) = _removeAskByKey(book, rightNode, targetKey, rightmost);
-        } else {
-            (leftNode, removed, dirtyChanged, removedTop) = _removeAskByKey(book, leftNode, targetKey, false);
-        }
-
-        if (removed == bytes32(0)) return (root, bytes32(0), false, false);
-        if (rightmost && goRight) {
-            bool branchDirty;
-            (newRoot, branchDirty) = _replaceRightmostRightChild(book, root, leftNode, rightNode, false);
-            return (newRoot, removed, dirtyChanged || branchDirty, removedTop);
-        }
-        return (
-            _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, false, !goRight),
-            removed,
-            dirtyChanged,
-            removedTop
-        );
-    }
-
-    /// @notice Update a right-spine branch after only its right child changed.
-    /// @param branchNode Existing branch node used as the stable right-spine anchor.
-    /// @param leftNode Existing left child.
-    /// @param rightNode Replacement right child.
-    /// @return newNode Replacement subtree root.
-    /// @return dirtyChanged True if a stable branch anchor was retained with a new right child.
-    /// @dev
-    /// This is the rightmost-branch optimization. The packed branch word is left in place when the
-    /// right child changes, so ancestors on the same right spine do not need to be rewritten. The
-    /// branch quantity/path can therefore become stale until the next same-side insertion calls
-    /// `_materializeRightSpine`.
-    function _replaceRightmostRightChild(
-        Book storage book,
-        bytes32 branchNode,
-        bytes32 leftNode,
-        bytes32 rightNode,
-        bool isBid
-    ) private returns (bytes32 newNode, bool dirtyChanged) {
-        if (rightNode == bytes32(0)) return (leftNode, false);
-        if (rightNode == branchNode || rightNode == leftNode) {
-            return (_replaceBranch(book, branchNode, leftNode, rightNode, isBid), false);
-        }
-
-        book.tree[_branchKey(branchNode)].rightNode = rightNode;
-        return (branchNode, true);
-    }
-
-    /// @notice Collapse or rewrite a branch after one or both children changed.
-    /// @param leftNode Replacement left child.
-    /// @param rightNode Replacement right child.
-    /// @return Replacement subtree root.
-    /// @dev
-    /// If one child was consumed or canceled, the other child is promoted. If both remain, the
-    /// branch summary is recomputed from the child nodes while its stable nonce identity is
-    /// preserved, and its pointers remain at the same mapping key. Callers pass children in
-    /// already-valid left/right order.
-    function _replaceBranch(Book storage book, bytes32 oldBranch, bytes32 leftNode, bytes32 rightNode, bool isBid)
-        private
-        returns (bytes32)
-    {
-        bytes32 newBranch;
-        if (leftNode == bytes32(0)) {
-            newBranch = rightNode;
-        } else if (rightNode == bytes32(0)) {
-            newBranch = leftNode;
-        } else {
-            newBranch = _branchNodeForChildren(book, leftNode, rightNode, isBid, _nonce(oldBranch));
-            // Right-first matching can leave both children alive only when the left child was not
-            // touched. The duplicate-child corruption guard also arrives here after changing only
-            // the right child, so the existing left slot and its cached split depth stay valid.
-            _rewriteSingleBranchChild(book, newBranch, leftNode, rightNode, false);
-        }
-
-        return newBranch;
+        _observeTreeWalk(2);
+        (bytes32 leftNode, uint8 depth) = _leftNodeAndDepthAt(slot, root, rightNode);
+        bool goRight = _bit(targetKey, depth);
+        if (goRight) (rightNode, removed, removedTop) = _removeByKey(book, rightNode, targetKey, isBid, rightmost);
+        else (leftNode, removed, removedTop) = _removeByKey(book, leftNode, targetKey, isBid, false);
+        if (removed == bytes32(0)) return (root, bytes32(0), false);
+        return
+            (
+                _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, isBid, !goRight),
+                removed,
+                removedTop
+            );
     }
 
     /// @dev Rebuild an existing branch after exactly one logical child changed. A surviving
@@ -1421,6 +855,7 @@ contract DeepstateV1 is Ownable {
             return (_withQuantity(node, newQuantity), remaining, quoteAmount);
         }
 
+        _observeTreeWalk(0);
         bytes32 leftNode = _leftNode(book, node);
         bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
         uint160 rightFillQuantity;
@@ -1485,118 +920,6 @@ contract DeepstateV1 is Ownable {
         _rewriteSingleBranchChild(book, newNode, leftNode, rightNode, false);
     }
 
-    /// @notice Rebuild a previously optimized right spine back into exact aggregate branches.
-    /// @param node Current subtree root.
-    /// @return Exact subtree root.
-    /// @dev Only the right spine can contain stable anchors. Left subtrees remain exact because the
-    /// optimization is used only for right-child updates. Callers pass nonempty subtrees; empty
-    /// insertion roots are handled before traversal and branch children are always nonzero.
-    function _materializeRightSpine(Book storage book, bytes32 node, bool isBid) private returns (bytes32) {
-        bytes32 leftNode = _leftNode(book, node);
-        if (leftNode == bytes32(0)) return node;
-
-        bytes32 rightNode = _materializeRightSpine(book, book.tree[_branchKey(node)].rightNode, isBid);
-        return _replaceBranchAfterSingleChildChange(book, node, leftNode, rightNode, isBid, false);
-    }
-
-    /// @notice Return the aggregate quantity for a fully crossing same-price subtree on the global right spine.
-    /// @param node Right-spine branch to inspect.
-    /// @param limitPrice Incoming order limit price.
-    /// @param remaining Incoming base quantity available.
-    /// @param matchFlags Internal matcher flags for resting side and dirty right-spine state.
-    /// @return fillQuantity Actual base quantity consumable as one same-price aggregate, or zero.
-    /// @dev
-    /// Dirty right-spine anchors keep correct child pointers but stale packed aggregate fields. For
-    /// same-tick subtrees this helper recovers the exact sum of leaf-rounded notionals from child
-    /// correction codes, preserving the one-event aggregate path without rewriting every ancestor.
-    /// Mixed-tick dirty subtrees intentionally fall back to the recursive matcher because one tick
-    /// and one correction cannot represent their quote value.
-    function _samePriceRightSpineFillQuantity(
-        Book storage book,
-        bytes32 node,
-        int32 limitPrice,
-        uint160 remaining,
-        uint256 matchFlags
-    ) private view returns (uint160 fillQuantity, uint256 quoteAmount, bytes32 outgoingTopOrder) {
-        bool isBid = matchFlags & _MATCH_RESTING_BID != 0;
-        int32 price;
-        bool uniform;
-        if (matchFlags & _MATCH_DIRTY != 0) {
-            (uniform, price, fillQuantity, quoteAmount, outgoingTopOrder) =
-                _dirtyRightSpineData(book, node, isBid, remaining);
-        } else {
-            uniform = _correctionCode(node) != 0;
-            price = _price(node);
-            fillQuantity = _quantity(node);
-            quoteAmount = uniform ? _uniformBranchQuote(node, isBid) : 0;
-            if (matchFlags & _MATCH_HOOK != 0) {
-                outgoingTopOrder = _rightmostLeaf(book, node);
-            }
-        }
-        if (!uniform) return (0, 0, bytes32(0));
-        if (matchFlags & _MATCH_RESTING_BID != 0 ? price < limitPrice : price > limitPrice) {
-            return (0, 0, bytes32(0));
-        }
-    }
-
-    /// @notice Recover an exact same-tick aggregate only if it fits the incoming quantity budget.
-    /// @dev Only right children can themselves be stale. Every left child is an exact off-spine
-    /// subtree, so its packed correction gives its exact rounded quote value in O(1). Recursing
-    /// solely through right children keeps recovery bounded by the 64-bit radix depth. A nonempty
-    /// right child makes a left quantity at least equal to the budget a definitive rejection.
-    /// The rightmost leaf's decoded price factor is reused while rebuilding exact rounded quotes.
-    function _dirtyRightSpineData(Book storage book, bytes32 node, bool isBid, uint160 budget)
-        private
-        view
-        returns (bool uniform, int32 tick, uint160 quantity, uint256 quoteAmount, bytes32 rightmostOrder)
-    {
-        (uniform, tick, quantity, quoteAmount, rightmostOrder,,) =
-            _dirtyRightSpineDataWithFactor(book, node, isBid, budget);
-    }
-
-    function _dirtyRightSpineDataWithFactor(Book storage book, bytes32 node, bool isBid, uint160 budget)
-        private
-        view
-        returns (
-            bool uniform,
-            int32 tick,
-            uint160 quantity,
-            uint256 quoteAmount,
-            bytes32 rightmostOrder,
-            uint256 factor,
-            uint16 shift
-        )
-    {
-        bytes32 leftNode = _leftNode(book, node);
-        if (leftNode == bytes32(0)) {
-            tick = _price(node);
-            quantity = _quantity(node);
-            if (quantity > budget) return (false, 0, 0, 0, 0, 0, 0);
-            (factor, shift) = TickMath32.getPriceFactorAtTick(tick);
-            quoteAmount = tick == 0 ? quantity : _quoteAtFactor(factor, shift, quantity, isBid);
-            return (true, tick, quantity, quoteAmount, node, factor, shift);
-        }
-
-        bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
-        uint160 leftQuantity = _quantity(leftNode);
-        if (leftQuantity >= budget) return (false, 0, 0, 0, 0, 0, 0);
-        bool leftUniform = book.tree[_branchKey(leftNode)].leftNode == bytes32(0) || _correctionCode(leftNode) != 0;
-        if (!leftUniform) return (false, 0, 0, 0, 0, 0, 0);
-
-        bool rightUniform;
-        int32 rightTick;
-        uint160 rightQuantity;
-        uint256 rightQuote;
-        (rightUniform, rightTick, rightQuantity, rightQuote, rightmostOrder, factor, shift) =
-            _dirtyRightSpineDataWithFactor(book, rightNode, isBid, budget - leftQuantity);
-        if (!rightUniform || _price(leftNode) != rightTick) return (false, 0, 0, 0, bytes32(0), 0, 0);
-
-        tick = rightTick;
-        quantity = _quantity(leftNode) + rightQuantity;
-        quoteAmount = _uniformNodeQuoteAtFactor(book, leftNode, isBid, factor, shift) + rightQuote;
-        uniform = true;
-    }
-
     /// @notice Create and store a two-child branch for two nonzero nodes.
     /// @param a First child candidate.
     /// @param b Second child candidate.
@@ -1604,9 +927,8 @@ contract DeepstateV1 is Ownable {
     /// @param bKey Sort key for `b` in the tree being modified.
     /// @return branchNode Self-addressed branch node.
     /// @dev
-    /// The first bit where `aKey` and `bKey` differ decides child order. Equal keys are impossible
-    /// for honest state because nonce assignment is unique; if corruption makes them equal, this
-    /// reverts before overwriting ownership or branch data.
+    /// The first bit where `aKey` and `bKey` differ decides child order. The witness descent has already rejected
+    /// equal keys before this helper is reached.
     /// Callers pass nonzero children; empty-subtree cases are handled before this helper is reached.
     function _storeBranch(
         Book storage book,
@@ -1618,7 +940,6 @@ contract DeepstateV1 is Ownable {
         uint32 branchSerial
     ) private returns (bytes32 branchNode) {
         uint8 branchDepth = _commonPrefix(aKey, bKey);
-        if (branchDepth == 64) revert DuplicateOrder();
 
         bytes32 leftNode = a;
         bytes32 rightNode = b;
@@ -1639,7 +960,6 @@ contract DeepstateV1 is Ownable {
     /// @return Branch node whose quantity is the child sum and whose nonce is stable across rewrites.
     function _branchNodeForChildren(Book storage book, bytes32 a, bytes32 b, bool isBid, uint32 branchNonce)
         private
-        view
         returns (bytes32)
     {
         uint160 quantity = _quantity(a) + _quantity(b);
@@ -1661,6 +981,10 @@ contract DeepstateV1 is Ownable {
             correctionCode = uint32(correction + 1);
         }
 
+        if (correctionCode == 0) {
+            book.tree[bytes32(uint256(branchNonce))].quoteTotal =
+                _subtreeQuote(book, a, isBid) + _subtreeQuote(book, b, isBid);
+        }
         return _branchNode(tick, quantity, correctionCode, branchNonce);
     }
 
@@ -1728,16 +1052,6 @@ contract DeepstateV1 is Ownable {
         }
     }
 
-    /// @dev Load and decode the left child paired with a previously computed branch slot.
-    function _leftNodeAt(uint256 branchSlot, bytes32 branchNode) private view returns (bytes32 leftNode) {
-        bytes32 storedLeftNode;
-        /// @solidity memory-safe-assembly
-        assembly {
-            storedLeftNode := sload(branchSlot)
-        }
-        leftNode = _decodeStoredLeftNode(branchNode, storedLeftNode);
-    }
-
     /// @dev Load and decode the left child paired with a slot returned by
     /// `_rightNodeAndBranchSlot`, and recover the branch's Patricia split depth without another
     /// storage read. Mixed-price depth comes from the child ticks. Same-price depth comes from the
@@ -1783,26 +1097,6 @@ contract DeepstateV1 is Ownable {
         depth = _commonPrefix(leftPriceKey, rightPriceKey);
     }
 
-    /// @notice Return the price of the leftmost leaf in a subtree.
-    /// @param node Subtree root.
-    /// @return price Price of the worst executable leaf in the subtree.
-    /// @dev
-    /// For bids, the leftmost leaf has the lowest bid price. For asks, the leftmost leaf has the
-    /// highest ask price because ask sort keys invert price. In both cases this is the "worst"
-    /// price that must cross before an entire subtree can be aggregate-consumed.
-    function _leftmostLeafPrice(Book storage book, bytes32 node) private view returns (int32 price) {
-        price = _price(_leftmostLeaf(book, node));
-    }
-
-    /// @dev Return any stable routing representative from a subtree without using branch identity.
-    function _leftmostLeaf(Book storage book, bytes32 node) private view returns (bytes32 leaf) {
-        while (true) {
-            bytes32 leftNode = _leftNode(book, node);
-            if (leftNode == bytes32(0)) return node;
-            node = leftNode;
-        }
-    }
-
     /// @notice Return the best leaf in a subtree.
     /// @param node Subtree root.
     /// @return leaf Rightmost live leaf under `node`.
@@ -1812,25 +1106,6 @@ contract DeepstateV1 is Ownable {
             bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
             if (rightNode == bytes32(0)) return node;
             node = rightNode;
-        }
-    }
-
-    /// @notice Fill in the new top nonce after a top subtree was fully removed.
-    /// @dev A zero incoming nonce in transient top-change storage means the immediate match/cancel
-    /// site could not know the next top order yet. Ancestor frames call this after rebuilding
-    /// `newNode`.
-    function _refreshRecordedTopNonce(Book storage book, bytes32 newNode) private {
-        uint32 incomingNonce;
-        /// @solidity memory-safe-assembly
-        assembly {
-            incomingNonce := tload(_TOP_CHANGE_INCOMING_NONCE_SLOT)
-        }
-        // Callers reach this helper only after a top fill has recorded a nonzero outgoing order.
-        if (incomingNonce != 0 || newNode == bytes32(0)) return;
-        incomingNonce = _replacementTopNonce(book, newNode);
-        /// @solidity memory-safe-assembly
-        assembly {
-            tstore(_TOP_CHANGE_INCOMING_NONCE_SLOT, incomingNonce)
         }
     }
 
@@ -1946,8 +1221,8 @@ contract DeepstateV1 is Ownable {
     /// @return quoteAmount Total quote value of the consumed subtree.
     /// @dev
     /// This helper is reached only for an exact mixed-price subtree that fully crosses and fits
-    /// inside the incoming remainder. Quote calculation still visits every mixed child, but the
-    /// traversal emits one summary rather than one event per consumed leaf or uniform child.
+    /// inside the incoming remainder. Its cached exact quote is read without visiting descendants,
+    /// and one summary event represents all consumed leaves.
     function _consumeSubtree(bytes32 id, Book storage book, bytes32 node, bool restingIsBid)
         private
         returns (uint256 quoteAmount)
@@ -1968,8 +1243,8 @@ contract DeepstateV1 is Ownable {
     }
 
     /// @notice Compute the exact quote sum for a fully consumed subtree without emitting child logs.
-    /// @dev Uniform branches remain O(1) through their correction code. Mixed branches recurse in
-    /// the matcher's established right-first order and preserve every leaf-level rounding result.
+    /// @dev Uniform branches use their correction code; mixed branches use the stored quote sum.
+    /// Both paths preserve leaf-level rounding without recursive pricing.
     function _subtreeQuote(Book storage book, bytes32 node, bool restingIsBid)
         private
         view
@@ -1980,15 +1255,10 @@ contract DeepstateV1 is Ownable {
             return _uniformBranchQuote(node, restingIsBid);
         }
 
-        bytes32 leftNode = _leftNode(book, node);
-        if (leftNode == bytes32(0)) {
+        if (_nonce(node) >= _nextBranchSerial(book.nonceAndFlags)) {
             return _quoteValue(_price(node), quantity, restingIsBid);
         }
-
-        quoteAmount = _subtreeQuote(book, book.tree[_branchKey(node)].rightNode, restingIsBid);
-        unchecked {
-            quoteAmount += _subtreeQuote(book, leftNode, restingIsBid);
-        }
+        return book.tree[_branchKey(node)].quoteTotal;
     }
 
     /// @notice Build the bid sort key from an order or branch node.
@@ -2015,16 +1285,6 @@ contract DeepstateV1 is Ownable {
         }
     }
 
-    /// @dev Return a bid radix key represented by an actual descendant leaf.
-    function _bidNodeKey(Book storage book, bytes32 node) private view returns (uint64 key) {
-        key = _bidSortKey(_leftmostLeaf(book, node));
-    }
-
-    /// @dev Return an ask radix key represented by an actual descendant leaf.
-    function _askNodeKey(Book storage book, bytes32 node) private view returns (uint64 key) {
-        key = _askSortKey(_leftmostLeaf(book, node));
-    }
-
     /// @notice Count matching leading bits between two 64-bit radix keys.
     /// @param a First key.
     /// @param b Second key.
@@ -2049,23 +1309,6 @@ contract DeepstateV1 is Ownable {
         /// @solidity memory-safe-assembly
         assembly {
             one := and(shr(sub(63, depth), key), 1)
-        }
-    }
-
-    /// @notice Return whether a side has optimized right-spine anchors that need materialization before insert.
-    /// @param isBid True for the bid tree, false for the ask tree.
-    /// @return dirty True if the side's right spine contains stale branch aggregate words.
-    function _rightSpineDirty(uint256 nonceAndFlags, bool isBid) private pure returns (bool dirty) {
-        uint256 flag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
-        dirty = nonceAndFlags & flag != 0;
-    }
-
-    /// @notice Mark a side's right spine dirty.
-    /// @param isBid True for the bid tree, false for the ask tree.
-    function _setRightSpineDirty(Book storage book, bool isBid, uint256 nonceAndFlags) private {
-        uint256 flag = isBid ? _BID_RIGHT_SPINE_DIRTY : _ASK_RIGHT_SPINE_DIRTY;
-        if (nonceAndFlags & flag == 0) {
-            book.nonceAndFlags = nonceAndFlags | flag;
         }
     }
 
@@ -2272,24 +1515,6 @@ contract DeepstateV1 is Ownable {
         // slither-disable-end incorrect-shift
     }
 
-    /// @notice Build a self-contained event node for a dirty same-tick aggregate fill.
-    /// @dev Right-spine anchors may have stale quantity and correction fields. The event node keeps
-    /// the anchor's tick/path identity, replaces quantity with the amount filled, and derives the
-    /// exact leaf-rounding correction from the already-computed quote amount. Offchain consumers
-    /// can therefore reconstruct quote value without two additional event words.
-    function _aggregateMatchEventNode(bytes32 node, uint160 quantity, uint256 quoteAmount, bool isBid)
-        private
-        pure
-        returns (bytes32 updated)
-    {
-        uint256 aggregateQuote = _quoteValue(_price(node), quantity, isBid);
-        uint256 correction = isBid ? quoteAmount - aggregateQuote : aggregateQuote - quoteAmount;
-        // A correction is at most matchedLeafCount - 1. The opposing order/branch allocation
-        // fronts admit at most 2^31 live leaves, so correction + 1 is representable in uint32.
-        // forge-lint: disable-next-line(unsafe-typecast)
-        updated = _withQuantityAndCorrection(node, quantity, uint32(correction + 1));
-    }
-
     /// @notice Replace the quantity and event-correction fields of a packed node.
     /// @dev Match events interpret `correctionCode - 1` as a signed one-sided rounding delta:
     /// bids add it to the rounded-up notional and asks subtract it from the rounded-down notional.
@@ -2355,20 +1580,6 @@ contract DeepstateV1 is Ownable {
     function _correctionCode(bytes32 node) private pure returns (uint32) {
         // forge-lint: disable-next-line(unsafe-typecast)
         return uint32((uint256(node) >> _CORRECTION_SHIFT) & _CORRECTION_MASK);
-    }
-
-    /// @notice Mark packed match metadata as having retained a dirty right-spine anchor.
-    /// @param change Existing packed match-change metadata.
-    /// @return Updated metadata with the dirty bit set.
-    function _markMatchDirty(bytes32 change) private pure returns (bytes32) {
-        return bytes32(uint256(change) | _MATCH_CHANGE_DIRTY);
-    }
-
-    /// @notice Return whether packed match metadata indicates a dirty right-spine anchor changed.
-    /// @param change Packed match-change metadata.
-    /// @return True if the dirty bit is set.
-    function _matchChangeDirty(bytes32 change) private pure returns (bool) {
-        return uint256(change) & _MATCH_CHANGE_DIRTY != 0;
     }
 
     /// @notice Extract the quantity field from a packed node.

@@ -1417,7 +1417,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
         stats.rightmostPrice = rightStats.rightmostPrice;
         stats.uniform = leftStats.uniform && rightStats.uniform && stats.leftmostPrice == stats.rightmostPrice;
         stats.exists = true;
-        if (!rightmost) {
+        {
             assertEq(_quantity(node), stats.quantity, "branch quantity");
             assertGt(_quantity(node), stats.maxPathLeafQuantity, "branch quantity over max leaf");
             assertEq(_price(node), leftStats.leftmostPrice, "branch representative price");
@@ -1427,6 +1427,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
                 assertEq(_correctionCode(node), correction + 1, "branch correction");
             } else {
                 assertEq(_correctionCode(node), 0, "mixed branch correction");
+                assertEq(engine.cachedQuote(node), stats.quoteAmount, "mixed branch exact quote");
             }
             _assertStoredNodeKeyRepresentsSubtree(node, stats, isBidTree);
         }
@@ -1443,7 +1444,7 @@ contract RadixMatchingEngineInvariantTest is StdInvariant, Test {
             (bytes32 leftNode, bytes32 rightNode) = engine.tree(node);
             uint160 actualQuantity = _actualSubtreeQuantity(node);
 
-            assertGe(uint256(_quantity(node)), uint256(actualQuantity), "right spine quantity bound");
+            assertEq(uint256(_quantity(node)), uint256(actualQuantity), "right spine exact quantity");
             assertTrue(leftNode != node, "right spine left self-cycle");
             assertTrue(rightNode != node, "right spine right self-cycle");
             assertTrue(leftNode != rightNode, "right spine duplicate children");

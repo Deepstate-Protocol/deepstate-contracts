@@ -54,8 +54,20 @@ routing derives keys from descendant order leaves rather than treating a branch 
 the path. The quantity field stores the exact sum of the child quantities. A uniform-tick branch
 stores `roundingCorrection + 1` in its
 correction field, allowing aggregate matching to reproduce the exact sum of per-order rounded
-notionals. Mixed-tick branches use correction code zero and recurse when their quote value is needed.
-The nonce is a unique node identity and addresses that node's stored child-pointer pair.
+notionals. Mixed-tick branches use correction code zero and store an exact leaf-rounded quote total alongside
+their child pointers. All quantities and representative worst ticks remain exact after every mutation.
+Matching consumes a whole crossing subtree from these summaries and expands only one boundary
+path, at most 64 branch levels (32 price bits plus 32 nonce bits), independently of book width.
+Insertion descends once to a witness leaf, then installs its split and rebuilds summaries on unwind.
+Cancellation also follows one path. Optional top-order lookups are additional bounded paths.
+
+The extra quote word changes branch storage requirements. Deploy this engine with fresh books;
+it cannot be substituted into populated legacy storage without rebuilding every mixed summary.
+The public action/hook ABI is unchanged, but full mixed sweeps now emit an existing subtree-summary
+event where the previous matcher could emit individual match events.
+
+See [the bounded-traversal comparison](docs/BOUNDED_TRAVERSAL_GAS.md) for controlled master/before/after
+gas measurements, including the additional cost of maintaining exact deep summaries.
 
 Resting order nonces start at `type(uint32).max` and decrement by one. Branch nonces start at one and
 increment by one. A book epoch remains restable only while the next order identity is above the next

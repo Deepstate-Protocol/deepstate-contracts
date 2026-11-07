@@ -1124,7 +1124,7 @@ contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
 
         vm.prank(TAKER);
         _fillAskNoRest(targetTick, 1);
-        assertTrue(_nonceAndFlags() & BID_RIGHT_SPINE_DIRTY != 0, "bid spine was not marked dirty");
+        assertEq(_nonceAndFlags() & BID_RIGHT_SPINE_DIRTY, 0, "summaries remain exact");
     }
 
     function _fillObservedOrderThreeTimes() internal {

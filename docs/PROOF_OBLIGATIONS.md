@@ -148,35 +148,27 @@ covered separately by N1.
 
 ### R4. Aggregate quantity and quote correctness
 
-Every clean branch quantity equals the sum of its leaves. Every uniform branch quote equals the sum
-of leaf-rounded quotes by A5. Every mixed subtree quote equals the recursive sum of its children.
+Every live branch quantity equals the sum of its leaves. Every uniform branch quote equals the sum
+of leaf-rounded quotes by A5. Every mixed branch stores the exact sum of its children's quotes in `quoteTotal`.
 Insertion, partial fill, full removal, cancellation, and branch collapse preserve these statements.
 
 **Evidence:** local arithmetic `SMT` lemmas, `INDUCTION` on subtree height, production symbolic
 one/two-maker paths, and stateful model invariants.
 
-### R5. Dirty right-spine safety
+### R5. Exact-summary preservation
 
-Only right-child rewrites can make a right-spine anchor stale. Its child pointers remain valid, every
-left subtree remains exact, and matching never treats a stale mixed-price aggregate as exact. The
-dirty same-tick recovery recursively adds exact left summaries and the right suffix. Materialization
-rebuilds the right child before its parent. Same-side insertion shares the dirty traversal while it
-follows right children, rebuilding each shared ancestor only once. Before insertion diverges into
-an exact left subtree, it materializes the untouched right tail and persists its repaired summary.
-Before creating a new parent above a dirty subtree, it materializes that subtree. Empty roots and
-leaves require no repair. Thus every child is exact before its parent is rebuilt, and insertion
-returns a clean tree without changing membership, priority, quantity, or quote accounting.
+Every mutation rebuilds surviving ancestors from exact child summaries. A mixed branch's
+`quoteTotal` equals the sum of independently leaf-rounded quotes. Its packed tick is the worst
+(leftmost) live tick. Uniform branches retain their exact rounding correction. There are no stale
+anchors, dirty recovery probes, or materialization passes.
 
-Recovery of a uniform dirty subtree is bounded by the incoming quantity. Its exact left subtree
-and nonempty right subtree cannot fit when the left quantity alone meets or exceeds the budget.
-Otherwise, the right subtree receives precisely the budget minus the left quantity. A rejected
-recovery falls back to ordinary right-first matching; it never discards executable liquidity.
-Successful recovery propagates the rightmost leaf's price factor upward, applying each child's
-existing rounding correction without decoding the same tick again.
+Insertion descends once to a witness leaf. The first differing bit determines a pending split;
+unwinding installs it at the unique ancestor interval containing that depth. Existing ancestors are
+rebuilt once, with no repeated descendant-key searches. Cancellation likewise changes one child per
+level. Branch identities remain stable across all summary rewrites.
 
-**Evidence:** `INDUCTION` over the dirty suffix length, production formal dirty-spine paths, corruption
-regressions, deterministic bid/ask divergence tests checking every aggregate, payout, and top hook,
-and stateful right-spine invariants.
+**Evidence:** source-bound arithmetic `SMT` lemmas, induction on the one-child path, stateful exact
+quantity/price/quote invariants, and instrumented full-depth and wide-book tests.
 
 ### R6. Best-price matching
 
@@ -280,16 +272,21 @@ claimed.
 
 ### E4. Termination and gas-bounded liveness
 
-Pure radix walks are bounded by 64 key bits. Partial matching visits at most one unresolved path per
-level while whole uniform subtrees are O(1). Exact quote calculation for a fully consumed mixed-price
-subtree is O(number of mixed descendants), route execution is additive over legs, and touched-token
-deduplication is quadratic in the number of distinct route tokens. Thus every finite call terminates
-in the unmetered model, but a sufficiently large mixed tree or route may exceed a particular block gas
-limit and revert.
+A side key has 32 price bits and 32 nonce bits, so each root-to-leaf path expands at most
+64 branches. A wholly crossing subtree that fits the quantity budget is consumed in O(1), using
+its exact quote summary. Otherwise the matcher tries the right child first. If it survives, either
+the budget is exhausted or the price boundary has been reached, so the left child is not visited.
+If it is completely consumed, that child was handled in O(1) and only the left boundary can expand.
+Thus at most one child per level expands, independent of the number of resting orders.
 
-**Evidence:** `INDUCTION` on key depth, subtree size, and route length; isolated gas benchmarks for
-concrete limits. “Live under every block gas limit” is false for every nontrivial EVM contract and is
-not claimed.
+Insertion and cancellation each descend one path and rebuild it once. Optional outgoing/incoming
+top-order lookups are additional bounded walks, not repeated searches inside matching frames.
+This is a bound on branch expansions, not a claim of 64 total SLOAD instructions or a transaction
+gas constant. Routes remain additive over books/legs, token settlement is additional, and each
+changed side retains its separately capped hook callback under the existing ABI.
+
+**Evidence:** source-bound `SMT` height/one-boundary recurrence, structural induction, instrumented
+64-level and 4,096-leaf regression tests, and isolated three-version gas comparisons.
 
 ## Proof Boundary
 

@@ -89,15 +89,18 @@ def bind_model_to_source():
         "prefixLength = uint8(LibBit.clz(differingBits << 192));",
         "one := and(shr(sub(63, depth), key), 1)",
         "nextOrderNonce = orderNonce - 1;",
-        "_dirtyRightSpineData(book, node, isBid, remaining);",
-        "if (leftQuantity >= budget) return (false, 0, 0, 0, 0, 0, 0);",
-        "_dirtyRightSpineDataWithFactor(book, rightNode, isBid, budget - leftQuantity);",
+        "uint256 quoteTotal;",
+        "if (rightNode == bytes32(0) && remaining != 0) {",
+        "return book.tree[_branchKey(node)].quoteTotal;",
+        "uint8 split;",
+        "if (split < depth) return (root, witness, split);",
+        "if (split == 64) revert DuplicateOrder();",
         "if (rotation.epoch == _POOL_EPOCH_MASK) revert EpochExhausted();",
         "++rotation.epoch;",
         "return (poolState & _POOL_HOOK_ACTIVE_MASK) | epoch;",
         "uint160 quantity = _quantity(a) + _quantity(b);",
-        "quoteAmount += _subtreeQuote(book, leftNode, restingIsBid);",
-        "(newRightNode, rightFillQuantity, rightQuoteAmount) =",
+        "_subtreeQuote(book, a, isBid) + _subtreeQuote(book, b, isBid);",
+        "(rightNode, rightFillQuantity, rightQuoteAmount) =",
         "if (remaining != 0) {",
         "bool restAllowed = !params.noRest && routedNonce != 1;",
         "int256 next = current + amount;",
@@ -551,16 +554,12 @@ def prove_keys_and_radix(p):
         1 + branch_index < UINT32_MAX - order_index,
     )
 
-    old_aggregate = Int("dirty_old_aggregate")
-    new_descendant = Int("dirty_new_descendant")
-    removed_quantity = Int("dirty_removed_quantity")
+    left = Int("exact_parent_left")
+    right = Int("exact_parent_right")
     p.prove(
-        "R5.stale-anchor-cannot-alias-descendant-by-quantity",
-        old_aggregate > new_descendant,
-        old_aggregate >= 2,
-        removed_quantity >= 1,
-        new_descendant >= 1,
-        new_descendant <= old_aggregate - removed_quantity,
+        "R5.exact-parent-cannot-alias-descendant-by-quantity",
+        And(left + right > left, left + right > right),
+        left >= 1, right >= 1, left + right <= UINT160_MAX,
     )
 
 
@@ -716,42 +715,25 @@ def prove_tree_transition_summaries(p):
         left_quantity + right_quantity <= UINT160_MAX,
     )
 
-    old_right_quantity = Int("dirty_old_right_quantity")
-    fill_budget = Int("dirty_fill_budget")
-    budget_domain = (
-        left_quantity >= 1,
-        right_quantity >= 1,
-        left_quantity + right_quantity <= UINT160_MAX,
-        fill_budget >= 1,
-        fill_budget <= UINT160_MAX,
-    )
+    removed = Int("exact_removed_right")
     p.prove(
-        "R5.left-budget-rejection-cannot-discard-fitting-subtree",
-        Implies(left_quantity >= fill_budget, left_quantity + right_quantity > fill_budget),
-        *budget_domain,
+        "R5.partial-child-cannot-be-fully-consumed",
+        right_quantity - removed > 0,
+        right_quantity >= 1, removed >= 0, removed < right_quantity,
     )
+    budget = Int("boundary_budget")
+    consumed = Int("boundary_consumed")
     p.prove(
-        "R5.residual-budget-exactly-characterizes-full-subtree-fit",
-        (left_quantity + right_quantity <= fill_budget)
-        == And(left_quantity < fill_budget, right_quantity <= fill_budget - left_quantity),
-        *budget_domain,
+        "R5.quantity-boundary-exhausts-budget",
+        budget - consumed == 0,
+        budget >= 1, consumed == budget,
     )
-    new_right_quantity = Int("dirty_new_right_quantity")
-    removed_right_quantity = old_right_quantity - new_right_quantity
-    stale_anchor_quantity = left_quantity + old_right_quantity
-    exact_dirty_quantity = left_quantity + new_right_quantity
+    outside_limit = Int("boundary_uncrossing_quantity")
     p.prove(
-        "R5.changed-dirty-anchor-strictly-overstates-exact-summary",
-        And(
-            stale_anchor_quantity > exact_dirty_quantity,
-            stale_anchor_quantity == exact_dirty_quantity + removed_right_quantity,
-            exact_dirty_quantity == left_quantity + new_right_quantity,
-        ),
-        left_quantity >= 1,
-        old_right_quantity >= 1,
-        new_right_quantity >= 1,
-        new_right_quantity < old_right_quantity,
-        stale_anchor_quantity <= UINT160_MAX,
+        "R5.price-boundary-retains-live-right-child",
+        right_quantity - consumed >= outside_limit,
+        right_quantity >= 1, outside_limit >= 1,
+        consumed >= 0, consumed <= right_quantity - outside_limit,
     )
 
     old_left_quote = Int("tree_old_left_quote")
@@ -1364,6 +1346,20 @@ def prove_termination_measures(p):
         And(64 - (depth + 1) < 64 - depth, 64 - (depth + 1) >= 0),
         depth >= 0,
         depth < 64,
+    )
+
+    expanded_right = Int("expanded_right")
+    expanded_left = Int("expanded_left")
+    remaining_height = Int("boundary_remaining_height")
+    # Only one child can expand. A wholly consumed sibling is answered by its cached summary.
+    p.prove(
+        "E4.one-boundary-path-work-is-height-bounded",
+        1 + expanded_right + expanded_left <= remaining_height,
+        remaining_height >= 1, remaining_height <= 64,
+        expanded_right >= 0, expanded_left >= 0,
+        expanded_right <= remaining_height - 1,
+        expanded_left <= remaining_height - 1,
+        Or(expanded_right == 0, expanded_left == 0),
     )
 
     subtree_size = Int("subtree_size")

@@ -23,8 +23,8 @@ For a side `s` and leaf `l`, define:
 - `N_s(t, q)`, the exact integer notional represented by production tick `t`, rounded down for an
   ask and up for a bid.
 
-For a subtree `T`, let `Leaves(T)` be its reachable leaves, `rep(T)` a descendant leaf used only to
-recover a radix routing key, `sumQ(T)` the sum of its live quantities, and `id(T)` the unique stable
+For a subtree `T`, let `Leaves(T)` be its reachable leaves, `rep(T)` its leftmost live leaf,
+`sumQ(T)` the sum of its live quantities, and `id(T)` the unique stable
 branch nonce allocated when that internal node is created. A clean branch summary is the packed word
 
 `A(T) = pack(price(rep(T)), sumQ(T), correction(T), id(T))`.
@@ -49,26 +49,21 @@ sign convention stated in the contract.
 5. a nonzero correction denotes a uniform-tick subtree and reconstructs exactly
    `sum(N_s(t, Q(l)))`; zero denotes a leaf or mixed branch;
 6. all reachable node addresses are distinct and nonzero; and
-7. the rightmost leaf has maximum side sort key.
+7. the rightmost leaf has maximum side sort key; and
+8. every mixed branch's `quoteTotal` equals the sum of leaf-rounded quote values, while its packed
+   tick equals the leftmost live tick.
 
-### 1.2 Dirty-tree invariant `D(T)`
+### 1.2 Exact summaries
 
-`D(T)` differs from `C(T)` only on a suffix of the global right spine. A retained dirty anchor:
-
-1. keeps its exact left child;
-2. points to a right child satisfying either `C` or `D`;
-3. retains a historical packed address whose quantity is at least the current subtree quantity;
-4. remains distinct from every current descendant; and
-5. is never used as an exact aggregate unless `_dirtyRightSpineData` reconstructs quantity and
-   quote from its children.
-
-All off-spine subtrees remain clean.
+All live subtrees satisfy `C(T)`, including the global rightmost path. Mixed quotes are cached
+when branches are created or rewritten; consuming them never recursively reprices descendants.
+No successful mutation leaves a stale packed quantity or representative tick.
 
 ### 1.3 Book and accounting invariant `B`
 
 For each book:
 
-1. the ask and bid roots each satisfy `C` or `D`;
+1. the ask and bid roots each satisfy `C`;
 2. every live leaf has exactly one original `orderOf[keccak256(bookId, originalOrder)]` record;
 3. every ownership record identifies at most one live leaf with the same tick and nonce;
 4. assigned nonces are unique across both sides and strictly decrease;
@@ -146,7 +141,8 @@ above the ascending branch-allocation front; it therefore satisfies `C`.
 
 ### 3.2 Insertion
 
-Assume `C(T)` after any required dirty-spine materialization.
+Assume `C(T)`. A single descent obtains a witness leaf and the first differing key bit. On unwind,
+the pending split is installed between the unique pair of enclosing Patricia depths.
 
 1. **Empty root:** the new leaf becomes the root.
 2. **Leaf root:** unequal nonces make the side keys unequal. `_storeBranch` finds their first
@@ -172,8 +168,8 @@ the target leaf, removal returns empty. On unwind:
 - one child is promoted without changing its invariant; and
 - two children are repacked from their exact summaries.
 
-For an off-spine path this proves `C` directly. On the global right path, the optimization may retain
-the old packed branch summary and update only its right pointer, producing `D` as proved in Section 4.
+This proves `C` on every path, including the global rightmost path. Every rewritten mixed branch
+stores the sum of its exact child quote values; every uniform branch recomputes its correction.
 
 ### 3.4 Live-node uniqueness
 
@@ -184,25 +180,18 @@ globally unique within the book, and disjoint from the other class. Since the lo
 live node contain that identity, distinct live nodes have distinct packed words and distinct branch
 mapping keys. The fixed root key zero cannot alias either class.
 
-## 4. Dirty Right-Spine Preservation
+## 4. Single-Boundary Preservation
 
-Assume `D(T)` and modify only the rightmost path.
+Whole crossing subtrees are consumed from their exact quantity and quote summaries. If a right
+child needs expansion, it cannot be fully consumed: either its quantity exceeds the budget or its
+worst tick is outside the limit. In the former case the budget is exhausted before reaching the
+left child; in the latter an uncrossing right suffix survives and no left price can cross.
+Consequently a right child that disappears was handled without expansion, and only then may the
+left boundary expand. At most one expanded child is charged to each strictly increasing key depth.
 
-1. The left child is unchanged and remains clean.
-2. A retained anchor keeps its unique branch nonce. Order and branch allocation fronts are
-   disjoint, and every other live branch has a different allocated nonce, so neither a descendant
-   rewrite nor a quantity change can alias the anchor. Production still rejects a replacement that
-   would create a self-cycle or duplicate child under corrupted state.
-3. Updating the right pointer preserves reachability and key order because the replacement is the
-   result of recursively modifying the old right subtree.
-4. Dirty aggregate words are never trusted for mixed-price consumption. `_dirtyRightSpineData`
-   accepts a frame only when the exact left child and recursively reconstructed right suffix are
-   uniform at the same tick; it then adds exact quantities and exact corrected quotes.
-5. `_materializeRightSpine` recursively materializes the right child before rebuilding its parent,
-   so induction on suffix length yields a clean exact root.
-
-Thus optimized matching/removal maps `C or D` to `C or D`, and a later same-side insertion maps it
-back to `C`.
+Surviving ancestors have at most one changed child. Rebuilding their exact summaries establishes
+`C` on unwind, with no lazy suffix or separate repair pass. Uniform matching shares one decoded
+price factor along its boundary path and preserves the same argument.
 
 ## 5. Matching Priority And Accounting
 
@@ -215,7 +204,8 @@ A subtree fast path is taken only when:
 2. its worst, leftmost leaf crosses the taker limit.
 
 If the worst leaf crosses, every better leaf crosses. If either condition fails, recursion processes
-the right subtree first and reaches the left subtree only with remaining quantity. Induction on
+the right subtree first and reaches the left subtree only after the right child was fully removed
+and quantity remains. Induction on
 subtree height proves that no worse maker fills while a better crossing maker remains. Strict nonce
 ordering proves time priority at equal tick.
 
@@ -347,12 +337,13 @@ body. Every token transfer and hook callback occurs while it is set. A callback 
 `fillRoute`, or `cancel` therefore reverts before mutation. On any outer revert, EVM frame rollback
 restores the prior transient and persistent state.
 
-Top-order tracking follows the same rightmost induction as matching:
+Top-order tracking compares the original best leaf with the completed mutation's replacement:
 
 - insertion records only when an empty side gains a top or the new key exceeds the old maximum;
 - partial top fill records the retained nonce and outgoing order for sold-amount reporting;
 - full top removal records the rightmost nonce of the rebuilt replacement, or zero for empty; and
-- left-side changes disable hook propagation because they cannot change the maximum key.
+- insertion that leaves the maximum key unchanged records no top change; and
+- cancellation records a change only when its removed leaf was globally rightmost.
 
 The router consumes these transient values after book mutation. It calls the configured hook with a
 200,000-gas cap and ignores success data. Under Cancun call isolation, a hook revert rolls back the
@@ -362,16 +353,16 @@ miss a notification.
 
 ## 11. Termination And Liveness Boundary
 
-Every radix recursion increases depth and has at most 64 key bits. Every subtree quote recursion
-enters a strict child with fewer nodes. Every route loop increases its index toward a finite calldata
-length, and every touched-list scan increases its index toward a finite in-memory count. These
-well-founded measures prove termination for every finite valid input in the unmetered semantics.
+Every radix path has at most 64 branch levels: 32 price bits plus 32 nonce bits.
+Matching expands at most one boundary child per level; wholly consumed sibling subtrees use
+cached exact summaries. Insertion obtains one witness on descent and installs its split on
+unwind. Cancellation follows one path and rebuilds exact summaries on unwind. No traversal
+depends on the number of leaves at a fixed key depth.
 
-They do not provide a state-independent block-gas bound. A mixed subtree quote can visit every mixed
-descendant, route work is additive in legs, and touched-token deduplication is quadratic in distinct
-route tokens. Thus for each concrete successful call there exists finite required gas, but a caller
-supplying less gas or constructing work above a chain's block limit reverts atomically. No stronger
-unconditional EVM liveness claim is possible.
+Optional top-order lookups add bounded 64-level walks. These statements bound branch expansions,
+not total storage reads or transaction gas. Route work remains additive in legs, touched-token
+deduplication remains quadratic in distinct route tokens, and capped side hooks and settlement
+add their own costs. A multi-leg route or insufficient gas may still revert atomically.
 
 ## 12. History Theorem
 

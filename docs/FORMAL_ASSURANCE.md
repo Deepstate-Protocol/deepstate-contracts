@@ -60,7 +60,7 @@ membership. Its invariants check:
 - owner and side mappings, cancel routing, and inactive-order absence;
 - strict nonce decrement, bid/ask storage separation, and zero-quantity storage absence;
 - uncrossed books, best-price selection, and same-price time priority;
-- right-spine lower bounds while optimized anchors are dirty; and
+- exact quantities, worst prices, and cached mixed quotes on every branch; and
 - sequential cancel and claim liveness for tracked orders.
 
 The multi-pool handler in `test/DeepstateV1Invariant.t.sol` maintains a separate model across three

@@ -755,12 +755,7 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(dave);
         bytes32 bestAsk = engine.fill(_order(10, 1, 0), false);
 
-        bytes32 askAggregate = _branchFor(firstAsk, secondAsk, false);
-        bytes32[] memory askMatches = new bytes32[](2);
-        askMatches[0] = _matchEventNode(bestAsk, 1, _quoteValue(10, 1, false), false);
-        askMatches[1] = _matchEventNode(askAggregate, 5, _quoteValue(20, 2, false) + _quoteValue(20, 3, false), false);
-        vm.expectEmit(false, false, false, true, address(engine));
-        emit AsksMatched(_bookId(), askMatches);
+        _expectMixedSweep(false, 6, _quoteValue(10, 1, false) + _quoteValue(20, 2, false) + _quoteValue(20, 3, false));
 
         vm.prank(carol);
         engine.fill(_order(20, 6, 0), true);
@@ -772,12 +767,7 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(dave);
         bytes32 bestBid = engine.fill(_order(80, 1, 0), true);
 
-        bytes32 bidAggregate = _branchFor(firstBid, secondBid, true);
-        bytes32[] memory bidMatches = new bytes32[](2);
-        bidMatches[0] = _matchEventNode(bestBid, 1, _quoteValue(80, 1, true), true);
-        bidMatches[1] = _matchEventNode(bidAggregate, 5, _quoteValue(70, 2, true) + _quoteValue(70, 3, true), true);
-        vm.expectEmit(false, false, false, true, address(engine));
-        emit BidsMatched(_bookId(), bidMatches);
+        _expectMixedSweep(true, 6, _quoteValue(80, 1, true) + _quoteValue(70, 2, true) + _quoteValue(70, 3, true));
 
         vm.prank(carol);
         engine.fill(_order(70, 6, 0), false);
@@ -796,10 +786,7 @@ contract RadixMatchingEngineCoverageTest is Test {
 
         bytes32 askSubtreeRoot = _branchFor(lowerAsk, higherAsk, false);
 
-        vm.expectEmit(false, false, false, true, address(engine));
-        emit AskMatched(_bookId(), _matchEventNode(bestAsk, 1, _quoteValue(10, 1, false), false));
-        vm.expectEmit(false, false, false, true, address(engine));
-        emit AskSubtreeMatched(_bookId(), askSubtreeRoot, 5, _quoteValue(20, 2, false) + _quoteValue(21, 3, false));
+        _expectMixedSweep(false, 6, _quoteValue(10, 1, false) + _quoteValue(20, 2, false) + _quoteValue(21, 3, false));
 
         vm.prank(carol);
         engine.fill(_order(21, 6, 0), true);
@@ -813,10 +800,7 @@ contract RadixMatchingEngineCoverageTest is Test {
 
         bytes32 bidSubtreeRoot = _branchFor(higherBid, lowerBid, true);
 
-        vm.expectEmit(false, false, false, true, address(engine));
-        emit BidMatched(_bookId(), _matchEventNode(bestBid, 1, _quoteValue(80, 1, true), true));
-        vm.expectEmit(false, false, false, true, address(engine));
-        emit BidSubtreeMatched(_bookId(), bidSubtreeRoot, 5, _quoteValue(70, 2, true) + _quoteValue(69, 3, true));
+        _expectMixedSweep(true, 6, _quoteValue(80, 1, true) + _quoteValue(70, 2, true) + _quoteValue(69, 3, true));
 
         vm.prank(carol);
         engine.fill(_order(69, 6, 0), false);
@@ -871,10 +855,11 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(carol);
         engine.fill(_order(60, 1, 0), true);
 
-        assertEq(engine.askRoot(), askAnchor);
+        assertEq(_nonce(engine.askRoot()), _nonce(askAnchor));
+        assertEq(_quantity(engine.askRoot()), 4);
         assertEq(
             uint256(vm.load(address(engine), _nextNonceSlot())),
-            (uint256(2) << BRANCH_NONCE_SHIFT) | (uint256(MAX_ORDER_NONCE) - 2) | ASK_RIGHT_SPINE_DIRTY
+            (uint256(2) << BRANCH_NONCE_SHIFT) | (uint256(MAX_ORDER_NONCE) - 2)
         );
 
         vm.prank(carol);
@@ -898,10 +883,11 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(carol);
         engine.fill(_order(80, 1, 0), false);
 
-        assertEq(engine.bidRoot(), bidAnchor);
+        assertEq(_nonce(engine.bidRoot()), _nonce(bidAnchor));
+        assertEq(_quantity(engine.bidRoot()), 4);
         assertEq(
             uint256(vm.load(address(engine), _nextNonceSlot())),
-            (uint256(2) << BRANCH_NONCE_SHIFT) | (uint256(MAX_ORDER_NONCE) - 2) | BID_RIGHT_SPINE_DIRTY
+            (uint256(2) << BRANCH_NONCE_SHIFT) | (uint256(MAX_ORDER_NONCE) - 2)
         );
 
         vm.prank(carol);
@@ -924,11 +910,7 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(carol);
         engine.fill(_order(60, 1, 0), true);
 
-        bytes32[] memory askMatches = new bytes32[](2);
-        askMatches[0] = _matchEventNode(_order(60, 1, _nonce(firstAsk)), 1, _quoteValue(60, 1, false), false);
-        askMatches[1] = _matchEventNode(secondAsk, 3, _quoteValue(61, 3, false), false);
-        vm.expectEmit(false, false, false, true, address(engine));
-        emit AsksMatched(_bookId(), askMatches);
+        _expectMixedSweep(false, 4, _quoteValue(60, 1, false) + _quoteValue(61, 3, false));
 
         vm.prank(carol);
         engine.fill(_order(61, 4, 0), true);
@@ -941,11 +923,7 @@ contract RadixMatchingEngineCoverageTest is Test {
         vm.prank(carol);
         engine.fill(_order(80, 1, 0), false);
 
-        bytes32[] memory bidMatches = new bytes32[](2);
-        bidMatches[0] = _matchEventNode(_order(80, 1, _nonce(firstBid)), 1, _quoteValue(80, 1, true), true);
-        bidMatches[1] = _matchEventNode(secondBid, 3, _quoteValue(79, 3, true), true);
-        vm.expectEmit(false, false, false, true, address(engine));
-        emit BidsMatched(_bookId(), bidMatches);
+        _expectMixedSweep(true, 4, _quoteValue(80, 1, true) + _quoteValue(79, 3, true));
 
         vm.prank(carol);
         engine.fill(_order(79, 4, 0), false);
@@ -955,7 +933,7 @@ contract RadixMatchingEngineCoverageTest is Test {
         int32 price = 50;
         bytes32 leftAsk = _order(price, 2, MAX_ORDER_NONCE - 1);
         bytes32 rightAsk = _order(price, 5, MAX_ORDER_NONCE);
-        bytes32 root = bytes32(uint256(_order(price, 4, 1)) | (uint256(1) << 32));
+        bytes32 root = bytes32(uint256(_order(price, 7, 1)) | (uint256(1) << 32));
 
         vm.store(
             address(engine), _nextNonceSlot(), bytes32((uint256(2) << BRANCH_NONCE_SHIFT) | uint256(MAX_ORDER_NONCE))
@@ -968,7 +946,8 @@ contract RadixMatchingEngineCoverageTest is Test {
         engine.fill(_order(price, 1, 0), true);
 
         bytes32 reducedRightAsk = _order(price, 4, _nonce(rightAsk));
-        assertEq(engine.askRoot(), root);
+        assertEq(_nonce(engine.askRoot()), _nonce(root));
+        assertEq(_quantity(engine.askRoot()), 6);
         _assertTreeBranchStorage(root, leftAsk, reducedRightAsk);
     }
 
@@ -1295,6 +1274,12 @@ contract RadixMatchingEngineCoverageTest is Test {
 
     function _branchRight(bytes32 branch) internal view returns (bytes32 rightNode) {
         (, rightNode) = engine.tree(branch);
+    }
+
+    function _expectMixedSweep(bool bid, uint160 quantity, uint256 value) internal {
+        vm.expectEmit(false, false, false, true, address(engine));
+        if (bid) emit BidSubtreeMatched(_bookId(), engine.bidRoot(), quantity, value);
+        else emit AskSubtreeMatched(_bookId(), engine.askRoot(), quantity, value);
     }
 
     function _branchFor(bytes32 a, bytes32 b, bool isBid) internal view returns (bytes32) {
