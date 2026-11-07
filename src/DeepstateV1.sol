@@ -830,7 +830,7 @@ contract DeepstateV1 is Ownable {
                 leftNode = _leftNodeAt(branchSlot, node);
                 samePrice = _price(leftNode) == _price(rightNode);
             }
-            if (samePrice) {
+            if (samePrice && (matchFlags & _MATCH_DIRTY != 0 || _quantity(node) <= remaining)) {
                 bytes32 outgoingTopOrder;
                 (fillQuantity, quoteAmount, outgoingTopOrder) =
                     _samePriceRightSpineFillQuantity(book, node, limitPrice, remaining, matchFlags);
@@ -974,7 +974,7 @@ contract DeepstateV1 is Ownable {
                 leftNode = _leftNodeAt(branchSlot, node);
                 samePrice = _price(leftNode) == _price(rightNode);
             }
-            if (samePrice) {
+            if (samePrice && (matchFlags & _MATCH_DIRTY != 0 || _quantity(node) <= remaining)) {
                 bytes32 outgoingTopOrder;
                 (fillQuantity, quoteAmount, outgoingTopOrder) = _samePriceRightSpineFillQuantity(
                     book, node, limitPrice, remaining, matchFlags | _MATCH_RESTING_BID
@@ -1643,7 +1643,7 @@ contract DeepstateV1 is Ownable {
 
     /// @notice Return whether a node represents one tick exactly.
     function _uniformNode(Book storage book, bytes32 node) private view returns (bool) {
-        return _correctionCode(node) != 0 || book.tree[_branchKey(node)].leftNode == bytes32(0);
+        return _correctionCode(node) != 0 || _nonce(node) >= _nextBranchSerial(book.nonceAndFlags);
     }
 
     /// @notice Return the exact sum of leaf-level rounded notionals for a uniform-tick node.

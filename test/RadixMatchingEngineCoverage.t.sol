@@ -1031,6 +1031,35 @@ contract RadixMatchingEngineCoverageTest is Test {
         assertEq(_subtreeQuantity(engine.askRoot()), 2);
     }
 
+    function testCoverage_DirtySamePricePartialFillsRetainFIFO() public {
+        for (uint256 side; side < 2; ++side) {
+            bool isBid = side != 0;
+            vm.prank(alice);
+            bytes32 first = engine.fill(_order(50, 5, 0), isBid);
+            vm.prank(bob);
+            bytes32 second = engine.fill(_order(50, 5, 0), isBid);
+
+            vm.startPrank(carol);
+            engine.fill(_order(50, 1, 0), !isBid);
+            engine.fill(_order(50, 1, 0), !isBid);
+            vm.stopPrank();
+
+            bytes32 root = isBid ? engine.bidRoot() : engine.askRoot();
+            assertEq(_subtreeQuantity(root), 8);
+            vm.prank(alice);
+            (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(first);
+            assertEq(baseAmount, isBid ? 2 : 3);
+            assertEq(
+                quoteAmount, isBid ? _quoteValue(50, 3, true) : _quoteValue(50, 5, false) - _quoteValue(50, 3, false)
+            );
+            assertEq(isBid ? engine.bidRoot() : engine.askRoot(), second);
+            vm.prank(bob);
+            engine.cancel(second);
+        }
+        assertEq(engine.bidRoot(), bytes32(0));
+        assertEq(engine.askRoot(), bytes32(0));
+    }
+
     function _fundAndApprove(address account) internal {
         base.mint(account, 1_000_000_000);
         quote.mint(account, 1_000_000_000);
