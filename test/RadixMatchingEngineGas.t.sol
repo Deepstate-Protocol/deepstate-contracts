@@ -992,7 +992,7 @@ contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
 
             uint64 siblingKey = targetKey ^ bit;
             int32 siblingTick = int32(uint32(siblingKey >> 32) ^ 0x80000000);
-            uint32 siblingNonce = uint32(siblingKey);
+            uint32 siblingNonce = cursor >= 32 ? MAX_ORDER_NONCE - uint32(branches) - 1 : uint32(siblingKey);
             _setNextNonce(siblingNonce, false);
             vm.prank(LIQUIDITY_PROVIDER);
             _fillBid(siblingTick, 1);
@@ -1046,9 +1046,11 @@ contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
     }
 
     function _setNextNonce(uint32 nonce, bool dirty) internal {
-        uint256 nonceAndFlags = uint256(nonce);
+        bytes32 slot = _nextNonceSlot();
+        uint256 nonceAndFlags = uint256(vm.load(address(engine), slot));
+        nonceAndFlags = (nonceAndFlags & ~(uint256(MAX_ORDER_NONCE) | BID_RIGHT_SPINE_DIRTY)) | nonce;
         if (dirty) nonceAndFlags |= BID_RIGHT_SPINE_DIRTY;
-        vm.store(address(engine), _nextNonceSlot(), bytes32(nonceAndFlags));
+        vm.store(address(engine), slot, bytes32(nonceAndFlags));
     }
 
     function _nonceAndFlags() internal view returns (uint256) {
