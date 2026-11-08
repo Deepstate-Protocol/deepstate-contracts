@@ -1,0 +1,99 @@
+No files changed, compilation skipped
+2026-11-08T05:41:55.366320Z  WARN evm::traces::external: etherscan config not found
+
+Ran 23 tests for test/ProductionCategories.t.sol:ProductionCategoriesTest
+[PASS] testProduction_CancelPartialAsk() (gas: 139920)
+Logs:
+  economic state: 0x1989beeed429d638bd699d194ef0db16caaa8230ea28711a915d99af2fbb3941
+
+[PASS] testProduction_CancelPartialBid() (gas: 181826)
+Logs:
+  economic state: 0x73c9317d5f61fb4d9f75558a817f354ed7936d00ce3fcdb846561f31073d8e67
+
+[PASS] testProduction_CancelUnfilledAsk() (gas: 124854)
+Logs:
+  economic state: 0x357152cb03c0394ebed793c7106e8045f8dfa375a4cd4f39cbe590a72bea0f4f
+
+[PASS] testProduction_CancelUnfilledBid() (gas: 166052)
+Logs:
+  economic state: 0x3a5bac8b1d092c1771f678af3a8b2a1212cd48984365ba11eafb4f99a0d62ca5
+
+[PASS] testProduction_ClaimAndCancelPair() (gas: 189611)
+Logs:
+  economic state: 0xe0fd1352303163f0df3dbe40799ac69c2033c3c667b81ab3fcb8d988789e0245
+
+[PASS] testProduction_ClaimFilledAsk() (gas: 79581)
+Logs:
+  economic state: 0x4047260bceb1651a6b3bbb8c1d1d37971f228f0f41f3658e3a93eaf60369f13d
+
+[PASS] testProduction_ClaimFilledBid() (gas: 93034)
+Logs:
+  economic state: 0xa0235fa1bd937eb63cb9a8f4d6ca7c9ab481cb928c46bb4be05c080965298312
+
+[PASS] testProduction_MatchAndRestAsk() (gas: 344821)
+Logs:
+  economic state: 0xb25e932c4c974236f89a6d99ec6e471de00b395a3ca48c1bc94e44bed2d8c1c3
+
+[PASS] testProduction_MatchAndRestBid() (gas: 313536)
+Logs:
+  economic state: 0xea2a550fa58f9d891622b8c920f54fc83e1d1ca88f55daf7d9bedcaca5d1a711
+
+[PASS] testProduction_MatchCancelReplacePair() (gas: 504436)
+Logs:
+  economic state: 0x364b5157c348bf7bc902d2e38cddff11b40c9504270fd2e2bf23ecd840789071
+
+[PASS] testProduction_MatchFullAsk() (gas: 174403)
+Logs:
+  economic state: 0x41a1f3a9a2fd6b30ab235de671aade8b6c81088c062c54a703576f06278c05b3
+
+[PASS] testProduction_MatchFullBid() (gas: 215472)
+Logs:
+  economic state: 0xf476a7eb1cd46246bfbf02acfe34f151baf624d17d0476e4263a801077c07ad9
+
+[PASS] testProduction_MatchPartialAsk() (gas: 183431)
+Logs:
+  economic state: 0x48f66d7691a274b236b8d30f4bd929da9ccfbcd7e201343b889c481457f1c8de
+
+[PASS] testProduction_MatchPartialBid() (gas: 224238)
+Logs:
+  economic state: 0x7906c58a2234777c80273c10065a4571879daf190197a560e07d831fe68deca6
+
+[PASS] testProduction_PartialCancelReplaceAsk() (gas: 296576)
+Logs:
+  economic state: 0xc9f8a3ac969cea5adfdacdd80f72e843fbff7c1b477754eb2fe88ecbc91b1c2d
+
+[PASS] testProduction_PartialCancelReplaceBid() (gas: 332336)
+Logs:
+  economic state: 0x7fe40fd6004f33e00604ef84bd2a8ea2a8530f471403b5eb1bd21b62ff18192c
+
+[PASS] testProduction_ReplaceAsk() (gas: 253861)
+Logs:
+  economic state: 0xa7f6bedf9ddb8aeb4bcc4af3682ab57593977cd0a1c86b26bcbb3ef7f342ce74
+
+[PASS] testProduction_ReplaceBid() (gas: 281875)
+Logs:
+  economic state: 0x95c4610d080681e619f44d3969f58b4e7761ebed6dddbaebaec2c9034f44ccca
+
+[PASS] testProduction_ReplacePair() (gas: 428745)
+Logs:
+  economic state: 0xe354ff16bfe13274afc843b34e7e13075f9ee0ab4eaadffbc9a5f7acfb6d9cad
+
+[PASS] testProduction_RestAskAtBest() (gas: 243424)
+Logs:
+  economic state: 0x00113c78ee2190c9eb4a65a0225f4b35e41b751e4d641221a6f2c9344e6a50a8
+
+[PASS] testProduction_RestAskImproved() (gas: 269354)
+Logs:
+  economic state: 0x11d685be1cb9be811b4204dda0acdc4e2170dafed52af9f2c30b2ea0e1087bb5
+
+[PASS] testProduction_RestBidAtBest() (gas: 269656)
+Logs:
+  economic state: 0xdbf3e71b81aecc22c0a6db1eef79ed9124f04ddfa2da67ecce1e61df1c84df9f
+
+[PASS] testProduction_RestBidImproved() (gas: 296153)
+Logs:
+  economic state: 0xaf4702ad5ec1cc18332cdcb5838e87726843cb63b3110b3ee49404e79cd5a6fe
+
+Suite result: ok. 23 passed; 0 failed; 0 skipped; finished in 17.56ms (6.24ms CPU time)
+
+Ran 1 test suite in 104.87ms (17.56ms CPU time): 23 tests passed, 0 failed, 0 skipped (23 total tests)

@@ -109,7 +109,13 @@ def bind_model_to_source():
         "quoteAmount = quoteState.removedQuote;",
         "if (restingQuote > uint256(type(int256).max)) revert InvalidOrder();",
         "quoteState.addedQuote = restingQuote;",
-        "topState.branchLimit = _nextBranchSerial(nonceAndFlags);",
+        "MatchTopState memory topState = MatchTopState(hookEnabled, 0, _nextBranchSerial(nonceAndFlags), 0);",
+        "if (restingIsBid ? bestPrice < limitPrice : bestPrice > limitPrice) {",
+        "if (removedTop && rightNode == bytes32(0)) {",
+        "_removeByKey(book, root, _bidSortKey(order), true, hookEnabled, quoteState);",
+        "_removeByKey(book, root, _askSortKey(order), false, hookEnabled, quoteState);",
+        "quoteState.incomingTopNonce = _replacementTopNonce(book, leftNode, quoteState.branchLimit);",
+        "_recordTopOrderChange(removed, quoteState.incomingTopNonce);",
         "quoteState.branchLimit = root == bytes32(0) ? _nextBranchSerial(nonceAndFlags) : newBranchSerial + 1;",
         "if (_nonce(root) >= quoteState.branchLimit) {",
         "while (_nonce(node) < branchLimit) {",
@@ -1494,6 +1500,14 @@ def prove_termination_measures(p):
     )
 
 
+def prove_common_path_reuse(p):
+    best = Int("common_best_tick")
+    leaf = Int("common_leaf_tick")
+    limit = Int("common_limit_tick")
+    p.prove("R6.non-crossing-best-bid-excludes-every-bid", leaf < limit, leaf <= best, best < limit)
+    p.prove("R6.non-crossing-best-ask-excludes-every-ask", leaf > limit, leaf >= best, best > limit)
+
+
 def main():
     try:
         bind_model_to_source()
@@ -1506,6 +1520,7 @@ def main():
         prove_nonce_epoch_and_namespaces(prover)
         prove_tree_transition_summaries(prover)
         prove_operation_reuse(prover)
+        prove_common_path_reuse(prover)
         prove_matching_priority_and_accounting(prover)
         prove_hook_top_transitions(prover)
         prove_route_and_signed_accounting(prover)

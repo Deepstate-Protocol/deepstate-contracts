@@ -1,0 +1,57 @@
+--- a/src/DeepstateV1.sol
++++ b/src/DeepstateV1.sol
+@@ -349,29 +349,34 @@
+         (limitPrice, remaining) = _validateIncomingOrder(order);
+         updatedNonceAndFlags = nonceAndFlags;
+ 
+-        MatchTopState memory topState;
+-        _beginMatchBuffer(topState);
+-
+         bool restingIsBid = !isBid;
+         bytes32 root = restingIsBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
+-        if (root != bytes32(0)) {
+-            topState.trackTop = hookEnabled;
+-            topState.branchLimit = _nextBranchSerial(nonceAndFlags);
+-            bytes32 oldTop;
+-            if (hookEnabled) oldTop = _rightmostLeaf(book, root, topState.branchLimit);
+-            bytes32 newRoot;
+-            (newRoot, baseFilled, quoteAmount) =
+-                _matchSubtree(id, book, root, limitPrice, remaining, restingIsBid, topState);
+-            remaining -= baseFilled;
+-            if (newRoot != root) {
+-                if (restingIsBid) book.tree[_ROOT_NODE].rightNode = newRoot;
+-                else book.tree[_ROOT_NODE].leftNode = newRoot;
+-            }
+-            if (hookEnabled && baseFilled != 0) {
+-                uint32 incomingNonce = topState.survivingNonce;
+-                if (incomingNonce == 0) incomingNonce = _replacementTopNonce(book, newRoot, topState.branchLimit);
+-                _recordTopOrderChange(oldTop, incomingNonce);
++        if (root == bytes32(0)) return (limitPrice, remaining, 0, 0, updatedNonceAndFlags);
++
++        MatchTopState memory topState = MatchTopState(hookEnabled, 0, _nextBranchSerial(nonceAndFlags), 0);
++        bytes32 oldTop = bytes32(0);
++        if (hookEnabled) {
++            oldTop = _rightmostLeaf(book, root, topState.branchLimit);
++            int32 bestPrice = _price(oldTop);
++            // The hook already needs this leaf. A non-crossing best price rules out the whole side.
++            if (restingIsBid ? bestPrice < limitPrice : bestPrice > limitPrice) {
++                return (limitPrice, remaining, 0, 0, updatedNonceAndFlags);
+             }
++        }
++
++        _beginMatchBuffer(topState);
++        bytes32 newRoot;
++        (newRoot, baseFilled, quoteAmount) =
++            _matchSubtree(id, book, root, limitPrice, remaining, restingIsBid, topState);
++        remaining -= baseFilled;
++        if (newRoot != root) {
++            if (restingIsBid) book.tree[_ROOT_NODE].rightNode = newRoot;
++            else book.tree[_ROOT_NODE].leftNode = newRoot;
++        }
++        if (hookEnabled && baseFilled != 0) {
++            uint32 incomingNonce = topState.survivingNonce;
++            if (incomingNonce == 0) incomingNonce = _replacementTopNonce(book, newRoot, topState.branchLimit);
++            _recordTopOrderChange(oldTop, incomingNonce);
+         }
+ 
+         _emitBufferedMatches(id, !isBid, topState);

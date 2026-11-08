@@ -1,0 +1,897 @@
+{
+  "sourceSha256": "ce755182dd007c3c578b860782ef3c9e45de2aae3287a3a4ef03fede6138b0c7",
+  "rows": [
+    {
+      "test": "ProductionCategoriesTest:testProduction_CancelPartialAsk()",
+      "gas": 139920
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_CancelPartialBid()",
+      "gas": 181826
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_CancelUnfilledAsk()",
+      "gas": 124854
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_CancelUnfilledBid()",
+      "gas": 166052
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_ClaimAndCancelPair()",
+      "gas": 189611
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_ClaimFilledAsk()",
+      "gas": 79581
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_ClaimFilledBid()",
+      "gas": 93034
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_MatchAndRestAsk()",
+      "gas": 344821
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_MatchAndRestBid()",
+      "gas": 313536
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_MatchCancelReplacePair()",
+      "gas": 504436
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_MatchFullAsk()",
+      "gas": 174403
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_MatchFullBid()",
+      "gas": 215472
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_MatchPartialAsk()",
+      "gas": 183431
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_MatchPartialBid()",
+      "gas": 224238
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_PartialCancelReplaceAsk()",
+      "gas": 296576
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_PartialCancelReplaceBid()",
+      "gas": 332336
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_ReplaceAsk()",
+      "gas": 253861
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_ReplaceBid()",
+      "gas": 281875
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_ReplacePair()",
+      "gas": 428745
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_RestAskAtBest()",
+      "gas": 243424
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_RestAskImproved()",
+      "gas": 269354
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_RestBidAtBest()",
+      "gas": 269656
+    },
+    {
+      "test": "ProductionCategoriesTest:testProduction_RestBidImproved()",
+      "gas": 296153
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_CancelAskSkipsPathologicalBidTree()",
+      "gas": 38577
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_CancelFilledBidClaim()",
+      "gas": 36646
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_CancelFullDepthBidCombRightmost()",
+      "gas": 748579
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_CancelMaxValidDepthAskCombRightmost()",
+      "gas": 659053
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_CancelPartialBid()",
+      "gas": 47366
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_CancelUnfilledAsk()",
+      "gas": 38638
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_CancelUnfilledBid()",
+      "gas": 38282
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskCrossLeafNonceComb()",
+      "gas": 352894
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskHalfNonceComb()",
+      "gas": 226878
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskNearlyWholeNonceComb()",
+      "gas": 90990
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskSmallFill16Orders()",
+      "gas": 119050
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskSmallFill64Orders()",
+      "gas": 135148
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskSmallFillNonceComb()",
+      "gas": 354714
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskWholeNonceComb()",
+      "gas": 65256
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidCrossLeafNonceComb()",
+      "gas": 353864
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidHalfNonceComb()",
+      "gas": 226269
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidNearlyWholeNonceComb()",
+      "gas": 91069
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidSmallFill16Orders()",
+      "gas": 118428
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidSmallFill64Orders()",
+      "gas": 135716
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidSmallFillNonceComb()",
+      "gas": 354634
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidWholeNonceComb()",
+      "gas": 64301
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillAskConsumesDirtySamePriceBidSubtree()",
+      "gas": 56131
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillAskConsumesFullDepthBidComb()",
+      "gas": 74942
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillAskFullyMatchesSingleBid()",
+      "gas": 73933
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillAskPartiallyMatchesOffSpineBidBranch()",
+      "gas": 107907
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillAskPartiallyMatchesSingleBid()",
+      "gas": 93398
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidConsumesAskAndRestsRemainder()",
+      "gas": 124787
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidConsumesDirtySamePriceAskSubtree()",
+      "gas": 56394
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidConsumesMaxValidDepthAskComb()",
+      "gas": 75421
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidConsumesSamePriceAskSubtree()",
+      "gas": 73137
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidFullyMatchesSingleAsk()",
+      "gas": 73739
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidPartiallyMatchesOffSpineAskBranch()",
+      "gas": 107817
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidPartiallyMatchesSingleAsk()",
+      "gas": 93539
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillRestAskEmptyBook()",
+      "gas": 149756
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_FillRestBidEmptyBook()",
+      "gas": 150466
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_LargeRandomBookAskMatchesOneBid()",
+      "gas": 158353
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_LargeRandomBookBidMatchesOneAsk()",
+      "gas": 197628
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_LargeRandomBookPartialFillsAsk()",
+      "gas": 206523
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_LargeRandomBookPartialFillsBid()",
+      "gas": 167206
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_LargeRandomBookRestsAsk()",
+      "gas": 196224
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_LargeRandomBookRestsBid()",
+      "gas": 210357
+    },
+    {
+      "test": "RadixMatchingEngineGasTest:testGas_PathologicalOffSpinePartialFillBidComb()",
+      "gas": 770808
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelAskSkipsPathologicalBidTree()",
+      "gas": 42373
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelFilledBidClaim()",
+      "gas": 37148
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelFullDepthBidCombRightmost()",
+      "gas": 768508
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelMaxValidDepthAskCombRightmost()",
+      "gas": 678133
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelPartialBid()",
+      "gas": 51695
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelUnfilledAsk()",
+      "gas": 42434
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelUnfilledBid()",
+      "gas": 42613
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskCrossLeafNonceComb()",
+      "gas": 365756
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskHalfNonceComb()",
+      "gas": 269740
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskNearlyWholeNonceComb()",
+      "gas": 165852
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskSmallFill16Orders()",
+      "gas": 126300
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskSmallFill64Orders()",
+      "gas": 142800
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskSmallFillNonceComb()",
+      "gas": 367592
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskWholeNonceComb()",
+      "gas": 142178
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidCrossLeafNonceComb()",
+      "gas": 367696
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidHalfNonceComb()",
+      "gas": 270101
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidNearlyWholeNonceComb()",
+      "gas": 166901
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidSmallFill16Orders()",
+      "gas": 126648
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidSmallFill64Orders()",
+      "gas": 144338
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidSmallFillNonceComb()",
+      "gas": 368482
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidWholeNonceComb()",
+      "gas": 142193
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillAskConsumesDirtySamePriceBidSubtree()",
+      "gas": 70194
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillAskConsumesFullDepthBidComb()",
+      "gas": 223142
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillAskFullyMatchesSingleBid()",
+      "gas": 81333
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillAskPartiallyMatchesOffSpineBidBranch()",
+      "gas": 117709
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillAskPartiallyMatchesSingleBid()",
+      "gas": 100749
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidConsumesAskAndRestsRemainder()",
+      "gas": 133021
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidConsumesDirtySamePriceAskSubtree()",
+      "gas": 69487
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidConsumesMaxValidDepthAskComb()",
+      "gas": 222772
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidConsumesSamePriceAskSubtree()",
+      "gas": 88431
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidFullyMatchesSingleAsk()",
+      "gas": 80248
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidPartiallyMatchesOffSpineAskBranch()",
+      "gas": 116649
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidPartiallyMatchesSingleAsk()",
+      "gas": 99999
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillRestAskEmptyBook()",
+      "gas": 138972
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillRestBidEmptyBook()",
+      "gas": 139682
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_LargeRandomBookAskMatchesOneBid()",
+      "gas": 170904
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_LargeRandomBookBidMatchesOneAsk()",
+      "gas": 212449
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_LargeRandomBookPartialFillsAsk()",
+      "gas": 214993
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_LargeRandomBookPartialFillsBid()",
+      "gas": 176210
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_LargeRandomBookRestsAsk()",
+      "gas": 224736
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_LargeRandomBookRestsBid()",
+      "gas": 234006
+    },
+    {
+      "test": "RadixMatchingEngineHookGasTest:testGas_PathologicalOffSpinePartialFillBidComb()",
+      "gas": 778307
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelAskSkipsPathologicalBidTree()",
+      "gas": 38577
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelFilledBidClaim()",
+      "gas": 36646
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelFullDepthBidCombRightmost()",
+      "gas": 748579
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelMaxValidDepthAskCombRightmost()",
+      "gas": 659053
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelPartialBid()",
+      "gas": 47366
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelUnfilledAsk()",
+      "gas": 38638
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelUnfilledBid()",
+      "gas": 38282
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskCrossLeafNonceComb()",
+      "gas": 353328
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskHalfNonceComb()",
+      "gas": 252348
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskNearlyWholeNonceComb()",
+      "gas": 116460
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskSmallFill16Orders()",
+      "gas": 119484
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskSmallFill64Orders()",
+      "gas": 135582
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskSmallFillNonceComb()",
+      "gas": 355148
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskWholeNonceComb()",
+      "gas": 90726
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidCrossLeafNonceComb()",
+      "gas": 354283
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidHalfNonceComb()",
+      "gas": 251724
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidNearlyWholeNonceComb()",
+      "gas": 116524
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidSmallFill16Orders()",
+      "gas": 118847
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidSmallFill64Orders()",
+      "gas": 136135
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidSmallFillNonceComb()",
+      "gas": 355053
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidWholeNonceComb()",
+      "gas": 89756
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillAskConsumesDirtySamePriceBidSubtree()",
+      "gas": 56550
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillAskConsumesFullDepthBidComb()",
+      "gas": 100397
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillAskFullyMatchesSingleBid()",
+      "gas": 74352
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillAskPartiallyMatchesOffSpineBidBranch()",
+      "gas": 108326
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillAskPartiallyMatchesSingleBid()",
+      "gas": 93817
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidConsumesAskAndRestsRemainder()",
+      "gas": 125221
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidConsumesDirtySamePriceAskSubtree()",
+      "gas": 56828
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidConsumesMaxValidDepthAskComb()",
+      "gas": 75855
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidConsumesSamePriceAskSubtree()",
+      "gas": 73571
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidFullyMatchesSingleAsk()",
+      "gas": 74173
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidPartiallyMatchesOffSpineAskBranch()",
+      "gas": 108251
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidPartiallyMatchesSingleAsk()",
+      "gas": 93973
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillRestAskEmptyBook()",
+      "gas": 149918
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillRestBidEmptyBook()",
+      "gas": 150629
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_LargeRandomBookAskMatchesOneBid()",
+      "gas": 158772
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_LargeRandomBookBidMatchesOneAsk()",
+      "gas": 198062
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_LargeRandomBookPartialFillsAsk()",
+      "gas": 206957
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_LargeRandomBookPartialFillsBid()",
+      "gas": 167625
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_LargeRandomBookRestsAsk()",
+      "gas": 196386
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_LargeRandomBookRestsBid()",
+      "gas": 210520
+    },
+    {
+      "test": "RadixMatchingEngineFeeGasTest:testGas_PathologicalOffSpinePartialFillBidComb()",
+      "gas": 796263
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelAskSkipsPathologicalBidTree()",
+      "gas": 38643
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelFilledBidClaim()",
+      "gas": 36712
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelFullDepthBidCombRightmost()",
+      "gas": 748601
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelMaxValidDepthAskCombRightmost()",
+      "gas": 659053
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelPartialBid()",
+      "gas": 47432
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelUnfilledAsk()",
+      "gas": 38748
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelUnfilledBid()",
+      "gas": 38348
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskCrossLeafNonceComb()",
+      "gas": 352951
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskHalfNonceComb()",
+      "gas": 227001
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskNearlyWholeNonceComb()",
+      "gas": 91069
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskSmallFill16Orders()",
+      "gas": 119283
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskSmallFill64Orders()",
+      "gas": 135227
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskSmallFillNonceComb()",
+      "gas": 354771
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskWholeNonceComb()",
+      "gas": 65379
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidCrossLeafNonceComb()",
+      "gas": 354119
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidHalfNonceComb()",
+      "gas": 226348
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidNearlyWholeNonceComb()",
+      "gas": 91170
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidSmallFill16Orders()",
+      "gas": 118551
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidSmallFill64Orders()",
+      "gas": 135883
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidSmallFillNonceComb()",
+      "gas": 354691
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidWholeNonceComb()",
+      "gas": 64358
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillAskConsumesDirtySamePriceBidSubtree()",
+      "gas": 56225
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillAskConsumesFullDepthBidComb()",
+      "gas": 75036
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillAskFullyMatchesSingleBid()",
+      "gas": 74115
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillAskPartiallyMatchesOffSpineBidBranch()",
+      "gas": 108001
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillAskPartiallyMatchesSingleBid()",
+      "gas": 93536
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidConsumesAskAndRestsRemainder()",
+      "gas": 124856
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidConsumesDirtySamePriceAskSubtree()",
+      "gas": 56507
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidConsumesMaxValidDepthAskComb()",
+      "gas": 75534
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidConsumesSamePriceAskSubtree()",
+      "gas": 73206
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidFullyMatchesSingleAsk()",
+      "gas": 73852
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidPartiallyMatchesOffSpineAskBranch()",
+      "gas": 107886
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidPartiallyMatchesSingleAsk()",
+      "gas": 93674
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillRestAskEmptyBook()",
+      "gas": 149850
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillRestBidEmptyBook()",
+      "gas": 150601
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_LargeRandomBookAskMatchesOneBid()",
+      "gas": 158469
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_LargeRandomBookBidMatchesOneAsk()",
+      "gas": 197763
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_LargeRandomBookPartialFillsAsk()",
+      "gas": 206724
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_LargeRandomBookPartialFillsBid()",
+      "gas": 167344
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_LargeRandomBookRestsAsk()",
+      "gas": 196296
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_LargeRandomBookRestsBid()",
+      "gas": 210448
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep1024()",
+      "gas": 97634
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep1024AndRest()",
+      "gas": 148906
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep1024BurningHookAndFees()",
+      "gas": 348088
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep1024FitsOneMillionGas()",
+      "gas": 96906
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep1024RestBurningHooksAndFees()",
+      "gas": 602168
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep256()",
+      "gas": 97318
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep4096()",
+      "gas": 98194
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep4096RestBurningHooksAndFees()",
+      "gas": 608847
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep64()",
+      "gas": 96618
+    },
+    {
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_PathologicalOffSpinePartialFillBidComb()",
+      "gas": 770902
+    },
+    {
+      "test": "DeepstateV1IntegratorFeeGasTest:testGas_IntegratorAndProtocolFeeFill()",
+      "gas": 124674
+    },
+    {
+      "test": "DeepstateV1IntegratorFeeGasTest:testGas_IntegratorFillAskFullyMatchesSingleBid()",
+      "gas": 99163
+    },
+    {
+      "test": "DeepstateV1IntegratorFeeGasTest:testGas_IntegratorFillBidFullyMatchesSingleAsk()",
+      "gas": 99383
+    },
+    {
+      "test": "DeepstateV1IntegratorFeeGasTest:testGas_IntegratorFillRestBidEmptyBook()",
+      "gas": 150971
+    },
+    {
+      "test": "DeepstateV1IntegratorFeeGasTest:testGas_IntegratorRouteNetsRepeatedFeeToken()",
+      "gas": 111668
+    },
+    {
+      "test": "OpportunityGasProbe:testOpportunity_RestAsk16Orders()",
+      "gas": 155250
+    },
+    {
+      "test": "OpportunityGasProbe:testOpportunity_RestAsk64Orders()",
+      "gas": 164501
+    },
+    {
+      "test": "OpportunityGasProbe:testOpportunity_RestAskDifferentTickLeftNonceComb()",
+      "gas": 162184
+    },
+    {
+      "test": "OpportunityGasProbe:testOpportunity_RestAskDirtyLeftNonceComb()",
+      "gas": 364636
+    },
+    {
+      "test": "OpportunityGasProbe:testOpportunity_RestAskLeftNonceComb()",
+      "gas": 364329
+    },
+    {
+      "test": "OpportunityGasProbe:testOpportunity_RestAskWorseTickLeftNonceComb()",
+      "gas": 163098
+    },
+    {
+      "test": "OpportunityGasProbe:testOpportunity_RestBid16Orders()",
+      "gas": 156151
+    },
+    {
+      "test": "OpportunityGasProbe:testOpportunity_RestBid64Orders()",
+      "gas": 165886
+    },
+    {
+      "test": "OpportunityGasProbe:testOpportunity_RestBidDifferentTickLeftNonceComb()",
+      "gas": 162805
+    },
+    {
+      "test": "OpportunityGasProbe:testOpportunity_RestBidDirtyLeftNonceComb()",
+      "gas": 365854
+    },
+    {
+      "test": "OpportunityGasProbe:testOpportunity_RestBidLeftNonceComb()",
+      "gas": 365833
+    },
+    {
+      "test": "OpportunityGasProbe:testOpportunity_RestBidWorseTickLeftNonceComb()",
+      "gas": 163301
+    },
+    {
+      "test": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_ObservedNativeBidCancelAfterThreePartialMatches()",
+      "gas": 114766
+    },
+    {
+      "test": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_ObservedNativeBidPartialMatchAfterDirtySpineRest()",
+      "gas": 129748
+    },
+    {
+      "test": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_ObservedNativeBidRestsAfterFiveLevelDirtySpine()",
+      "gas": 214604
+    },
+    {
+      "test": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_PathologicalNativeBidCancelAfterThreePartialMatches()",
+      "gas": 653318
+    },
+    {
+      "test": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_PathologicalNativeBidPartialMatchAfterDirtySpineRest()",
+      "gas": 667744
+    },
+    {
+      "test": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_PathologicalNativeBidRestsAfterFullDepthDirtySpine()",
+      "gas": 768289
+    }
+  ]
+}

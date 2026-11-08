@@ -1248,6 +1248,80 @@ contract DeepstateV1Test is Test {
         }
     }
 
+    function testFuzz_NonCrossingRouteLegThenExactBestMatch(bool restingBid, uint8 countSeed, uint256 seed) public {
+        RotationRecordingHook hook = new RotationRecordingHook(address(engine));
+        engine.setPoolHookConfig(address(token0), address(token1), address(hook), true, true);
+        uint256 count = bound(countSeed, 2, 32);
+        int32 bestTick;
+        bytes32 bestOrder;
+        for (uint256 i; i < count; ++i) {
+            int32 tick = int32(int256(uint256(keccak256(abi.encode(seed, i))) % 2001) - 1000);
+            vm.prank(alice);
+            bytes32 order = engine.fill(_fill(0, _order(tick, 10, 0), restingBid, false, false));
+            if (i == 0 || (restingBid ? tick > bestTick : tick < bestTick)) {
+                bestTick = tick;
+                bestOrder = order;
+            }
+        }
+        DeepstateV1.FillParams[] memory legs = new DeepstateV1.FillParams[](2);
+        int32 outside = restingBid ? bestTick + 1 : bestTick - 1;
+        legs[0] = _fill(0, _order(outside, 5, 0), !restingBid, true, false);
+        legs[1] = _fill(0, _order(bestTick, 5, 0), !restingBid, true, false);
+        uint256 beforeCalls = hook.callCount();
+        uint256 beforeBase = token0.balanceOf(bob);
+        uint256 beforeQuote = token1.balanceOf(bob);
+        vm.prank(bob);
+        engine.fillRoute(legs);
+        assertEq(hook.callCount(), beforeCalls + 1);
+        (,, address soldToken, uint160 outgoingAmount, uint32 incomingNonce) = hook.callAt(beforeCalls);
+        assertEq(soldToken, restingBid ? address(token1) : address(token0));
+        assertEq(outgoingAmount, restingBid ? _quoteValue(bestTick, 10, true) : 10);
+        assertEq(incomingNonce, uint32(uint256(bestOrder)));
+        uint256 quoteFilled = _quoteValue(bestTick, 10, restingBid) - _quoteValue(bestTick, 5, restingBid);
+        assertEq(token0.balanceOf(bob), restingBid ? beforeBase - 5 : beforeBase + 5);
+        assertEq(token1.balanceOf(bob), restingBid ? beforeQuote + quoteFilled : beforeQuote - quoteFilled);
+    }
+
+    function testFuzz_CancelBestHookReportsActualSuccessor(bool bid, uint8 countSeed, uint256 seed) public {
+        RotationRecordingHook hook = new RotationRecordingHook(address(engine));
+        engine.setPoolHookConfig(address(token0), address(token1), address(hook), true, true);
+        uint256 count = bound(countSeed, 2, 32);
+        bytes32[] memory orders = new bytes32[](count);
+        int32[] memory ticks = new int32[](count);
+        bool[] memory active = new bool[](count);
+        for (uint256 i; i < count; ++i) {
+            ticks[i] = i % 3 == 0 ? int32(0) : int32(int256(uint256(keccak256(abi.encode(seed, i))) % 2001) - 1000);
+            vm.prank(alice);
+            orders[i] = engine.fill(_fill(0, _order(ticks[i], 10, 0), bid, false, false));
+            active[i] = true;
+        }
+        for (uint256 remaining = count; remaining != 0; --remaining) {
+            uint256 best = _bestActiveOrder(ticks, active, bid);
+            uint256 beforeCalls = hook.callCount();
+            vm.prank(alice);
+            engine.cancel(address(token0), address(token1), 0, orders[best]);
+            active[best] = false;
+            assertEq(hook.callCount(), beforeCalls + 1);
+            (,, address soldToken, uint160 outgoingAmount, uint32 incomingNonce) = hook.callAt(beforeCalls);
+            assertEq(soldToken, bid ? address(token1) : address(token0));
+            assertEq(outgoingAmount, bid ? _quoteValue(ticks[best], 10, true) : 10);
+            uint32 expected = remaining == 1 ? 0 : uint32(uint256(orders[_bestActiveOrder(ticks, active, bid)]));
+            assertEq(incomingNonce, expected);
+        }
+    }
+
+    function _bestActiveOrder(int32[] memory ticks, bool[] memory active, bool bid)
+        private
+        pure
+        returns (uint256 best)
+    {
+        best = type(uint256).max;
+        for (uint256 i; i < ticks.length; ++i) {
+            if (!active[i]) continue;
+            if (best == type(uint256).max || (bid ? ticks[i] > ticks[best] : ticks[i] < ticks[best])) best = i;
+        }
+    }
+
     function testFuzz_MatchBuffersDoNotLeakBetweenRouteLegs(uint8 countSeed) public {
         uint256 count = bound(countSeed, 2, 32);
         bytes32[] memory orders = new bytes32[](count);

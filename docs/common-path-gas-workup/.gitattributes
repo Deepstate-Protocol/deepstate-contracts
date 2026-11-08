@@ -1,0 +1,4 @@
+raw/*.log -whitespace
+raw/*.snapshot -whitespace
+raw/*.patch -whitespace
+raw/*.sol.txt -whitespace

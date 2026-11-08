@@ -1,0 +1,34 @@
+{
+  "variant": "00-baseline",
+  "sourceSha256": "ce755182dd007c3c578b860782ef3c9e45de2aae3287a3a4ef03fede6138b0c7",
+  "runtimeSha256": "868dec02e5065a5cafed60f3fa665bb0c862791116825cc4dcfefd7089795dcb",
+  "fixtureSha256": "62066e98fe58b2fb9e539e3efab721706f76fa89f8f7732786acd8721bd16ec7",
+  "compiler": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "00-baseline-release.log",
+      "snapshot": "00-baseline-release.snapshot",
+      "logSha256": "b3972120b6950d15a9468c4d73a40d8d8f55856e2ad2d5575ef80845c0443320",
+      "snapshotSha256": "31bd4599cae570218665965afce968ee4114e6b1f90ff5e19274b2454efad689"
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "00-baseline-insertion.log",
+      "snapshot": "00-baseline-insertion.snapshot",
+      "logSha256": "c60080f0ab0febd49c51fdfd79eee3e4e9cf58a19eff8ce041de17343d982c0e",
+      "snapshotSha256": "4deeff534904eb9c57d3c649a4d991b367b84f4cca2b231a5afc2af90a840c56"
+    },
+    {
+      "group": "production",
+      "count": 23,
+      "log": "00-baseline-production.log",
+      "snapshot": "00-baseline-production.snapshot",
+      "logSha256": "431e24def91536f3e8f53be2ecd2213d2dc754e2eef5f58c89af4088f944be80",
+      "snapshotSha256": "3cc5fbb2f47896860d9c2497715b76611047393baa3aca2bcaef39304887cbf2"
+    }
+  ]
+}

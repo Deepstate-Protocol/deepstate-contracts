@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {DeepstateV1} from "../src/DeepstateV1.sol";
-import {RadixMatchingEngineGasTest} from "./RadixMatchingEngineGas.t.sol";
+import {RadixMatchingEngineGasTest, MockHook} from "./RadixMatchingEngineGas.t.sol";
 
 contract TraversalEngine is DeepstateV1 {
     uint256[3] public expansions;
@@ -104,6 +104,44 @@ contract BoundedTraversalTest is RadixMatchingEngineGasTest {
         _fill(_order(1, 1, 0), false);
         assertEq(_walks(1), 1, "price prefix proves split at root");
         _assertSummaries(_askRoot(), false);
+    }
+
+    function test_HookedNonCrossingOrderSkipsMatchingBoundaryWalk() public {
+        for (uint256 i; i < 64; ++i) {
+            vm.prank(bob);
+            _fill(_order(int32(int256(1000 + i)), 10, 0), false);
+        }
+        engine.setPoolHookConfig(address(base), address(quote), address(new MockHook()), true, true);
+        _reset();
+        vm.prank(alice);
+        bytes32 order = _fill(_order(-100, 5, 0), true);
+        assertEq(_quantity(order), 5);
+        assertEq(_walks(0), 0, "best ask already proves no match");
+        assertEq(_quantity(_askRoot()), 640);
+        _assertSummaries(_askRoot(), false);
+    }
+
+    function test_UnhookedTopCancelDoesNotReadSuccessorSubtree() public {
+        for (uint256 i; i < 64; ++i) {
+            vm.prank(alice);
+            _fill(_order(int32(int256(i)), 10, 0), true);
+        }
+        vm.prank(alice);
+        bytes32 order = _fill(_order(1000, 10, 0), true);
+        (bytes32 successorSubtree,) = _tree(_bidRoot());
+        bytes32 bookSlot = keccak256(abi.encode(_bookId(), uint256(0)));
+        bytes32 subtreeSlot =
+            keccak256(abi.encode(bytes32(uint256(uint32(uint256(successorSubtree)))), uint256(bookSlot) + 1));
+        vm.record();
+        vm.prank(alice);
+        _cancel(order);
+        (bytes32[] memory reads,) = vm.accesses(address(engine));
+        for (uint256 i; i < reads.length; ++i) {
+            assertTrue(
+                reads[i] != subtreeSlot && reads[i] != bytes32(uint256(subtreeSlot) + 1), "unused successor read"
+            );
+        }
+        assertEq(_bidRoot(), successorSubtree);
     }
 
     function _buildUniqueFullDepthComb() private returns (bytes32 target) {

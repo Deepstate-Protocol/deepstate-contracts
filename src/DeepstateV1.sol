@@ -98,6 +98,7 @@ contract DeepstateV1 is Ownable {
         uint16 shift;
         uint256 removedQuote;
         uint32 branchLimit;
+        uint32 incomingTopNonce;
     }
 
     struct InsertQuoteState {
@@ -349,29 +350,34 @@ contract DeepstateV1 is Ownable {
         (limitPrice, remaining) = _validateIncomingOrder(order);
         updatedNonceAndFlags = nonceAndFlags;
 
-        MatchTopState memory topState;
-        _beginMatchBuffer(topState);
-
         bool restingIsBid = !isBid;
         bytes32 root = restingIsBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
-        if (root != bytes32(0)) {
-            topState.trackTop = hookEnabled;
-            topState.branchLimit = _nextBranchSerial(nonceAndFlags);
-            bytes32 oldTop;
-            if (hookEnabled) oldTop = _rightmostLeaf(book, root, topState.branchLimit);
-            bytes32 newRoot;
-            (newRoot, baseFilled, quoteAmount) =
-                _matchSubtree(id, book, root, limitPrice, remaining, restingIsBid, topState);
-            remaining -= baseFilled;
-            if (newRoot != root) {
-                if (restingIsBid) book.tree[_ROOT_NODE].rightNode = newRoot;
-                else book.tree[_ROOT_NODE].leftNode = newRoot;
+        if (root == bytes32(0)) return (limitPrice, remaining, 0, 0, updatedNonceAndFlags);
+
+        MatchTopState memory topState = MatchTopState(hookEnabled, 0, _nextBranchSerial(nonceAndFlags), 0);
+        bytes32 oldTop = bytes32(0);
+        if (hookEnabled) {
+            oldTop = _rightmostLeaf(book, root, topState.branchLimit);
+            int32 bestPrice = _price(oldTop);
+            // The hook already needs this leaf. A non-crossing best price rules out the whole side.
+            if (restingIsBid ? bestPrice < limitPrice : bestPrice > limitPrice) {
+                return (limitPrice, remaining, 0, 0, updatedNonceAndFlags);
             }
-            if (hookEnabled && baseFilled != 0) {
-                uint32 incomingNonce = topState.survivingNonce;
-                if (incomingNonce == 0) incomingNonce = _replacementTopNonce(book, newRoot, topState.branchLimit);
-                _recordTopOrderChange(oldTop, incomingNonce);
-            }
+        }
+
+        _beginMatchBuffer(topState);
+        bytes32 newRoot;
+        (newRoot, baseFilled, quoteAmount) =
+            _matchSubtree(id, book, root, limitPrice, remaining, restingIsBid, topState);
+        remaining -= baseFilled;
+        if (newRoot != root) {
+            if (restingIsBid) book.tree[_ROOT_NODE].rightNode = newRoot;
+            else book.tree[_ROOT_NODE].leftNode = newRoot;
+        }
+        if (hookEnabled && baseFilled != 0) {
+            uint32 incomingNonce = topState.survivingNonce;
+            if (incomingNonce == 0) incomingNonce = _replacementTopNonce(book, newRoot, topState.branchLimit);
+            _recordTopOrderChange(oldTop, incomingNonce);
         }
 
         _emitBufferedMatches(id, !isBid, topState);
@@ -420,8 +426,7 @@ contract DeepstateV1 is Ownable {
         isBid = state.isBid;
         bool hookEnabled = hookFlags & (isBid ? _CANCEL_HOOK_BID : _CANCEL_HOOK_ASK) != 0;
 
-        CancelQuoteState memory quoteState;
-        quoteState.branchLimit = _nextBranchSerial(nonceAndFlags);
+        CancelQuoteState memory quoteState = CancelQuoteState(0, 0, 0, _nextBranchSerial(nonceAndFlags), 0);
         bytes32 removed = _removeOrderFromBook(book, order, isBid, hookEnabled, nonceAndFlags, quoteState);
 
         (baseAmount, quoteAmount) = _cancelAmounts(order, removed, isBid, originalQuantity, quoteState);
@@ -491,12 +496,13 @@ contract DeepstateV1 is Ownable {
             bytes32 newRoot;
             if (root != bytes32(0)) {
                 bool removedTop;
-                (newRoot, removed, removedTop) = _removeByKey(book, root, _bidSortKey(order), true, true, quoteState);
+                (newRoot, removed, removedTop) =
+                    _removeByKey(book, root, _bidSortKey(order), true, hookEnabled, quoteState);
                 if (removed != bytes32(0) && newRoot != root) {
                     book.tree[_ROOT_NODE].rightNode = newRoot;
                 }
                 if (hookEnabled && removedTop) {
-                    _recordTopOrderChange(removed, _replacementTopNonce(book, newRoot, quoteState.branchLimit));
+                    _recordTopOrderChange(removed, quoteState.incomingTopNonce);
                 }
             }
         } else {
@@ -504,12 +510,13 @@ contract DeepstateV1 is Ownable {
             bytes32 newRoot;
             if (root != bytes32(0)) {
                 bool removedTop;
-                (newRoot, removed, removedTop) = _removeByKey(book, root, _askSortKey(order), false, true, quoteState);
+                (newRoot, removed, removedTop) =
+                    _removeByKey(book, root, _askSortKey(order), false, hookEnabled, quoteState);
                 if (removed != bytes32(0) && newRoot != root) {
                     book.tree[_ROOT_NODE].leftNode = newRoot;
                 }
                 if (hookEnabled && removedTop) {
-                    _recordTopOrderChange(removed, _replacementTopNonce(book, newRoot, quoteState.branchLimit));
+                    _recordTopOrderChange(removed, quoteState.incomingTopNonce);
                 }
             }
         }
@@ -841,6 +848,10 @@ contract DeepstateV1 is Ownable {
             (leftNode, removed, removedTop) = _removeByKey(book, leftNode, targetKey, isBid, false, quoteState);
         }
         if (removed == bytes32(0)) return (root, bytes32(0), false);
+        if (removedTop && rightNode == bytes32(0)) {
+            // The first collapsed parent exposes the successor subtree; ancestors need no new walk.
+            quoteState.incomingTopNonce = _replacementTopNonce(book, leftNode, quoteState.branchLimit);
+        }
         return (
             _replaceBranchAfterCancel(book, root, leftNode, rightNode, isBid, !goRight, quoteState, slot, depth),
             removed,
