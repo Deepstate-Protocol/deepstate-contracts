@@ -1,2 +1,3 @@
 raw/*.log -whitespace
 raw/*.patch -whitespace
+rejected/*.patch -whitespace

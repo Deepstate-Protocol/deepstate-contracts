@@ -4,6 +4,10 @@ These are measured **scratch prototypes**, not changes to the working contract o
 The history investigation is on the working branch in local commit `3676a54`; this follow-up keeps
 the candidate patches separate so they can be reviewed before promotion. Nothing is pushed.
 
+The selected candidate is **E / `uniform-difference`**, without the zero-delta quote-cache guard.
+The [complete per-test tables](BOUNDED_GAS_DELTA_TABLES.md) show every measured case and every
+stage delta, including unchanged rows and regressions. The F experiment is rejected and archived.
+
 ## Controls
 
 The comparison baseline is the bounded implementation `096eab2`, not master or the pre-bound fix.
@@ -12,7 +16,7 @@ All primary comparisons use solc 0.8.28, via-IR, optimizer 200, Cancun, and the 
 Only the engine runtime is replaced, before any books are populated.
 
 Each of seven cumulative solc prototypes executes all 188 release gas rows and 12 insertion probes.
-The fully validated E prototype is additionally measured under experimental Solar 0.3.0 / Solidity 0.8.38,
+The behaviorally tested E prototype is additionally measured under experimental Solar 0.3.0 / Solidity 0.8.38,
 against the existing Solar bounded baseline, with the same Forge executor and fixtures. Solar's
 metadata does not report a via-IR pipeline; it is not treated as the solc compiler pipeline.
 
@@ -39,8 +43,8 @@ Do not sum their percentages or apply the patches sequentially.
 | D | C2 + lazy insertion quote/factor sharing | 41 | 0 | -0.03% |
 | E | D + uniform matching notional differences | 62 | 0 | -0.05% |
 
-The additional F prototype guards exact-zero quote-cache deltas. Its incremental tradeoff and
-storage-access measurements are reported separately below; its 200 gas rows are also in the CSV.
+The F prototype is excluded from the selected implementation. Its 200 historical rows remain
+in the CSV with a rejected status and in the separate archived table, not in the active patch set.
 
 The early-split shortcut alone is not an unconditional improvement: although different-price
 comb insertion gets much cheaper, the original C version adds 21,350 gas to a deep native rest.
@@ -99,28 +103,17 @@ Uniform matching already carries the price factor. Use the existing exact notion
 helper to update the correction instead of independently computing the old and new notionals.
 The quote helper's rounding direction and event correction behavior are unchanged.
 
-## Combined Prototype Results
+## Complete Results
 
-All values below are solc gas, compared with the current bounded implementation.
+- [Selected E, solc: all 200 cases](BOUNDED_GAS_DELTA_TABLES.md#selected-solc).
+- [Selected E, Solar: all 200 cases](BOUNDED_GAS_DELTA_TABLES.md#selected-solar).
+- [Intermediate A-D stages: all 1,000 cases](BOUNDED_GAS_DELTA_TABLES.md#stage-a).
+- [Complete CSV, with baseline, preceding-stage, and master deltas](BOUNDED_GAS_OPPORTUNITIES.csv).
 
-| Operation | Bounded `096eab2` | Prototype E | Change |
-|---|---:|---:|---:|
-| Match one bid in a 10,000-order book | 187,864 | 166,308 | -11.47% |
-| Match one ask in a 10,000-order book | 238,777 | 207,474 | -13.11% |
-| Partially fill ask in that book | 250,884 | 216,781 | -13.59% |
-| Partially fill bid in that book | 200,385 | 175,601 | -12.37% |
-| Rest ask in that book | 256,729 | 203,791 | -20.62% |
-| Rest bid in that book | 253,558 | 220,687 | -12.96% |
-| Full-depth bid cancellation | 887,530 | 775,156 | -12.66% |
-| Full-depth bid cancellation with hook | 911,245 | 798,870 | -12.33% |
-| Native deep cancellation after prior fills | 770,624 | 675,740 | -12.31% |
-| Native deep partial fill | 772,698 | 702,104 | -9.14% |
-| Native rest after full-depth prior fills | 874,932 | 791,805 | -9.50% |
-| Hooked pathological off-spine partial fill | 903,202 | 833,615 | -7.70% |
-| Different-tick ask insertion above a nonce comb | 291,723 | 166,107 | -43.06% |
-| Different-tick bid insertion above a nonce comb | 293,539 | 167,923 | -42.79% |
-| Same-tick ask insertion through a nonce comb | 434,309 | 385,751 | -11.18% |
-| Sweep 4,096 mixed prices | 100,207 | 100,178 | -0.03% |
+Every table includes baseline gas, previous-stage gas, candidate gas, absolute deltas, and percentage
+deltas. No threshold filters the tables. CSV statuses distinguish selected, intermediate, and
+rejected measurements; compiler results are separate. The table generator verifies every raw
+snapshot and passing-run fingerprint before rendering.
 
 The largest solc increase is **546 gas** in a 64-order insertion probe. Some simple cancellations
 add roughly 120-323 gas. These smaller costs are retained in the CSV rather than classified as
@@ -150,28 +143,12 @@ canonical gas measurements. Token storage accesses and fixture construction are 
 Thus E removes actual reads, not only arithmetic. It preserves the writes required to keep the
 reachable ancestor summaries exact.
 
-### F. Do Not Write A Cache When Its Exact Delta Is Zero
+### Rejected F Experiment
 
-Some mixed-price ask subtrees have leaf-rounded quote deltas of zero. E still reads and writes
-their cache with `quoteTotal -= 0` or `quoteTotal += 0`. Guarding those operations preserves the
-exact cache without touching storage.
-
-- In the deep zero-quote ask cancellation, recorded reads fall from 164 to 132 and writes from
-  97 to 65. All 32 unchanged cache writes disappear.
-- In the small zero-quote example, reads fall from 12 to 10 and writes from 6 to 4, eliminating
-  the two unchanged writes.
-- In the canonical deep ask benchmark, gas falls from **685,595 to 611,387**, an additional
-  **74,208 gas** saved compared with E.
-- The guard has a cost when the delta is nonzero: up to **1,440 extra gas** in the tested matrix
-  compared with E. Three independent cases save at least 1,000 gas versus E, while nine add at
-  least 1,000. This is not assumed to be an improvement for every production workload.
-- Compared with the original bounded baseline, F still has 62 cases saving at least 1,000 gas,
-  none adding that much, and a maximum increase of 546 gas. F's highest measured case is 835,007
-  gas. Its 200 gas cases and five storage probes pass; the full E behavioral/invariant campaign
-  is not relabeled as an F campaign.
-
-The guards add no traversal, deferred calculation, or changed quote rounding. F remains a
-separate candidate so its branch overhead can be judged against actual workload frequency.
+The internal zero-delta quote-cache guard is excluded from the selected E implementation. Its
+patch and the dependent dead-code experiment are moved to [the rejected archive](bounded-gas-opportunities/rejected/README.md).
+The [complete archived table](bounded-gas-opportunities/rejected/ZERO_DELTA_GAS.md) preserves all
+200 measured rows and all regressions. Existing input validation is unchanged.
 
 ### Removing An Unreferenced Helper
 
@@ -180,10 +157,13 @@ Deleting it from a scratch F build produces **identical executable bytecode**, 2
 and after, when Solidity's length-delimited CBOR metadata is excluded. The optimizer already
 removed it. Source cleanup is possible, but no runtime gas saving is attributed to that deletion.
 
-The raw storage logs, 15-case storage-access CSV, dead-code bytecode comparison, and optional
+The raw storage logs, 15-case storage-access CSV, dead-code bytecode comparison, and archived
 patch are included with the evidence. An initial storage-probe attempt exhausted the test call's
 gas during large-book construction; setup is now unmetered, and that discarded attempt is kept
 separate from the five successful target-operation measurements per runtime.
+
+The bytecode-identity patch depends on the rejected F variant. It is retained as historical
+evidence only and is not an implementation or cleanup patch for E.
 
 ## Validation And Promotion Boundary
 

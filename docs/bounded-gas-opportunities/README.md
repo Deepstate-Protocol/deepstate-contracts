@@ -5,10 +5,12 @@ approved contract revision. The working production source is unchanged.
 
 ## Contents
 
-- `raw/*.patch`: seven cumulative source candidates, each based on `096eab2`. Choose one; do not
-  apply them sequentially. `uniform-difference.patch` contains the final combined prototype.
-  `zero-delta.patch` adds the optional zero-value storage guard. `dead-code-removed.patch` is a
-  separate code-generation identity check, not an additional measured gas dataset.
+- `selection.json`: the selected E patch and source fingerprint. The zero-delta guard is excluded.
+- `raw/*.patch`: six cumulative A-E source stages, each based on `096eab2`. Choose one; do not
+  apply them sequentially. `uniform-difference.patch` contains the selected combined prototype,
+  with no zero-delta quote-cache guard.
+- `rejected/*.patch`: historical experiments, not implementation candidates. The zero-delta
+  variant and the dependent dead-code identity experiment must not be applied with E.
 - `raw/validation-harness.patch`: artifact-based test deployments plus two focused early-split
   counter tests. This is only for validation, not the common gas comparison fixture.
 - `raw/*-manifest.json`: source/runtime fingerprints, compiler metadata, executor revision,
@@ -20,7 +22,9 @@ approved contract revision. The working production source is unchanged.
   isolated gas measurements and are not used in the gas comparison CSV.
 - `raw/dead-code-check.json`: executable-bytecode identity after removing an unused helper,
   with Solidity's length-delimited CBOR metadata excluded from the comparison.
-- `summary.json`: independent-case summaries, counts, peaks, and validation results.
+- `summary.json`: historical independent-case summaries, counts, peaks, and validation results.
+  It retains the rejected F experiment; `selection.json` defines the actual candidate selection.
+- `delta-table-manifest.json`: rendered-table row counts and output fingerprints.
 - `evidence-sha256.json`: checksums for every raw evidence file.
 - `measure.mjs`, `validate.mjs`, `compatibility.mjs`: scripts used for the measurements and checks.
 
@@ -59,6 +63,25 @@ scripts retain the local experiment paths as provenance; adjust those roots when
 The complete CSV includes eight datasets of 200 rows. Exclude `included_in_summary=false` when
 calculating independent-case statistics. A negative delta means less gas than the bounded baseline
 under the same compiler. Case counts and medians are not production-frequency-weighted savings.
+The `status` column identifies selected, intermediate, and rejected datasets. Every row also has
+preceding-stage deltas and the controlled master comparison; failed master budget checks have no
+successful-operation percentage.
+
+## Complete Tables
+
+The [full rendered report](../BOUNDED_GAS_DELTA_TABLES.md) includes 400 selected E rows across
+solc and Solar, plus all 1,000 intermediate-stage rows. All 200 rejected F rows are retained in
+the separate [archived table](rejected/ZERO_DELTA_GAS.md). No gas threshold filters these tables.
+
+Regenerate the complete Markdown tables, CSV, and table manifest from committed evidence:
+
+```sh
+node script/build_bounded_gas_delta_tables.mjs
+```
+
+This verifies the raw snapshot/log hashes, matching 200-case sets, compiler settings, selection
+fingerprint, and the absence of the rejected guard in E. It does not run new benchmarks or edit
+the contract.
 
 For the storage study, add `raw/StorageAccessProbe.t.sol` to the original frozen fixture and use
 `run-storage.mjs` with the corresponding engine runtime artifacts. The probe pauses gas metering

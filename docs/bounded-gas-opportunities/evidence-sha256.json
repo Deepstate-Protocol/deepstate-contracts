@@ -2,7 +2,7 @@
   "StorageAccessProbe.t.sol": "c2429e062f6197ac6936a488bc66c13cd2f264f3479c018b274ad913aa7d10dc",
   "compatibility.json": "e256016b699a8cb9e4d93052b4909881d33b5792f889e4545eec439bafad7d23",
   "dead-code-check.json": "79f63361073e3059980b155589cd24239a6a9d15a4f62d186c1fb8974fdd857c",
-  "dead-code-removed.patch": "d14378aaf2522aaee7f2670d9d20066644c339bce29da22475a261800c1a774e",
+  "../rejected/dead-code-removed.patch": "d14378aaf2522aaee7f2670d9d20066644c339bce29da22475a261800c1a774e",
   "early-split-gated-insertion.log": "87704f9fa605b5198defbdc9645fdd64bf7e138a3ac16ff13e3cce82f7102269",
   "early-split-gated-insertion.snapshot": "5cffd0cd14aebe31fb427635fbc140a9fe3a9ca2c07eebfc3ae9ebf5f1621142",
   "early-split-gated-manifest.json": "def70a8881da7bd3ddf0d27b99c8c7d7d365ccca48f16841b424c10c729aac92",
@@ -60,5 +60,5 @@
   "zero-delta-manifest.json": "2a0042202f5ba40c21022da347b2613713536243b991224be3091ff01c6bbbbc",
   "zero-delta-release.log": "54ae01972ffda0acb0de72545c653679ae80e6c50c60e541d193bcd29be9b50c",
   "zero-delta-release.snapshot": "6490a266a80a7dd73e34b729ef55a8081663f441df955070e437f577e899f0ea",
-  "zero-delta.patch": "2e70ac6599d083dd7c7a01b8ffe0dfdc855821900934f680f8e507acf21379a8"
+  "../rejected/zero-delta.patch": "2e70ac6599d083dd7c7a01b8ffe0dfdc855821900934f680f8e507acf21379a8"
 }
