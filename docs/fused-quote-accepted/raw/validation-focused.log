@@ -1,0 +1,70 @@
+Compiling 30 files with Solar 0.8.28
+Solar 0.8.28 finished in 162.27ms
+Compiler run successful with warnings:
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/interfaces/IHook.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/libraries/TickMath32.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/DeepstateV1.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ test/QuoteMath.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ test/SinglePairEngineHarness.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[2018]: function state mutability can be restricted to pure
+    ╭▸ src/DeepstateV1.sol:648:5
+    │
+648 │ ┏     function _matchAskLeaf(bytes32 root, int32 limitPrice, uint160 remaining, MatchTopState memory topState)
+649 │ ┃         private
+650 │ ┃         returns (bytes32 newRoot, uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
+    ‡ ┃
+676 │ ┃     }
+    ╰╴┗━━━━━┛
+
+
+warning[2018]: function state mutability can be restricted to pure
+    ╭▸ src/DeepstateV1.sol:686:5
+    │
+686 │ ┏     function _matchBidLeaf(bytes32 root, int32 limitPrice, uint160 remaining, MatchTopState memory topState)
+687 │ ┃         private
+688 │ ┃         returns (bytes32 newRoot, uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
+    ‡ ┃
+714 │ ┃     }
+    ╰╴┗━━━━━┛
+
+
+
+Ran 5 tests for test/FusedQuote.t.sol:FusedQuoteTest
+[PASS] testFuzz_FusedDeltaMatchesIndependentQuoteOracle(int32,uint160,uint160,bool) (runs: 4096, μ: 9609, ~: 9763)
+[PASS] testFuzz_PartialFillEventsAndBalances(int32,uint128,uint128,bool,bool) (runs: 4096, μ: 437041, ~: 369461)
+[PASS] test_RemainderBoundaryCases() (gas: 56883)
+[PASS] test_RepeatedPartialFillsTelescopeAndClaim() (gas: 1267504)
+[PASS] test_TickAndQuantityBoundaries() (gas: 1136569)
+Suite result: ok. 5 passed; 0 failed; 0 skipped; finished in 171.71ms (198.35ms CPU time)
+
+Ran 1 test suite in 174.03ms (171.71ms CPU time): 5 tests passed, 0 failed, 0 skipped (5 total tests)

@@ -1050,10 +1050,9 @@ contract DeepstateV1 is Ownable {
             unchecked {
                 newQuantity = nodeQuantity - remaining;
             }
-            quoteAmount = _quoteAtFactor(factor, shift, nodeQuantity, restingIsBid)
-                - _quoteAtFactor(factor, shift, newQuantity, restingIsBid);
-            uint256 standaloneQuote = _quoteAtFactor(factor, shift, remaining, restingIsBid);
-            uint32 eventCorrectionCode = quoteAmount == standaloneQuote ? 1 : 0;
+            uint32 eventCorrectionCode;
+            (quoteAmount, eventCorrectionCode) =
+                _quoteDifferenceAndEventCodeAtFactor(factor, shift, nodeQuantity, newQuantity, restingIsBid);
             _recordMatch(_withQuantityAndCorrection(node, remaining, eventCorrectionCode), topState);
             return (_withQuantity(node, newQuantity), remaining, quoteAmount);
         }
@@ -1613,8 +1612,49 @@ contract DeepstateV1 is Ownable {
         if (price == 0) return (fillQuantity, 1);
 
         (uint256 factor, uint16 shift) = TickMath32.getPriceFactorAtTick(price);
-        quoteAmount = _quoteDifferenceAtFactor(factor, shift, largerQuantity, smallerQuantity, roundUp);
-        correctionCode = quoteAmount == _quoteAtFactor(factor, shift, fillQuantity, roundUp) ? 1 : 0;
+        return _quoteDifferenceAndEventCodeAtFactor(factor, shift, largerQuantity, smallerQuantity, roundUp);
+    }
+
+    /// @dev Partial fills have a positive quantity. Reuse its product for the standalone notional
+    /// and the telescoping delta; their equality determines the exact one-bit event correction.
+    function _quoteDifferenceAndEventCodeAtFactor(
+        uint256 factor,
+        uint16 shift,
+        uint160 largerQuantity,
+        uint160 smallerQuantity,
+        bool roundUp
+    ) internal pure returns (uint256 quoteAmount, uint32 correctionCode) {
+        // slither-disable-start incorrect-shift
+        assembly ("memory-safe") {
+            let fillQuantity := sub(largerQuantity, smallerQuantity)
+            let productLow := mul(fillQuantity, factor)
+            let productHigh := 0
+            if or(shr(128, fillQuantity), shr(128, factor)) {
+                let mm := mulmod(fillQuantity, factor, not(0))
+                productHigh := sub(mm, add(productLow, lt(mm, productLow)))
+            }
+
+            quoteAmount := or(shl(sub(256, shift), productHigh), shr(shift, productLow))
+            let mask := sub(shl(shift, 1), 1)
+            let remainder := and(productLow, mask)
+            let smallerRemainder := and(mul(smallerQuantity, factor), mask)
+            let standaloneQuote := quoteAmount
+            if and(roundUp, iszero(iszero(remainder))) {
+                standaloneQuote := add(standaloneQuote, 1)
+            }
+
+            let sum := add(smallerRemainder, remainder)
+            if gt(sum, mask) { quoteAmount := add(quoteAmount, 1) }
+            let largerRemainder := and(sum, mask)
+            if and(roundUp, iszero(iszero(largerRemainder))) {
+                quoteAmount := add(quoteAmount, 1)
+            }
+            if and(roundUp, iszero(iszero(smallerRemainder))) {
+                quoteAmount := sub(quoteAmount, 1)
+            }
+            correctionCode := eq(quoteAmount, standaloneQuote)
+        }
+        // slither-disable-end incorrect-shift
     }
 
     /// @dev Difference between same-tick rounded notionals without requiring either full notional to fit.

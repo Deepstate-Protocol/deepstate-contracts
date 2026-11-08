@@ -1,0 +1,58 @@
+Compiling 2 files with Solar 0.8.28
+Solar 0.8.28 finished in 101.58ms
+Compiler run successful with warnings:
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/interfaces/IHook.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/libraries/TickMath32.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/DeepstateV1.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[2018]: function state mutability can be restricted to pure
+    ╭▸ src/DeepstateV1.sol:648:5
+    │
+648 │ ┏     function _matchAskLeaf(bytes32 root, int32 limitPrice, uint160 remaining, MatchTopState memory topState)
+649 │ ┃         private
+650 │ ┃         returns (bytes32 newRoot, uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
+    ‡ ┃
+676 │ ┃     }
+    ╰╴┗━━━━━┛
+
+
+warning[2018]: function state mutability can be restricted to pure
+    ╭▸ src/DeepstateV1.sol:686:5
+    │
+686 │ ┏     function _matchBidLeaf(bytes32 root, int32 limitPrice, uint160 remaining, MatchTopState memory topState)
+687 │ ┃         private
+688 │ ┃         returns (bytes32 newRoot, uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
+    ‡ ┃
+714 │ ┃     }
+    ╰╴┗━━━━━┛
+
+
+
+Ran 7 tests for test/BoundedTraversal.t.sol:BoundedTraversalTest
+[PASS] testFuzz_QuantityAndLimitBoundariesUseOnePath(uint256,bool) (runs: 256, μ: 41293748, ~: 40053653)
+[PASS] test_DifferentAskTickSplitsAboveUniformSubtreeWithoutWitnessDescent() (gas: 25618971)
+[PASS] test_DifferentBidTickSplitsAboveUniformSubtreeWithoutWitnessDescent() (gas: 25656976)
+[PASS] test_Full64LevelCombMatchInsertAndCancelStayBounded() (gas: 25346532)
+[PASS] test_HookedNonCrossingOrderSkipsMatchingBoundaryWalk() (gas: 15800917)
+[PASS] test_UnhookedTopCancelDoesNotReadSuccessorSubtree() (gas: 12408320)
+[PASS] test_WideSweep4096ExpandsNoBranchesAndAllMakersClaim() (gas: 3018)
+Suite result: ok. 7 passed; 0 failed; 0 skipped; finished in 3.61s (5.22s CPU time)
+
+Ran 1 test suite in 3.61s (3.61s CPU time): 7 tests passed, 0 failed, 0 skipped (7 total tests)

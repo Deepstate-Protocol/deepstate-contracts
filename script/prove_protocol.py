@@ -132,6 +132,11 @@ def bind_model_to_source():
         "if (remaining != 0) {",
         "bool restAllowed = !params.noRest && routedNonce != 1;",
         "int256 next = current + amount;",
+        "_quoteDifferenceAndEventCodeAtFactor(factor, shift, nodeQuantity, newQuantity, restingIsBid);",
+        "return _quoteDifferenceAndEventCodeAtFactor(factor, shift, largerQuantity, smallerQuantity, roundUp);",
+        "let smallerRemainder := and(mul(smallerQuantity, factor), mask)",
+        "let standaloneQuote := quoteAmount",
+        "correctionCode := eq(quoteAmount, standaloneQuote)",
         "uint256 next = current + amount;",
         "if (current < type(int256).min + signedAmount) revert DeltaOverflow();",
         "return bytes32(_FEE_DELTA_DOMAIN | uint256(uint160(token)));",
@@ -1508,6 +1513,32 @@ def prove_common_path_reuse(p):
     p.prove("R6.non-crossing-best-ask-excludes-every-ask", leaf > limit, leaf >= best, best > limit)
 
 
+def prove_fused_partial_quote(p):
+    divisor = Int("fused_divisor")
+    quotient = Int("fused_fill_quotient")
+    remaining = Int("fused_remaining_remainder")
+    filled = Int("fused_fill_remainder")
+    assumptions = (divisor >= 1, quotient >= 0, remaining >= 0, remaining < divisor, filled >= 0, filled < divisor)
+    total = remaining + filled
+    carry = If(total >= divisor, 1, 0)
+    larger_remainder = total % divisor
+    ask_quote = quotient + carry
+    bid_quote = ask_quote + If(larger_remainder != 0, 1, 0) - If(remaining != 0, 1, 0)
+    standalone_ask = quotient
+    standalone_bid = quotient + If(filled != 0, 1, 0)
+    ask_code = If(ask_quote == standalone_ask, 1, 0)
+    bid_code = If(bid_quote == standalone_bid, 1, 0)
+    p.prove("R8.fused-ask-event-and-rounding",
+            And(ask_quote == standalone_ask + 1 - ask_code,
+                ask_quote >= standalone_ask, ask_quote <= standalone_ask + 1), *assumptions)
+    p.prove("R8.fused-bid-event-and-rounding",
+            And(bid_quote == standalone_bid - 1 + bid_code, bid_quote >= 0,
+                bid_quote >= standalone_bid - 1, bid_quote <= standalone_bid), *assumptions)
+    p.prove("R8.zero-fill-remainder-has-no-event-correction", And(ask_code == 1, bid_code == 1), *assumptions, filled == 0)
+    p.prove("R8.zero-remaining-remainder-has-no-event-correction", And(ask_code == 1, bid_code == 1), *assumptions, remaining == 0)
+    p.prove("R8.exact-carry-has-event-correction", And(ask_code == 0, bid_code == 0), *assumptions, total == divisor)
+
+
 def main():
     try:
         bind_model_to_source()
@@ -1521,6 +1552,7 @@ def main():
         prove_tree_transition_summaries(prover)
         prove_operation_reuse(prover)
         prove_common_path_reuse(prover)
+        prove_fused_partial_quote(prover)
         prove_matching_priority_and_accounting(prover)
         prove_hook_top_transitions(prover)
         prove_route_and_signed_accounting(prover)

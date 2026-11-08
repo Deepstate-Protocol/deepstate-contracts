@@ -1,0 +1,2017 @@
+{
+  "cases": 223,
+  "cheaper": 81,
+  "unchanged": 142,
+  "costlier": 0,
+  "largestSaving": -300,
+  "largestRegression": 0,
+  "rows": [
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_CancelPartialAsk()",
+      "baseline": 139633,
+      "candidate": 139633,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_CancelPartialBid()",
+      "baseline": 181146,
+      "candidate": 181146,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_CancelUnfilledAsk()",
+      "baseline": 124567,
+      "candidate": 124567,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_CancelUnfilledBid()",
+      "baseline": 165372,
+      "candidate": 165372,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_ClaimAndCancelPair()",
+      "baseline": 188978,
+      "candidate": 188978,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_ClaimFilledAsk()",
+      "baseline": 79628,
+      "candidate": 79628,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_ClaimFilledBid()",
+      "baseline": 93102,
+      "candidate": 93102,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_MatchAndRestAsk()",
+      "baseline": 344874,
+      "candidate": 344874,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_MatchAndRestBid()",
+      "baseline": 313601,
+      "candidate": 313601,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_MatchCancelReplacePair()",
+      "baseline": 496391,
+      "candidate": 496149,
+      "delta": -242,
+      "percent": -0.04875189115032303,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_MatchFullAsk()",
+      "baseline": 174468,
+      "candidate": 174468,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_MatchFullBid()",
+      "baseline": 215525,
+      "candidate": 215525,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_MatchPartialAsk()",
+      "baseline": 183496,
+      "candidate": 183254,
+      "delta": -242,
+      "percent": -0.1318829838252605,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_MatchPartialBid()",
+      "baseline": 224291,
+      "candidate": 224049,
+      "delta": -242,
+      "percent": -0.10789554641068969,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_PartialCancelReplaceAsk()",
+      "baseline": 277527,
+      "candidate": 277527,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_PartialCancelReplaceBid()",
+      "baseline": 320683,
+      "candidate": 320683,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_ReplaceAsk()",
+      "baseline": 234812,
+      "candidate": 234812,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_ReplaceBid()",
+      "baseline": 270222,
+      "candidate": 270222,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_ReplacePair()",
+      "baseline": 420635,
+      "candidate": 420635,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_RestAskAtBest()",
+      "baseline": 224662,
+      "candidate": 224662,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_RestAskImproved()",
+      "baseline": 250592,
+      "candidate": 250592,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_RestBidAtBest()",
+      "baseline": 258683,
+      "candidate": 258683,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "production",
+      "test": "ProductionCategoriesTest:testProduction_RestBidImproved()",
+      "baseline": 285180,
+      "candidate": 285180,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "insertion",
+      "test": "OpportunityGasProbe:testOpportunity_RestAsk16Orders()",
+      "baseline": 154963,
+      "candidate": 154963,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "insertion",
+      "test": "OpportunityGasProbe:testOpportunity_RestAsk64Orders()",
+      "baseline": 164214,
+      "candidate": 164214,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "insertion",
+      "test": "OpportunityGasProbe:testOpportunity_RestAskDifferentTickLeftNonceComb()",
+      "baseline": 161897,
+      "candidate": 161897,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "insertion",
+      "test": "OpportunityGasProbe:testOpportunity_RestAskDirtyLeftNonceComb()",
+      "baseline": 364349,
+      "candidate": 364349,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "insertion",
+      "test": "OpportunityGasProbe:testOpportunity_RestAskLeftNonceComb()",
+      "baseline": 364042,
+      "candidate": 364042,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "insertion",
+      "test": "OpportunityGasProbe:testOpportunity_RestAskWorseTickLeftNonceComb()",
+      "baseline": 162811,
+      "candidate": 162811,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "insertion",
+      "test": "OpportunityGasProbe:testOpportunity_RestBid16Orders()",
+      "baseline": 155864,
+      "candidate": 155864,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "insertion",
+      "test": "OpportunityGasProbe:testOpportunity_RestBid64Orders()",
+      "baseline": 165599,
+      "candidate": 165599,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "insertion",
+      "test": "OpportunityGasProbe:testOpportunity_RestBidDifferentTickLeftNonceComb()",
+      "baseline": 162518,
+      "candidate": 162518,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "insertion",
+      "test": "OpportunityGasProbe:testOpportunity_RestBidDirtyLeftNonceComb()",
+      "baseline": 365567,
+      "candidate": 365567,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "insertion",
+      "test": "OpportunityGasProbe:testOpportunity_RestBidLeftNonceComb()",
+      "baseline": 365546,
+      "candidate": 365546,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "insertion",
+      "test": "OpportunityGasProbe:testOpportunity_RestBidWorseTickLeftNonceComb()",
+      "baseline": 163014,
+      "candidate": 163014,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "DeepstateV1IntegratorFeeGasTest:testGas_IntegratorAndProtocolFeeFill()",
+      "baseline": 124673,
+      "candidate": 124673,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "DeepstateV1IntegratorFeeGasTest:testGas_IntegratorFillAskFullyMatchesSingleBid()",
+      "baseline": 99162,
+      "candidate": 99162,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "DeepstateV1IntegratorFeeGasTest:testGas_IntegratorFillBidFullyMatchesSingleAsk()",
+      "baseline": 99382,
+      "candidate": 99382,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "DeepstateV1IntegratorFeeGasTest:testGas_IntegratorFillRestBidEmptyBook()",
+      "baseline": 150971,
+      "candidate": 150971,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "DeepstateV1IntegratorFeeGasTest:testGas_IntegratorRouteNetsRepeatedFeeToken()",
+      "baseline": 111666,
+      "candidate": 111666,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelAskSkipsPathologicalBidTree()",
+      "baseline": 38594,
+      "candidate": 38594,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelFilledBidClaim()",
+      "baseline": 36676,
+      "candidate": 36676,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelFullDepthBidCombRightmost()",
+      "baseline": 752062,
+      "candidate": 752062,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelMaxValidDepthAskCombRightmost()",
+      "baseline": 662536,
+      "candidate": 662536,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelPartialBid()",
+      "baseline": 47381,
+      "candidate": 47381,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelUnfilledAsk()",
+      "baseline": 38655,
+      "candidate": 38655,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_CancelUnfilledBid()",
+      "baseline": 38299,
+      "candidate": 38299,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskCrossLeafNonceComb()",
+      "baseline": 353327,
+      "candidate": 353027,
+      "delta": -300,
+      "percent": -0.08490718229855064,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskHalfNonceComb()",
+      "baseline": 252347,
+      "candidate": 252047,
+      "delta": -300,
+      "percent": -0.11888391777988247,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskNearlyWholeNonceComb()",
+      "baseline": 116459,
+      "candidate": 116159,
+      "delta": -300,
+      "percent": -0.25760138761280793,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskSmallFill16Orders()",
+      "baseline": 119483,
+      "candidate": 119183,
+      "delta": -300,
+      "percent": -0.2510817438464049,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskSmallFill64Orders()",
+      "baseline": 135581,
+      "candidate": 135281,
+      "delta": -300,
+      "percent": -0.22126994195351857,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskSmallFillNonceComb()",
+      "baseline": 355147,
+      "candidate": 354847,
+      "delta": -300,
+      "percent": -0.08447206368067307,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyAskWholeNonceComb()",
+      "baseline": 90725,
+      "candidate": 90725,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidCrossLeafNonceComb()",
+      "baseline": 354282,
+      "candidate": 353982,
+      "delta": -300,
+      "percent": -0.08467830711128423,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidHalfNonceComb()",
+      "baseline": 251723,
+      "candidate": 251423,
+      "delta": -300,
+      "percent": -0.11917862094445085,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidNearlyWholeNonceComb()",
+      "baseline": 116523,
+      "candidate": 116223,
+      "delta": -300,
+      "percent": -0.25745990062047835,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidSmallFill16Orders()",
+      "baseline": 118846,
+      "candidate": 118546,
+      "delta": -300,
+      "percent": -0.25242751123302426,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidSmallFill64Orders()",
+      "baseline": 136134,
+      "candidate": 135834,
+      "delta": -300,
+      "percent": -0.22037110494072018,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidSmallFillNonceComb()",
+      "baseline": 355052,
+      "candidate": 354752,
+      "delta": -300,
+      "percent": -0.08449466557011368,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_DirtyBidWholeNonceComb()",
+      "baseline": 89755,
+      "candidate": 89755,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillAskConsumesDirtySamePriceBidSubtree()",
+      "baseline": 56549,
+      "candidate": 56549,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillAskConsumesFullDepthBidComb()",
+      "baseline": 100396,
+      "candidate": 100396,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillAskFullyMatchesSingleBid()",
+      "baseline": 74351,
+      "candidate": 74351,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillAskPartiallyMatchesOffSpineBidBranch()",
+      "baseline": 108325,
+      "candidate": 108025,
+      "delta": -300,
+      "percent": -0.276944380336949,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillAskPartiallyMatchesSingleBid()",
+      "baseline": 93816,
+      "candidate": 93574,
+      "delta": -242,
+      "percent": -0.2579517353116739,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidConsumesAskAndRestsRemainder()",
+      "baseline": 125220,
+      "candidate": 125220,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidConsumesDirtySamePriceAskSubtree()",
+      "baseline": 56827,
+      "candidate": 56827,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidConsumesMaxValidDepthAskComb()",
+      "baseline": 75854,
+      "candidate": 75854,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidConsumesSamePriceAskSubtree()",
+      "baseline": 73570,
+      "candidate": 73570,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidFullyMatchesSingleAsk()",
+      "baseline": 74172,
+      "candidate": 74172,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidPartiallyMatchesOffSpineAskBranch()",
+      "baseline": 108250,
+      "candidate": 107950,
+      "delta": -300,
+      "percent": -0.27713625866050806,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillBidPartiallyMatchesSingleAsk()",
+      "baseline": 93972,
+      "candidate": 93730,
+      "delta": -242,
+      "percent": -0.2575235176435534,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillRestAskEmptyBook()",
+      "baseline": 149918,
+      "candidate": 149918,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_FillRestBidEmptyBook()",
+      "baseline": 150629,
+      "candidate": 150629,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_LargeRandomBookAskMatchesOneBid()",
+      "baseline": 158771,
+      "candidate": 158771,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_LargeRandomBookBidMatchesOneAsk()",
+      "baseline": 198061,
+      "candidate": 198061,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_LargeRandomBookPartialFillsAsk()",
+      "baseline": 206956,
+      "candidate": 206714,
+      "delta": -242,
+      "percent": -0.1169330678984905,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_LargeRandomBookPartialFillsBid()",
+      "baseline": 167624,
+      "candidate": 167382,
+      "delta": -242,
+      "percent": -0.1443707345010261,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_LargeRandomBookRestsAsk()",
+      "baseline": 196385,
+      "candidate": 196385,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_LargeRandomBookRestsBid()",
+      "baseline": 210519,
+      "candidate": 210519,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineFeeGasTest:testGas_PathologicalOffSpinePartialFillBidComb()",
+      "baseline": 796262,
+      "candidate": 795975,
+      "delta": -287,
+      "percent": -0.03604341284652539,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_CancelAskSkipsPathologicalBidTree()",
+      "baseline": 38594,
+      "candidate": 38594,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_CancelFilledBidClaim()",
+      "baseline": 36676,
+      "candidate": 36676,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_CancelFullDepthBidCombRightmost()",
+      "baseline": 752062,
+      "candidate": 752062,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_CancelMaxValidDepthAskCombRightmost()",
+      "baseline": 662536,
+      "candidate": 662536,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_CancelPartialBid()",
+      "baseline": 47381,
+      "candidate": 47381,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_CancelUnfilledAsk()",
+      "baseline": 38655,
+      "candidate": 38655,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_CancelUnfilledBid()",
+      "baseline": 38299,
+      "candidate": 38299,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskCrossLeafNonceComb()",
+      "baseline": 352893,
+      "candidate": 352593,
+      "delta": -300,
+      "percent": -0.08501160408395746,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskHalfNonceComb()",
+      "baseline": 226877,
+      "candidate": 226577,
+      "delta": -300,
+      "percent": -0.13223023929265637,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskNearlyWholeNonceComb()",
+      "baseline": 90989,
+      "candidate": 90689,
+      "delta": -300,
+      "percent": -0.3297101847476068,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskSmallFill16Orders()",
+      "baseline": 119049,
+      "candidate": 118749,
+      "delta": -300,
+      "percent": -0.2519970768339087,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskSmallFill64Orders()",
+      "baseline": 135147,
+      "candidate": 134847,
+      "delta": -300,
+      "percent": -0.22198051011121223,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskSmallFillNonceComb()",
+      "baseline": 354713,
+      "candidate": 354413,
+      "delta": -300,
+      "percent": -0.08457541730920491,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyAskWholeNonceComb()",
+      "baseline": 65255,
+      "candidate": 65255,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidCrossLeafNonceComb()",
+      "baseline": 353863,
+      "candidate": 353563,
+      "delta": -300,
+      "percent": -0.08477857249839627,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidHalfNonceComb()",
+      "baseline": 226268,
+      "candidate": 225968,
+      "delta": -300,
+      "percent": -0.13258613679353687,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidNearlyWholeNonceComb()",
+      "baseline": 91068,
+      "candidate": 90768,
+      "delta": -300,
+      "percent": -0.32942416655685863,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidSmallFill16Orders()",
+      "baseline": 118427,
+      "candidate": 118127,
+      "delta": -300,
+      "percent": -0.25332061100931375,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidSmallFill64Orders()",
+      "baseline": 135715,
+      "candidate": 135415,
+      "delta": -300,
+      "percent": -0.22105146815016763,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidSmallFillNonceComb()",
+      "baseline": 354633,
+      "candidate": 354333,
+      "delta": -300,
+      "percent": -0.08459449628207188,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_DirtyBidWholeNonceComb()",
+      "baseline": 64300,
+      "candidate": 64300,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillAskConsumesDirtySamePriceBidSubtree()",
+      "baseline": 56130,
+      "candidate": 56130,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillAskConsumesFullDepthBidComb()",
+      "baseline": 74941,
+      "candidate": 74941,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillAskFullyMatchesSingleBid()",
+      "baseline": 73932,
+      "candidate": 73932,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillAskPartiallyMatchesOffSpineBidBranch()",
+      "baseline": 107906,
+      "candidate": 107606,
+      "delta": -300,
+      "percent": -0.2780197579374641,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillAskPartiallyMatchesSingleBid()",
+      "baseline": 93397,
+      "candidate": 93155,
+      "delta": -242,
+      "percent": -0.25910896495604785,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidConsumesAskAndRestsRemainder()",
+      "baseline": 124786,
+      "candidate": 124786,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidConsumesDirtySamePriceAskSubtree()",
+      "baseline": 56393,
+      "candidate": 56393,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidConsumesMaxValidDepthAskComb()",
+      "baseline": 75420,
+      "candidate": 75420,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidConsumesSamePriceAskSubtree()",
+      "baseline": 73136,
+      "candidate": 73136,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidFullyMatchesSingleAsk()",
+      "baseline": 73738,
+      "candidate": 73738,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidPartiallyMatchesOffSpineAskBranch()",
+      "baseline": 107816,
+      "candidate": 107516,
+      "delta": -300,
+      "percent": -0.27825183646212065,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillBidPartiallyMatchesSingleAsk()",
+      "baseline": 93538,
+      "candidate": 93296,
+      "delta": -242,
+      "percent": -0.2587183818341209,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillRestAskEmptyBook()",
+      "baseline": 149756,
+      "candidate": 149756,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_FillRestBidEmptyBook()",
+      "baseline": 150466,
+      "candidate": 150466,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_LargeRandomBookAskMatchesOneBid()",
+      "baseline": 158352,
+      "candidate": 158352,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_LargeRandomBookBidMatchesOneAsk()",
+      "baseline": 197627,
+      "candidate": 197627,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_LargeRandomBookPartialFillsAsk()",
+      "baseline": 206522,
+      "candidate": 206280,
+      "delta": -242,
+      "percent": -0.11717879935309555,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_LargeRandomBookPartialFillsBid()",
+      "baseline": 167205,
+      "candidate": 166963,
+      "delta": -242,
+      "percent": -0.1447325139798451,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_LargeRandomBookRestsAsk()",
+      "baseline": 196223,
+      "candidate": 196223,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_LargeRandomBookRestsBid()",
+      "baseline": 210356,
+      "candidate": 210356,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTest:testGas_PathologicalOffSpinePartialFillBidComb()",
+      "baseline": 770807,
+      "candidate": 770520,
+      "delta": -287,
+      "percent": -0.0372337044162806,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_ObservedNativeBidCancelAfterThreePartialMatches()",
+      "baseline": 115063,
+      "candidate": 115063,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_ObservedNativeBidPartialMatchAfterDirtySpineRest()",
+      "baseline": 129747,
+      "candidate": 129503,
+      "delta": -244,
+      "percent": -0.18805829807240246,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_ObservedNativeBidRestsAfterFiveLevelDirtySpine()",
+      "baseline": 214317,
+      "candidate": 214317,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_PathologicalNativeBidCancelAfterThreePartialMatches()",
+      "baseline": 656207,
+      "candidate": 656207,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_PathologicalNativeBidPartialMatchAfterDirtySpineRest()",
+      "baseline": 667743,
+      "candidate": 667456,
+      "delta": -287,
+      "percent": -0.04298060780869287,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_PathologicalNativeBidRestsAfterFullDepthDirtySpine()",
+      "baseline": 768002,
+      "candidate": 768002,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelAskSkipsPathologicalBidTree()",
+      "baseline": 38660,
+      "candidate": 38660,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelFilledBidClaim()",
+      "baseline": 36742,
+      "candidate": 36742,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelFullDepthBidCombRightmost()",
+      "baseline": 752084,
+      "candidate": 752084,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelMaxValidDepthAskCombRightmost()",
+      "baseline": 662536,
+      "candidate": 662536,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelPartialBid()",
+      "baseline": 47447,
+      "candidate": 47447,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelUnfilledAsk()",
+      "baseline": 38765,
+      "candidate": 38765,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_CancelUnfilledBid()",
+      "baseline": 38365,
+      "candidate": 38365,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskCrossLeafNonceComb()",
+      "baseline": 352950,
+      "candidate": 352650,
+      "delta": -300,
+      "percent": -0.08499787505312367,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskHalfNonceComb()",
+      "baseline": 227000,
+      "candidate": 226700,
+      "delta": -300,
+      "percent": -0.13215859030837004,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskNearlyWholeNonceComb()",
+      "baseline": 91068,
+      "candidate": 90768,
+      "delta": -300,
+      "percent": -0.32942416655685863,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskSmallFill16Orders()",
+      "baseline": 119282,
+      "candidate": 118982,
+      "delta": -300,
+      "percent": -0.2515048372763703,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskSmallFill64Orders()",
+      "baseline": 135226,
+      "candidate": 134926,
+      "delta": -300,
+      "percent": -0.2218508275035866,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskSmallFillNonceComb()",
+      "baseline": 354770,
+      "candidate": 354470,
+      "delta": -300,
+      "percent": -0.08456182879048398,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyAskWholeNonceComb()",
+      "baseline": 65378,
+      "candidate": 65378,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidCrossLeafNonceComb()",
+      "baseline": 354118,
+      "candidate": 353818,
+      "delta": -300,
+      "percent": -0.08471752353735196,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidHalfNonceComb()",
+      "baseline": 226347,
+      "candidate": 226047,
+      "delta": -300,
+      "percent": -0.132539861363305,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidNearlyWholeNonceComb()",
+      "baseline": 91169,
+      "candidate": 90869,
+      "delta": -300,
+      "percent": -0.3290592196909037,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidSmallFill16Orders()",
+      "baseline": 118550,
+      "candidate": 118250,
+      "delta": -300,
+      "percent": -0.25305778152678193,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidSmallFill64Orders()",
+      "baseline": 135882,
+      "candidate": 135582,
+      "delta": -300,
+      "percent": -0.22077979423323177,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidSmallFillNonceComb()",
+      "baseline": 354690,
+      "candidate": 354390,
+      "delta": -300,
+      "percent": -0.0845809016324114,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_DirtyBidWholeNonceComb()",
+      "baseline": 64357,
+      "candidate": 64357,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillAskConsumesDirtySamePriceBidSubtree()",
+      "baseline": 56224,
+      "candidate": 56224,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillAskConsumesFullDepthBidComb()",
+      "baseline": 75035,
+      "candidate": 75035,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillAskFullyMatchesSingleBid()",
+      "baseline": 74114,
+      "candidate": 74114,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillAskPartiallyMatchesOffSpineBidBranch()",
+      "baseline": 108000,
+      "candidate": 107700,
+      "delta": -300,
+      "percent": -0.2777777777777778,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillAskPartiallyMatchesSingleBid()",
+      "baseline": 93535,
+      "candidate": 93293,
+      "delta": -242,
+      "percent": -0.25872667985246167,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidConsumesAskAndRestsRemainder()",
+      "baseline": 124855,
+      "candidate": 124855,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidConsumesDirtySamePriceAskSubtree()",
+      "baseline": 56506,
+      "candidate": 56506,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidConsumesMaxValidDepthAskComb()",
+      "baseline": 75533,
+      "candidate": 75533,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidConsumesSamePriceAskSubtree()",
+      "baseline": 73205,
+      "candidate": 73205,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidFullyMatchesSingleAsk()",
+      "baseline": 73851,
+      "candidate": 73851,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidPartiallyMatchesOffSpineAskBranch()",
+      "baseline": 107885,
+      "candidate": 107585,
+      "delta": -300,
+      "percent": -0.2780738749594476,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillBidPartiallyMatchesSingleAsk()",
+      "baseline": 93673,
+      "candidate": 93431,
+      "delta": -242,
+      "percent": -0.2583455211213477,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillRestAskEmptyBook()",
+      "baseline": 149850,
+      "candidate": 149850,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_FillRestBidEmptyBook()",
+      "baseline": 150601,
+      "candidate": 150601,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_LargeRandomBookAskMatchesOneBid()",
+      "baseline": 158468,
+      "candidate": 158468,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_LargeRandomBookBidMatchesOneAsk()",
+      "baseline": 197762,
+      "candidate": 197762,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_LargeRandomBookPartialFillsAsk()",
+      "baseline": 206723,
+      "candidate": 206481,
+      "delta": -242,
+      "percent": -0.11706486457723621,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_LargeRandomBookPartialFillsBid()",
+      "baseline": 167343,
+      "candidate": 167101,
+      "delta": -242,
+      "percent": -0.14461315979754158,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_LargeRandomBookRestsAsk()",
+      "baseline": 196295,
+      "candidate": 196295,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_LargeRandomBookRestsBid()",
+      "baseline": 210447,
+      "candidate": 210447,
+      "delta": 0,
+      "percent": 0,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep1024()",
+      "baseline": 97633,
+      "candidate": 97633,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep1024AndRest()",
+      "baseline": 148905,
+      "candidate": 148905,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep1024BurningHookAndFees()",
+      "baseline": 348153,
+      "candidate": 348153,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep1024FitsOneMillionGas()",
+      "baseline": 96905,
+      "candidate": 96905,
+      "delta": 0,
+      "percent": 0,
+      "notes": "functional budget check; capped call succeeds"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep1024RestBurningHooksAndFees()",
+      "baseline": 602233,
+      "candidate": 602233,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep256()",
+      "baseline": 97317,
+      "candidate": 97317,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep4096()",
+      "baseline": 98193,
+      "candidate": 98193,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep4096RestBurningHooksAndFees()",
+      "baseline": 608912,
+      "candidate": 608912,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_MixedSweep64()",
+      "baseline": 96617,
+      "candidate": 96617,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineGasTestWideSweep:testGas_PathologicalOffSpinePartialFillBidComb()",
+      "baseline": 770901,
+      "candidate": 770614,
+      "delta": -287,
+      "percent": -0.03722916431552171,
+      "notes": "inherited repetition"
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelAskSkipsPathologicalBidTree()",
+      "baseline": 42351,
+      "candidate": 42351,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelFilledBidClaim()",
+      "baseline": 37178,
+      "candidate": 37178,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelFullDepthBidCombRightmost()",
+      "baseline": 760361,
+      "candidate": 760361,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelMaxValidDepthAskCombRightmost()",
+      "baseline": 669986,
+      "candidate": 669986,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelPartialBid()",
+      "baseline": 51675,
+      "candidate": 51675,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelUnfilledAsk()",
+      "baseline": 42412,
+      "candidate": 42412,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_CancelUnfilledBid()",
+      "baseline": 42591,
+      "candidate": 42591,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskCrossLeafNonceComb()",
+      "baseline": 365821,
+      "candidate": 365521,
+      "delta": -300,
+      "percent": -0.0820073205201451,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskHalfNonceComb()",
+      "baseline": 269805,
+      "candidate": 269505,
+      "delta": -300,
+      "percent": -0.11119141602268305,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskNearlyWholeNonceComb()",
+      "baseline": 165917,
+      "candidate": 165617,
+      "delta": -300,
+      "percent": -0.18081329821537276,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskSmallFill16Orders()",
+      "baseline": 126365,
+      "candidate": 126065,
+      "delta": -300,
+      "percent": -0.23740750999089938,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskSmallFill64Orders()",
+      "baseline": 142865,
+      "candidate": 142565,
+      "delta": -300,
+      "percent": -0.20998845063521507,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskSmallFillNonceComb()",
+      "baseline": 367657,
+      "candidate": 367357,
+      "delta": -300,
+      "percent": -0.08159779359566117,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyAskWholeNonceComb()",
+      "baseline": 142243,
+      "candidate": 142243,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidCrossLeafNonceComb()",
+      "baseline": 367749,
+      "candidate": 367449,
+      "delta": -300,
+      "percent": -0.08157738022401148,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidHalfNonceComb()",
+      "baseline": 270154,
+      "candidate": 269854,
+      "delta": -300,
+      "percent": -0.11104777275183784,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidNearlyWholeNonceComb()",
+      "baseline": 166954,
+      "candidate": 166654,
+      "delta": -300,
+      "percent": -0.17969021407094168,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidSmallFill16Orders()",
+      "baseline": 126701,
+      "candidate": 126401,
+      "delta": -300,
+      "percent": -0.23677792598322034,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidSmallFill64Orders()",
+      "baseline": 144391,
+      "candidate": 144091,
+      "delta": -300,
+      "percent": -0.2077691822897549,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidSmallFillNonceComb()",
+      "baseline": 368535,
+      "candidate": 368235,
+      "delta": -300,
+      "percent": -0.08140339452155154,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_DirtyBidWholeNonceComb()",
+      "baseline": 142246,
+      "candidate": 142246,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillAskConsumesDirtySamePriceBidSubtree()",
+      "baseline": 70247,
+      "candidate": 70247,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillAskConsumesFullDepthBidComb()",
+      "baseline": 223195,
+      "candidate": 223195,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillAskFullyMatchesSingleBid()",
+      "baseline": 81386,
+      "candidate": 81386,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillAskPartiallyMatchesOffSpineBidBranch()",
+      "baseline": 117762,
+      "candidate": 117462,
+      "delta": -300,
+      "percent": -0.25475110816732055,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillAskPartiallyMatchesSingleBid()",
+      "baseline": 100802,
+      "candidate": 100560,
+      "delta": -242,
+      "percent": -0.24007460169441083,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidConsumesAskAndRestsRemainder()",
+      "baseline": 133086,
+      "candidate": 133086,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidConsumesDirtySamePriceAskSubtree()",
+      "baseline": 69552,
+      "candidate": 69552,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidConsumesMaxValidDepthAskComb()",
+      "baseline": 222837,
+      "candidate": 222837,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidConsumesSamePriceAskSubtree()",
+      "baseline": 88496,
+      "candidate": 88496,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidFullyMatchesSingleAsk()",
+      "baseline": 80313,
+      "candidate": 80313,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidPartiallyMatchesOffSpineAskBranch()",
+      "baseline": 116714,
+      "candidate": 116414,
+      "delta": -300,
+      "percent": -0.2570385729218431,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillBidPartiallyMatchesSingleAsk()",
+      "baseline": 100064,
+      "candidate": 99822,
+      "delta": -242,
+      "percent": -0.24184521905980172,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillRestAskEmptyBook()",
+      "baseline": 138972,
+      "candidate": 138972,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_FillRestBidEmptyBook()",
+      "baseline": 139682,
+      "candidate": 139682,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_LargeRandomBookAskMatchesOneBid()",
+      "baseline": 170957,
+      "candidate": 170957,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_LargeRandomBookBidMatchesOneAsk()",
+      "baseline": 212514,
+      "candidate": 212514,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_LargeRandomBookPartialFillsAsk()",
+      "baseline": 215058,
+      "candidate": 214816,
+      "delta": -242,
+      "percent": -0.11252778320267091,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_LargeRandomBookPartialFillsBid()",
+      "baseline": 176263,
+      "candidate": 176021,
+      "delta": -242,
+      "percent": -0.1372948378275645,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_LargeRandomBookRestsAsk()",
+      "baseline": 205974,
+      "candidate": 205974,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_LargeRandomBookRestsBid()",
+      "baseline": 207481,
+      "candidate": 207481,
+      "delta": 0,
+      "percent": 0,
+      "notes": ""
+    },
+    {
+      "group": "release",
+      "test": "RadixMatchingEngineHookGasTest:testGas_PathologicalOffSpinePartialFillBidComb()",
+      "baseline": 778360,
+      "candidate": 778073,
+      "delta": -287,
+      "percent": -0.03687239837607277,
+      "notes": ""
+    }
+  ]
+}

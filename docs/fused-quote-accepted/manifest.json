@@ -1,0 +1,524 @@
+{
+  "measurement": {
+    "baselineCommit": "83ce527995e1e44932de281d5d732ed1afa80204",
+    "compiler": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+    "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+    "variants": {
+      "baseline": {
+        "sourceSha256": "b0aefaca2ec79252222720e1472297800affce1c804cdcaf6beb5d5b0b051550",
+        "runtimeSha256": "64296c92c77ec4292af4c983f005a4663b39930907d8d75d98f0e3153f124b11"
+      },
+      "candidate": {
+        "sourceSha256": "b85ad09b308c69cb9ba2b309ce0f15dbaee8b0e5d51087650f7cff0a918e796f",
+        "runtimeSha256": "836d16260ea6a2c2ec87fc37b593b5cb94533251dbcc60fb7d1da6fe60dbb670"
+      }
+    },
+    "runs": [
+      {
+        "group": "release",
+        "count": 188,
+        "log": "baseline-release.log",
+        "snapshot": "baseline-release.snapshot",
+        "logSha256": "944f6a31b073f8cbf6adb13ca5805ebbd12ef6eb23d6d173116c8faae7589279",
+        "snapshotSha256": "786e198eabbf87f848d96e6e1fe01f8b045027563729e1640e81c0c92b4dd865",
+        "name": "baseline-release",
+        "variant": "baseline",
+        "reusedValidatedBaseline": true
+      },
+      {
+        "group": "insertion",
+        "count": 12,
+        "log": "baseline-insertion.log",
+        "snapshot": "baseline-insertion.snapshot",
+        "logSha256": "914966a7a496225f7de0e52b0e643df53332dbbabdd14e31823501bcd29127af",
+        "snapshotSha256": "309985fa14e0c121daebc86559f16d0d0b2d571d75e7f1ec5b33fe6fe489c974",
+        "name": "baseline-insertion",
+        "variant": "baseline",
+        "reusedValidatedBaseline": true
+      },
+      {
+        "group": "production",
+        "count": 23,
+        "log": "baseline-production.log",
+        "snapshot": "baseline-production.snapshot",
+        "logSha256": "0637c1ceec59d966d686db50c59d4cb030f63b881a6d2fd44dcbe2faf54dbc0a",
+        "snapshotSha256": "407f5b35d93b9e9602b175d97b2f4665b42320e31bb8a4baf5e9ab528e5a52ba",
+        "name": "baseline-production",
+        "variant": "baseline",
+        "reusedValidatedBaseline": true
+      },
+      {
+        "command": "/tmp/deepstate-rebase-pr34-20261107/toolchain/forge",
+        "args": [
+          "snapshot",
+          "--match-contract",
+          "^ProductionCategoriesTest$",
+          "--match-test",
+          "^testProduction_",
+          "-vv",
+          "--threads",
+          "4",
+          "--isolate",
+          "--snap",
+          "/tmp/deepstate-fused-accepted-20261108/results/candidate-production.snapshot"
+        ],
+        "log": "candidate-production.log",
+        "sha256": "a499845a02ce242b5a983851416576d83fe58756d03fe57ce0b73bb841dea262",
+        "status": 0,
+        "name": "candidate-production",
+        "variant": "candidate",
+        "group": "production",
+        "count": 23,
+        "logSha256": "a499845a02ce242b5a983851416576d83fe58756d03fe57ce0b73bb841dea262",
+        "snapshot": "candidate-production.snapshot",
+        "snapshotSha256": "ae2a1bb9b7179dc4f44449ca4286d79b969f88508c7bd2fc62ddb099b929b16a"
+      },
+      {
+        "command": "/tmp/deepstate-rebase-pr34-20261107/toolchain/forge",
+        "args": [
+          "snapshot",
+          "--match-contract",
+          "^OpportunityGasProbe$",
+          "--match-test",
+          "^testOpportunity_",
+          "--threads",
+          "4",
+          "--isolate",
+          "--snap",
+          "/tmp/deepstate-fused-accepted-20261108/results/candidate-insertion.snapshot"
+        ],
+        "log": "candidate-insertion.log",
+        "sha256": "97eb45b6edbc675babff5beb8d7b2d2ca03a785f636691508903ed9e798700b9",
+        "status": 0,
+        "name": "candidate-insertion",
+        "variant": "candidate",
+        "group": "insertion",
+        "count": 12,
+        "logSha256": "97eb45b6edbc675babff5beb8d7b2d2ca03a785f636691508903ed9e798700b9",
+        "snapshot": "candidate-insertion.snapshot",
+        "snapshotSha256": "309985fa14e0c121daebc86559f16d0d0b2d571d75e7f1ec5b33fe6fe489c974"
+      },
+      {
+        "command": "/tmp/deepstate-rebase-pr34-20261107/toolchain/forge",
+        "args": [
+          "snapshot",
+          "--match-contract",
+          "(RadixMatchingEngine(Gas|HookGas|FeeGas)Test|DeepstateV1IntegratorFeeGasTest)",
+          "--threads",
+          "4",
+          "--isolate",
+          "--snap",
+          "/tmp/deepstate-fused-accepted-20261108/results/candidate-release.snapshot"
+        ],
+        "log": "candidate-release.log",
+        "sha256": "92575e753dfa40e13f7eacebbea593a4d6573abbd5b25d95b51d7e4dfe9d9ffb",
+        "status": 0,
+        "name": "candidate-release",
+        "variant": "candidate",
+        "group": "release",
+        "count": 188,
+        "logSha256": "92575e753dfa40e13f7eacebbea593a4d6573abbd5b25d95b51d7e4dfe9d9ffb",
+        "snapshot": "candidate-release.snapshot",
+        "snapshotSha256": "4b91e204f813ab2b2d2be24ab75b9cb3ad77dbd1422147ac4e65e8aae98b3958"
+      }
+    ],
+    "settings": {
+      "remappings": [
+        "forge-std/=lib/forge-std/src/",
+        "solady/=lib/solady/src/"
+      ],
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "metadata": {
+        "bytecodeHash": "ipfs"
+      },
+      "compilationTarget": {
+        "src/DeepstateV1.sol": "DeepstateV1"
+      },
+      "evmVersion": "cancun",
+      "libraries": {}
+    },
+    "imports": {
+      "lib/solady/src/auth/Ownable.sol": "0xc208cdd9de02bbf4b5edad18b88e23a2be7ff56d2287d5649329dc7cda64b9a3",
+      "lib/solady/src/utils/LibBit.sol": "0x71752d8322c7b0b5e4997befe36b254a306c6abc7fd24f65d79f47ce2e1a8278",
+      "lib/solady/src/utils/SafeTransferLib.sol": "0xf53a25143307304d9de7186f93f11faae3cc4f722c4b088aed6f4f8f87a02f7a",
+      "src/interfaces/IHook.sol": "0xba60a445ce718ae34db38f70506fa9932261f868241e104cf2f5a8412fed1bb7",
+      "src/libraries/TickMath32.sol": "0x20a3ca51c741d0e4dd3cd76742111d7e186f7e082f2153986a43d0580dcfa60a"
+    },
+    "fixtures": {
+      "foundry.toml": "910ee6c2be5f85557cbfd3d9ea560dd28964d1f9fc3cccd48b1bcf66c13142a1",
+      "src/DeepstateV1.sol": "b05662e0d6bb55ecf655c3c89cc90d1ab09d464915a24719808be07e3fe5ba5c",
+      "test/RadixMatchingEngineGas.t.sol": "6be3690d081f954edb144fdedfc582c00f7e54a9fa82596995108182d6e84df6",
+      "test/BoundedTraversalGas.t.sol": "65d6484336e5d30b49ed7d5bc45836a27de46de8c0b96b572675d04414517034",
+      "test/OpportunityGasProbe.t.sol": "b26806ea074fe6c6928f613bfd12b018bb68a916827f79ac6797fcdfebf41b86",
+      "test/ProductionCategories.t.sol": "62066e98fe58b2fb9e539e3efab721706f76fa89f8f7732786acd8721bd16ec7"
+    }
+  },
+  "validation": {
+    "hashes": {
+      "src/DeepstateV1.sol": "b85ad09b308c69cb9ba2b309ce0f15dbaee8b0e5d51087650f7cff0a918e796f",
+      "src/libraries/TickMath32.sol": "c5402a448c54e8f63314c40ff9e394abac34bd51ba6f098306842c53077f874f",
+      "src/interfaces/IHook.sol": "f8b398822f45bf4dbcf270df93a4215e5a28cb031ea5ec62bd1b08e7ff713691",
+      "test/FusedQuote.t.sol": "397588d92201b56acf054e922867786425f4756a2ab9a4fea00cea7cd4540d2e",
+      "test/QuoteMath.sol": "82a0dc7acd912466c57e91a4ecb4bf970e8a2275f131ef24a327b434f03d59fa",
+      "script/prove_protocol.py": "5552f3ff876aed13d352a683fb1fc6b3c0b37166843a64c18bddf2c0263fca04"
+    },
+    "runs": [
+      {
+        "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+        "args": [
+          "test",
+          "--no-dynamic-test-linking",
+          "--out",
+          "out-fused-check",
+          "--cache-path",
+          "cache-fused-check",
+          "--threads",
+          "4",
+          "--match-contract",
+          "^FusedQuoteTest$",
+          "--fuzz-runs",
+          "4096"
+        ],
+        "log": "validation-focused.log",
+        "sha256": "aec23ff019f10a8238fa10264483090e16eddc4773ca4044eccfd8fbbdf454c8",
+        "status": 0,
+        "group": "focused"
+      },
+      {
+        "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+        "args": [
+          "test",
+          "--no-dynamic-test-linking",
+          "--out",
+          "out-fused-check",
+          "--cache-path",
+          "cache-fused-check",
+          "--threads",
+          "4",
+          "--no-match-contract",
+          "(Invariant|Gas|AccessList|BoundedTraversal)",
+          "--fuzz-runs",
+          "256"
+        ],
+        "log": "validation-behavior.log",
+        "sha256": "a13b8421c794cdd2ed3811ad2cc20e0a4475218aa358cf258c1095459d4fb4e2",
+        "status": 0,
+        "group": "behavior"
+      },
+      {
+        "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+        "args": [
+          "test",
+          "--no-dynamic-test-linking",
+          "--out",
+          "out-fused-check",
+          "--cache-path",
+          "cache-fused-check",
+          "--threads",
+          "4",
+          "--match-contract",
+          "^BoundedTraversalTest$",
+          "--match-test",
+          "^(test_|testFuzz_)",
+          "--fuzz-runs",
+          "256"
+        ],
+        "log": "validation-bounds.log",
+        "sha256": "4ed3f6cab31b0406769e76bd44653443e2bdeb6043c66e34b8921152fa1560b4",
+        "status": 0,
+        "group": "bounds"
+      },
+      {
+        "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+        "args": [
+          "test",
+          "--no-dynamic-test-linking",
+          "--out",
+          "out-fused-check",
+          "--cache-path",
+          "cache-fused-check",
+          "--threads",
+          "4",
+          "--match-contract",
+          "(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest|DeepstateV1NativeETHInvariantTest)",
+          "--match-test",
+          "invariant_.*"
+        ],
+        "log": "validation-invariants.log",
+        "sha256": "722cba87fb56340c43a1f11eefda99db1fc82b2f16cd202a361b055dfa721544",
+        "status": 0,
+        "group": "invariants"
+      },
+      {
+        "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+        "args": [
+          "snapshot",
+          "--no-dynamic-test-linking",
+          "--out",
+          "out-fused-check",
+          "--cache-path",
+          "cache-fused-check",
+          "--threads",
+          "4",
+          "--isolate",
+          "--match-contract",
+          "(RadixMatchingEngine(Gas|HookGas|FeeGas)Test|DeepstateV1IntegratorFeeGasTest)",
+          "--snap",
+          ".gas-snapshot.solar"
+        ],
+        "log": "validation-release-snapshot.log",
+        "sha256": "ec93949dd467d211861fa2c21cfa559a3957300d9cea7eb7ff5acac7d10a6123",
+        "status": 0,
+        "group": "release-snapshot"
+      },
+      {
+        "command": "python3",
+        "args": [
+          "script/prove_protocol.py"
+        ],
+        "log": "validation-smt.log",
+        "sha256": "9d5987115f7a016129a54f102bd6cff7658aad4092b86bf92b92a3b5667a7a69",
+        "status": 0,
+        "group": "smt"
+      },
+      {
+        "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+        "args": [
+          "fmt",
+          "--check",
+          "src/DeepstateV1.sol",
+          "src/libraries/TickMath32.sol",
+          "src/interfaces/IHook.sol",
+          "test/FusedQuote.t.sol",
+          "test/QuoteMath.sol"
+        ],
+        "log": "validation-format.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "status": 0,
+        "group": "format"
+      }
+    ],
+    "compatibility": {
+      "publicAbiEqual": true,
+      "persistentStorageLayoutEqual": true,
+      "layout": {
+        "storage": [
+          {
+            "astId": 227,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "books",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_mapping(t_bytes32,t_struct(Book)1480_storage)"
+          },
+          {
+            "astId": 228,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "orderOf",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_mapping(t_bytes32,t_struct(OrderState)1476_storage)"
+          },
+          {
+            "astId": 258,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "_poolEpochAndHookFlags",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_mapping(t_bytes32,t_uint256)"
+          },
+          {
+            "astId": 259,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "poolHook",
+            "offset": 0,
+            "slot": "3",
+            "type": "t_mapping(t_bytes32,t_address)"
+          },
+          {
+            "astId": 260,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "_feeConfig",
+            "offset": 0,
+            "slot": "4",
+            "type": "t_uint256"
+          }
+        ],
+        "types": {
+          "t_address": {
+            "encoding": "inplace",
+            "label": "address",
+            "numberOfBytes": "20"
+          },
+          "t_bool": {
+            "encoding": "inplace",
+            "label": "bool",
+            "numberOfBytes": "1"
+          },
+          "t_bytes32": {
+            "encoding": "inplace",
+            "label": "bytes32",
+            "numberOfBytes": "32"
+          },
+          "t_mapping(t_bytes32,t_address)": {
+            "encoding": "mapping",
+            "key": "t_bytes32",
+            "label": "mapping(bytes32 => address)",
+            "numberOfBytes": "32",
+            "value": "t_address"
+          },
+          "t_mapping(t_bytes32,t_struct(Book)1480_storage)": {
+            "encoding": "mapping",
+            "key": "t_bytes32",
+            "label": "mapping(bytes32 => struct DeepstateV1.Book)",
+            "numberOfBytes": "32",
+            "value": "t_struct(Book)1480_storage"
+          },
+          "t_mapping(t_bytes32,t_struct(Branch)1475_storage)": {
+            "encoding": "mapping",
+            "key": "t_bytes32",
+            "label": "mapping(bytes32 => struct DeepstateV1.Branch)",
+            "numberOfBytes": "32",
+            "value": "t_struct(Branch)1475_storage"
+          },
+          "t_mapping(t_bytes32,t_struct(OrderState)1476_storage)": {
+            "encoding": "mapping",
+            "key": "t_bytes32",
+            "label": "mapping(bytes32 => struct DeepstateV1.OrderState)",
+            "numberOfBytes": "32",
+            "value": "t_struct(OrderState)1476_storage"
+          },
+          "t_mapping(t_bytes32,t_uint256)": {
+            "encoding": "mapping",
+            "key": "t_bytes32",
+            "label": "mapping(bytes32 => uint256)",
+            "numberOfBytes": "32",
+            "value": "t_uint256"
+          },
+          "t_struct(Book)1480_storage": {
+            "encoding": "inplace",
+            "label": "struct DeepstateV1.Book",
+            "numberOfBytes": "64",
+            "members": [
+              {
+                "astId": 281,
+                "contract": "src/DeepstateV1.sol:DeepstateV1",
+                "label": "nonceAndFlags",
+                "offset": 0,
+                "slot": "0",
+                "type": "t_uint256"
+              },
+              {
+                "astId": 282,
+                "contract": "src/DeepstateV1.sol:DeepstateV1",
+                "label": "tree",
+                "offset": 0,
+                "slot": "1",
+                "type": "t_mapping(t_bytes32,t_struct(Branch)1475_storage)"
+              }
+            ]
+          },
+          "t_struct(Branch)1475_storage": {
+            "encoding": "inplace",
+            "label": "struct DeepstateV1.Branch",
+            "numberOfBytes": "96",
+            "members": [
+              {
+                "astId": 261,
+                "contract": "src/DeepstateV1.sol:DeepstateV1",
+                "label": "leftNode",
+                "offset": 0,
+                "slot": "0",
+                "type": "t_bytes32"
+              },
+              {
+                "astId": 262,
+                "contract": "src/DeepstateV1.sol:DeepstateV1",
+                "label": "rightNode",
+                "offset": 0,
+                "slot": "1",
+                "type": "t_bytes32"
+              },
+              {
+                "astId": 263,
+                "contract": "src/DeepstateV1.sol:DeepstateV1",
+                "label": "quoteTotal",
+                "offset": 0,
+                "slot": "2",
+                "type": "t_uint256"
+              }
+            ]
+          },
+          "t_struct(OrderState)1476_storage": {
+            "encoding": "inplace",
+            "label": "struct DeepstateV1.OrderState",
+            "numberOfBytes": "32",
+            "members": [
+              {
+                "astId": 264,
+                "contract": "src/DeepstateV1.sol:DeepstateV1",
+                "label": "owner",
+                "offset": 0,
+                "slot": "0",
+                "type": "t_address"
+              },
+              {
+                "astId": 265,
+                "contract": "src/DeepstateV1.sol:DeepstateV1",
+                "label": "isBid",
+                "offset": 20,
+                "slot": "0",
+                "type": "t_bool"
+              }
+            ]
+          },
+          "t_uint256": {
+            "encoding": "inplace",
+            "label": "uint256",
+            "numberOfBytes": "32"
+          }
+        }
+      }
+    }
+  },
+  "fingerprints": {
+    "raw/baseline-release.log": "944f6a31b073f8cbf6adb13ca5805ebbd12ef6eb23d6d173116c8faae7589279",
+    "raw/baseline-release.snapshot": "786e198eabbf87f848d96e6e1fe01f8b045027563729e1640e81c0c92b4dd865",
+    "raw/baseline-insertion.log": "914966a7a496225f7de0e52b0e643df53332dbbabdd14e31823501bcd29127af",
+    "raw/baseline-insertion.snapshot": "309985fa14e0c121daebc86559f16d0d0b2d571d75e7f1ec5b33fe6fe489c974",
+    "raw/baseline-production.log": "0637c1ceec59d966d686db50c59d4cb030f63b881a6d2fd44dcbe2faf54dbc0a",
+    "raw/baseline-production.snapshot": "407f5b35d93b9e9602b175d97b2f4665b42320e31bb8a4baf5e9ab528e5a52ba",
+    "raw/candidate-production.log": "a499845a02ce242b5a983851416576d83fe58756d03fe57ce0b73bb841dea262",
+    "raw/candidate-production.snapshot": "ae2a1bb9b7179dc4f44449ca4286d79b969f88508c7bd2fc62ddb099b929b16a",
+    "raw/candidate-insertion.log": "97eb45b6edbc675babff5beb8d7b2d2ca03a785f636691508903ed9e798700b9",
+    "raw/candidate-insertion.snapshot": "309985fa14e0c121daebc86559f16d0d0b2d571d75e7f1ec5b33fe6fe489c974",
+    "raw/candidate-release.log": "92575e753dfa40e13f7eacebbea593a4d6573abbd5b25d95b51d7e4dfe9d9ffb",
+    "raw/candidate-release.snapshot": "4b91e204f813ab2b2d2be24ab75b9cb3ad77dbd1422147ac4e65e8aae98b3958",
+    "raw/validation-focused.log": "aec23ff019f10a8238fa10264483090e16eddc4773ca4044eccfd8fbbdf454c8",
+    "raw/validation-behavior.log": "a13b8421c794cdd2ed3811ad2cc20e0a4475218aa358cf258c1095459d4fb4e2",
+    "raw/validation-bounds.log": "4ed3f6cab31b0406769e76bd44653443e2bdeb6043c66e34b8921152fa1560b4",
+    "raw/validation-invariants.log": "722cba87fb56340c43a1f11eefda99db1fc82b2f16cd202a361b055dfa721544",
+    "raw/validation-release-snapshot.log": "ec93949dd467d211861fa2c21cfa559a3957300d9cea7eb7ff5acac7d10a6123",
+    "raw/validation-smt.log": "9d5987115f7a016129a54f102bd6cff7658aad4092b86bf92b92a3b5667a7a69",
+    "raw/validation-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw/DeepstateV1.sol.txt": "b85ad09b308c69cb9ba2b309ce0f15dbaee8b0e5d51087650f7cff0a918e796f",
+    "raw/TickMath32.sol.txt": "c5402a448c54e8f63314c40ff9e394abac34bd51ba6f098306842c53077f874f",
+    "raw/IHook.sol.txt": "f8b398822f45bf4dbcf270df93a4215e5a28cb031ea5ec62bd1b08e7ff713691",
+    "raw/FusedQuote.t.sol.txt": "397588d92201b56acf054e922867786425f4756a2ab9a4fea00cea7cd4540d2e",
+    "raw/QuoteMath.sol.txt": "82a0dc7acd912466c57e91a4ecb4bf970e8a2275f131ef24a327b434f03d59fa",
+    "raw/prove_protocol.py.txt": "5552f3ff876aed13d352a683fb1fc6b3c0b37166843a64c18bddf2c0263fca04",
+    "raw/baseline.sol.txt": "b0aefaca2ec79252222720e1472297800affce1c804cdcaf6beb5d5b0b051550",
+    "raw/candidate.sol.txt": "b85ad09b308c69cb9ba2b309ce0f15dbaee8b0e5d51087650f7cff0a918e796f",
+    "GAS_TABLES.md": "91d150d54fcfabbcd98131a490822cd9e94250b0b60cb8ac14d8aa25d7c67110",
+    "GAS_DELTAS.csv": "7ac756800ff93c83fd2aa63e84474da779391c4c05e819b79fe2ef5a84bc0f06",
+    "summary.json": "7acf02f4e1df753e077697eac26cd323577d13c31ac340e88720f72b317f2e4b",
+    "raw/measurement.json": "8e522940a4196b21c070be2a763d6909665db6451a1dd2d09fe590dba629c9c7",
+    "raw/validation.json": "2bba1f0d3e597d15a22ceac680478fac3fae79b856779eaca5422ead370a50fc",
+    "raw/ProductionCategories.t.sol.txt": "62066e98fe58b2fb9e539e3efab721706f76fa89f8f7732786acd8721bd16ec7",
+    "raw/open-snapshot.json": "66b1e2ec52f200c293e3de100459edf803db963da26cde6ddf1912b59afbbb34",
+    "raw/fused-only.patch": "02c0f67fb2c385144285614c4244ff43ccf291c3f0893af4b58f91a1670044c5"
+  }
+}
