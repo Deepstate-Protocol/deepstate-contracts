@@ -110,4 +110,4 @@ case,master_bf18c54,before_fb144e9,after,delta_vs_master,percent_vs_master,delta
 "WorstCaseGasProbe:testWorst_MixedSweep4096()",35572680,36748047,98975,-35473705,-99.7218,-36649072,-99.7307,97606
 "WorstCaseGasProbe:testWorst_MixedSweep4096RestBurningHooksAndFees()",36063805,37239303,616585,-35447220,-98.2903,-36622718,-98.3443,613787
 "WorstCaseGasProbe:testWorst_MixedSweep64()",648460,666643,98675,-549785,-84.7832,-567968,-85.1982,97306
-"WorstCaseGasProbe:testWorst_OneMillionGasBudgetRevertsAtomically()",1009180,1009180,98339,-910841,-90.2556,-910841,-90.2556,96970
+"WorstCaseGasProbe:testWorst_OneMillionGasBudgetRevertsAtomically()",1009180,1009180,98339,,,,,96970

@@ -1,0 +1,129 @@
+{
+  "fixtures": {
+    "src/DeepstateV1.sol": "b05662e0d6bb55ecf655c3c89cc90d1ab09d464915a24719808be07e3fe5ba5c",
+    "test/RadixMatchingEngineGas.t.sol": "0a77af8daa0f0da3f621352c353b749e527c238579e64a9ef4a76fa132fa3a1a",
+    "test/RadixMatchingEngineAccessList.t.sol": "06ad7878f87ccbfddfcf393fc420bacfe92264102a6235185d9bf285922ae505"
+  },
+  "runs": [
+    {
+      "label": "solc-master-access",
+      "compiler": "solc",
+      "version": "master",
+      "cases": 6,
+      "log": "solc-master-access.log",
+      "logSha256": "030ba10fc047b56b78c828fd2ad7f15a117d2f61efe721816bc92806a7216a0b",
+      "runtimeSha256": "d7d32f341ec3d0eeb03fcc9cb28418db13a9d2aa67948fd99254b698c2b7d289",
+      "command": [
+        "forge@d3167db",
+        "test",
+        "--match-contract",
+        "^RadixMatchingEngineAccessListBenchmark$",
+        "--match-test",
+        "^testBenchmark_",
+        "--threads",
+        "2",
+        "-vv"
+      ]
+    },
+    {
+      "label": "solc-before-access",
+      "compiler": "solc",
+      "version": "before",
+      "cases": 6,
+      "log": "solc-before-access.log",
+      "logSha256": "085aae16ba5b078932794fab0c3ef96d19abd7c31fc84a1a72ad5eb4bcf08f39",
+      "runtimeSha256": "b609d58b64c3606f11255bfeef98dc715851b3ba44fe495441767f62284ab69f",
+      "command": [
+        "forge@d3167db",
+        "test",
+        "--match-contract",
+        "^RadixMatchingEngineAccessListBenchmark$",
+        "--match-test",
+        "^testBenchmark_",
+        "--threads",
+        "2",
+        "-vv"
+      ]
+    },
+    {
+      "label": "solc-after-access",
+      "compiler": "solc",
+      "version": "after",
+      "cases": 6,
+      "log": "solc-after-access.log",
+      "logSha256": "80d9e6076b857bb01a9462b83848081c4b1db74f415952d664f7ef17b7f7f12d",
+      "runtimeSha256": "adabf6b35cb280ad4314ef815f6810f9dd7ea1b3ecca054b5f53a5a4d09ded72",
+      "command": [
+        "forge@d3167db",
+        "test",
+        "--match-contract",
+        "^RadixMatchingEngineAccessListBenchmark$",
+        "--match-test",
+        "^testBenchmark_",
+        "--threads",
+        "2",
+        "-vv"
+      ]
+    },
+    {
+      "label": "solar-master-access",
+      "compiler": "solar",
+      "version": "master",
+      "cases": 6,
+      "log": "solar-master-access.log",
+      "logSha256": "c62b8e97c7e11134d34d970e08f92f9cbfdc7da6665ccd2d54de3e5279145e81",
+      "runtimeSha256": "87e4e17a4eb6cfe500ff860f871f9616f334a9e75245ed03872e2731856b9e92",
+      "command": [
+        "forge@d3167db",
+        "test",
+        "--match-contract",
+        "^RadixMatchingEngineAccessListBenchmark$",
+        "--match-test",
+        "^testBenchmark_",
+        "--threads",
+        "2",
+        "-vv"
+      ]
+    },
+    {
+      "label": "solar-before-access",
+      "compiler": "solar",
+      "version": "before",
+      "cases": 6,
+      "log": "solar-before-access.log",
+      "logSha256": "4dea5116c2654e937140728a9aa096eed3bb82700c4caf434cbb6118815ee8be",
+      "runtimeSha256": "9bef72d135276d967f534bde8adc44435b7577e2bc1c4db9efffccf19bf61c35",
+      "command": [
+        "forge@d3167db",
+        "test",
+        "--match-contract",
+        "^RadixMatchingEngineAccessListBenchmark$",
+        "--match-test",
+        "^testBenchmark_",
+        "--threads",
+        "2",
+        "-vv"
+      ]
+    },
+    {
+      "label": "solar-after-access",
+      "compiler": "solar",
+      "version": "after",
+      "cases": 6,
+      "log": "solar-after-access.log",
+      "logSha256": "e4f92d4ec6a3772fb4ebd33db00a25bf26672b740bfa459b592f27ae654b4503",
+      "runtimeSha256": "0d39790407a998a8f6e4881e68c81116633ed87422e5685f23936ab7c4bc78a3",
+      "command": [
+        "forge@d3167db",
+        "test",
+        "--match-contract",
+        "^RadixMatchingEngineAccessListBenchmark$",
+        "--match-test",
+        "^testBenchmark_",
+        "--threads",
+        "2",
+        "-vv"
+      ]
+    }
+  ]
+}

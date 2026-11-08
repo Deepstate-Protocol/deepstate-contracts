@@ -1,0 +1,6 @@
+RadixMatchingEngineGasTest:testGas_LargeRandomBookAskMatchesOneBid() (gas: 190327)
+RadixMatchingEngineGasTest:testGas_LargeRandomBookBidMatchesOneAsk() (gas: 241240)
+RadixMatchingEngineGasTest:testGas_LargeRandomBookPartialFillsAsk() (gas: 253347)
+RadixMatchingEngineGasTest:testGas_LargeRandomBookPartialFillsBid() (gas: 202848)
+RadixMatchingEngineGasTest:testGas_LargeRandomBookRestsAsk() (gas: 259192)
+RadixMatchingEngineGasTest:testGas_LargeRandomBookRestsBid() (gas: 256021)

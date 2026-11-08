@@ -66,8 +66,8 @@ it cannot be substituted into populated legacy storage without rebuilding every 
 The public action/hook ABI is unchanged, but full mixed sweeps now emit an existing subtree-summary
 event where the previous matcher could emit individual match events.
 
-See [the bounded-traversal comparison](docs/BOUNDED_TRAVERSAL_GAS.md) for controlled master/before/after
-gas measurements, including the additional cost of maintaining exact deep summaries.
+See [the full gas workup](docs/FULL_GAS_WORKUP.md) for every release benchmark, master/before/after
+and Solar comparisons, populated-book regressions, and access-list studies.
 
 Resting order nonces start at `type(uint32).max` and decrement by one. Branch nonces start at one and
 increment by one. A book epoch remains restable only while the next order identity is above the next

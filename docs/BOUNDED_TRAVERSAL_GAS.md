@@ -1,5 +1,10 @@
 # Bounded Traversal Gas Comparison
 
+The [full 200-test workup](FULL_GAS_WORKUP.md) supersedes this selected-case report and includes
+the large-book cases, complete Solar matrices, and access-list studies. This earlier report uses a
+different frozen harness; do not mix its absolute gas columns with the full workup. The capped-gas
+row in the companion CSV is a failure/success check, so its percentage deltas are now left blank.
+
 ## Method
 
 - Master: `bf18c54b13123de5ecc3e05dcff6822436e0cd27`.

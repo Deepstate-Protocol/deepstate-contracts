@@ -1,0 +1,101 @@
+Warning: This is a nightly build of Foundry. It is recommended to use the latest stable version. To mute this warning set `FOUNDRY_DISABLE_NIGHTLY_WARNING` in your environment. 
+
+Compiling 28 files with Solc 0.8.28
+Solc 0.8.28 finished in 106.26s
+Compiler run successful with warnings:
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> src/DeepstateV1.sol:447:99:
+    |
+447 |     function _removeOrderFromBook(Book storage book, bytes32 order, bool isBid, bool hookEnabled, uint256 nonceAndFlags)
+    |                                                                                                   ^^^^^^^^^^^^^^^^^^^^^
+
+2026-11-07T23:57:55.430439Z  WARN evm::traces::external: etherscan config not found
+
+Ran 6 tests for test/RadixMatchingEngineAccessList.t.sol:RadixMatchingEngineAccessListBenchmark
+[PASS] testBenchmark_FillAskConsumesDirtySamePriceBidSubtree() (gas: 2453093)
+Logs:
+  FillAskConsumesDirtySamePriceBidSubtree
+  engine keys: 13
+  base keys: 3
+  quote keys: 2
+  total keys: 18
+  cold execution: 60963
+  warm execution: 24950
+  execution-only saving: 36013
+  access-list intrinsic: 41400
+  warm plus intrinsic: 66350
+  transaction-net saving: -5387
+
+[PASS] testBenchmark_FillAskConsumesFullDepthBidComb() (gas: 14543561)
+Logs:
+  FillAskConsumesFullDepthBidComb
+  engine keys: 100
+  base keys: 3
+  quote keys: 2
+  total keys: 105
+  cold execution: 303952
+  warm execution: 159928
+  execution-only saving: 144024
+  access-list intrinsic: 206700
+  warm plus intrinsic: 366628
+  transaction-net saving: -62676
+
+[PASS] testBenchmark_FillBidConsumesAskAndRestsRemainder() (gas: 416190)
+Logs:
+  FillBidConsumesAskAndRestsRemainder
+  engine keys: 6
+  base keys: 2
+  quote keys: 3
+  total keys: 11
+  cold execution: 112255
+  warm execution: 101745
+  execution-only saving: 10510
+  access-list intrinsic: 28100
+  warm plus intrinsic: 129845
+  transaction-net saving: -17590
+
+[PASS] testBenchmark_FillBidConsumesDirtySamePriceAskSubtree() (gas: 2433425)
+Logs:
+  FillBidConsumesDirtySamePriceAskSubtree
+  engine keys: 13
+  base keys: 2
+  quote keys: 3
+  total keys: 18
+  cold execution: 61005
+  warm execution: 24992
+  execution-only saving: 36013
+  access-list intrinsic: 41400
+  warm plus intrinsic: 66392
+  transaction-net saving: -5387
+
+[PASS] testBenchmark_FillBidConsumesMaxValidDepthAskComb() (gas: 80017588)
+Logs:
+  FillBidConsumesMaxValidDepthAskComb
+  engine keys: 100
+  base keys: 2
+  quote keys: 3
+  total keys: 105
+  cold execution: 299889
+  warm execution: 155865
+  execution-only saving: 144024
+  access-list intrinsic: 206700
+  warm plus intrinsic: 362565
+  transaction-net saving: -62676
+
+[PASS] testBenchmark_FillBidConsumesSamePriceAskSubtree() (gas: 2389936)
+Logs:
+  FillBidConsumesSamePriceAskSubtree
+  engine keys: 4
+  base keys: 2
+  quote keys: 3
+  total keys: 9
+  cold execution: 62120
+  warm execution: 49608
+  execution-only saving: 12512
+  access-list intrinsic: 24300
+  warm plus intrinsic: 73908
+  transaction-net saving: -11788
+
+Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 56.13ms (100.23ms CPU time)
+
+Ran 1 test suite in 419.79ms (56.13ms CPU time): 6 tests passed, 0 failed, 0 skipped (6 total tests)

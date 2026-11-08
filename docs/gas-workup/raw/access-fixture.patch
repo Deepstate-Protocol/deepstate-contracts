@@ -1,0 +1,41 @@
+diff --git a/test/RadixMatchingEngineGas.t.sol b/test/RadixMatchingEngineGas.t.sol
+index 1b45577..60f6848 100644
+--- a/test/RadixMatchingEngineGas.t.sol
++++ b/test/RadixMatchingEngineGas.t.sol
+@@ -62,6 +62,7 @@ contract RadixMatchingEngineGasTest is Test {
+             quote = tokenA;
+         }
+         engine = new DeepstateV1();
++        vm.etch(address(engine), vm.envBytes("VARIANT_BYTECODE"));
+ 
+         _fundAndApprove(alice);
+         _fundAndApprove(bob);
+@@ -970,6 +971,7 @@ contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
+     function setUp() public {
+         usdc = new GasTestERC20();
+         engine = new DeepstateV1();
++        vm.etch(address(engine), vm.envBytes("VARIANT_BYTECODE"));
+ 
+         usdc.mint(HOT_WALLET, uint256(1) << 220);
+         usdc.mint(LIQUIDITY_PROVIDER, uint256(1) << 220);
+@@ -1124,7 +1126,11 @@ contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
+ 
+         vm.prank(TAKER);
+         _fillAskNoRest(targetTick, 1);
+-        assertEq(_nonceAndFlags() & BID_RIGHT_SPINE_DIRTY, 0, "summaries remain exact");
++        if (vm.envBool("EXACT_SUMMARIES")) {
++            assertEq(_nonceAndFlags() & BID_RIGHT_SPINE_DIRTY, 0, "summaries remain exact");
++        } else {
++            assertTrue(_nonceAndFlags() & BID_RIGHT_SPINE_DIRTY != 0, "legacy summary flag");
++        }
+     }
+ 
+     function _fillObservedOrderThreeTimes() internal {
+@@ -1244,6 +1250,7 @@ contract DeepstateV1IntegratorFeeGasTest is Test {
+         GasTestERC20 tokenB = new GasTestERC20();
+         (token0, token1) = address(tokenA) < address(tokenB) ? (tokenA, tokenB) : (tokenB, tokenA);
+         engine = new DeepstateV1();
++        vm.etch(address(engine), vm.envBytes("VARIANT_BYTECODE"));
+         _fundAndApprove(MAKER);
+         _fundAndApprove(TAKER);
+     }

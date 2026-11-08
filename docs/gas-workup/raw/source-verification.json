@@ -1,0 +1,161 @@
+[
+  {
+    "name": "master",
+    "compiler": "solc",
+    "ref": "bf18c54b13123de5ecc3e05dcff6822436e0cd27",
+    "source": "src/DeepstateV1.sol",
+    "keccak256": "0x8ef3e431ca95b9876b42ab19791a5cc7fc486ee3d365f3ce31c24e6d634b89f6",
+    "compilerVersion": "0.8.28+commit.7893614a",
+    "settings": {
+      "remappings": [
+        "forge-std/=/private/tmp/deepstate-solar-gas-20261107/contracts/lib/forge-std/src/",
+        "solady/=/private/tmp/deepstate-solar-gas-20261107/contracts/lib/solady/src/"
+      ],
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "metadata": {
+        "bytecodeHash": "ipfs"
+      },
+      "compilationTarget": {
+        "src/DeepstateV1.sol": "DeepstateV1"
+      },
+      "evmVersion": "cancun",
+      "libraries": {},
+      "viaIR": true
+    }
+  },
+  {
+    "name": "master",
+    "compiler": "solar",
+    "ref": "bf18c54b13123de5ecc3e05dcff6822436e0cd27",
+    "source": "src/DeepstateV1.sol",
+    "keccak256": "0x8ef3e431ca95b9876b42ab19791a5cc7fc486ee3d365f3ce31c24e6d634b89f6",
+    "compilerVersion": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+    "settings": {
+      "remappings": [
+        "forge-std/=lib/forge-std/src/",
+        "solady/=lib/solady/src/"
+      ],
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "metadata": {
+        "bytecodeHash": "ipfs"
+      },
+      "compilationTarget": {
+        "src/DeepstateV1.sol": "DeepstateV1"
+      },
+      "evmVersion": "cancun",
+      "libraries": {}
+    }
+  },
+  {
+    "name": "before",
+    "compiler": "solc",
+    "ref": "fb144e9e7dc7c9e452efc2b22ced86b811124e13",
+    "source": "src/DeepstateV1.sol",
+    "keccak256": "0x2ca04a21444f2493d94b5148937ff1f207a68ec5292bc56bce18110c570ef329",
+    "compilerVersion": "0.8.28+commit.7893614a",
+    "settings": {
+      "remappings": [
+        "forge-std/=/private/tmp/deepstate-solar-gas-20261107/contracts/lib/forge-std/src/",
+        "solady/=/private/tmp/deepstate-solar-gas-20261107/contracts/lib/solady/src/"
+      ],
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "metadata": {
+        "bytecodeHash": "ipfs"
+      },
+      "compilationTarget": {
+        "src/DeepstateV1.sol": "DeepstateV1"
+      },
+      "evmVersion": "cancun",
+      "libraries": {},
+      "viaIR": true
+    }
+  },
+  {
+    "name": "before",
+    "compiler": "solar",
+    "ref": "fb144e9e7dc7c9e452efc2b22ced86b811124e13",
+    "source": "src/DeepstateV1.sol",
+    "keccak256": "0x2ca04a21444f2493d94b5148937ff1f207a68ec5292bc56bce18110c570ef329",
+    "compilerVersion": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+    "settings": {
+      "remappings": [
+        "forge-std/=lib/forge-std/src/",
+        "solady/=lib/solady/src/"
+      ],
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "metadata": {
+        "bytecodeHash": "ipfs"
+      },
+      "compilationTarget": {
+        "src/DeepstateV1.sol": "DeepstateV1"
+      },
+      "evmVersion": "cancun",
+      "libraries": {}
+    }
+  },
+  {
+    "name": "after",
+    "compiler": "solc",
+    "ref": "096eab28d87debdd472b4e22e65820e2b1b8d523",
+    "source": "src/DeepstateV1.sol",
+    "keccak256": "0x0b10da030922b3182590f1f48cf5a50fcbdfb2eb689833f119476f1a7e64f34f",
+    "compilerVersion": "0.8.28+commit.7893614a",
+    "settings": {
+      "remappings": [
+        "forge-std/=lib/forge-std/src/",
+        "solady/=lib/solady/src/"
+      ],
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "metadata": {
+        "bytecodeHash": "ipfs"
+      },
+      "compilationTarget": {
+        "src/DeepstateV1.sol": "DeepstateV1"
+      },
+      "evmVersion": "cancun",
+      "libraries": {},
+      "viaIR": true
+    }
+  },
+  {
+    "name": "after",
+    "compiler": "solar",
+    "ref": "096eab28d87debdd472b4e22e65820e2b1b8d523",
+    "source": "src/DeepstateV1.sol",
+    "keccak256": "0x0b10da030922b3182590f1f48cf5a50fcbdfb2eb689833f119476f1a7e64f34f",
+    "compilerVersion": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+    "settings": {
+      "remappings": [
+        "forge-std/=lib/forge-std/src/",
+        "solady/=lib/solady/src/"
+      ],
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "metadata": {
+        "bytecodeHash": "ipfs"
+      },
+      "compilationTarget": {
+        "src/DeepstateV1.sol": "DeepstateV1"
+      },
+      "evmVersion": "cancun",
+      "libraries": {}
+    }
+  }
+]
