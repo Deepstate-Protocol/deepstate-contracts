@@ -1,0 +1,426 @@
+Compiling 38 files with Solar 0.8.28
+Solar 0.8.28 finished in 1.28s
+Compiler run successful with warnings:
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/interfaces/IHook.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/libraries/TickMath32.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/DeepstateV1.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ script/DeepstateV1.s.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ test/QuoteMath.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ test/DeepstateV1Script.t.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ test/SinglePairEngineHarness.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ test/RadixMatchingEngineCoverage.t.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ test/RadixMatchingEngineFormal.t.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ test/TickMath32.t.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[2018]: function state mutability can be restricted to pure
+    ╭▸ src/DeepstateV1.sol:641:5
+    │
+641 │ ┏     function _matchAskLeaf(bytes32 root, int32 limitPrice, uint160 remaining, MatchTopState memory topState)
+642 │ ┃         private
+643 │ ┃         returns (bytes32 newRoot, uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
+    ‡ ┃
+669 │ ┃     }
+    ╰╴┗━━━━━┛
+
+
+warning[2018]: function state mutability can be restricted to pure
+    ╭▸ src/DeepstateV1.sol:679:5
+    │
+679 │ ┏     function _matchBidLeaf(bytes32 root, int32 limitPrice, uint160 remaining, MatchTopState memory topState)
+680 │ ┃         private
+681 │ ┃         returns (bytes32 newRoot, uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
+    ‡ ┃
+707 │ ┃     }
+    ╰╴┗━━━━━┛
+
+
+
+Ran 9 tests for test/RadixMatchingEngineFormal.t.sol:AccountingAlgebraFormalTest
+[PASS] testFuzz_DifferentialQuoteLimbReconstruction(uint256,uint256,uint8) (runs: 256, μ: 3410, ~: 3410)
+[PASS] testFuzz_FormalAskCorrectionIsExact(uint256,uint256,uint8) (runs: 256, μ: 3117, ~: 3117)
+[PASS] testFuzz_FormalBidCorrectionIsExact(uint256,uint256,uint8) (runs: 256, μ: 3227, ~: 3227)
+[PASS] testFuzz_FormalCorrectionCodeCapacity(uint32,uint32,uint32,uint32,bool) (runs: 256, μ: 3602, ~: 3602)
+[PASS] testFuzz_FormalQuoteLimbReconstructionAtMaxShift(uint256,uint256) (runs: 256, μ: 3227, ~: 3227)
+[PASS] testFuzz_FormalQuoteLimbReconstructionAtMidShift(uint256,uint256) (runs: 256, μ: 3184, ~: 3184)
+[PASS] testFuzz_FormalQuoteLimbReconstructionAtMinShift(uint256,uint256) (runs: 256, μ: 3140, ~: 3140)
+[PASS] testFuzz_FormalQuoteRemainderBound(uint256,uint8) (runs: 256, μ: 3007, ~: 3007)
+[PASS] testFuzz_FormalTickDecompositionBounds(int32) (runs: 256, μ: 513, ~: 496)
+Suite result: ok. 9 passed; 0 failed; 0 skipped; finished in 68.52ms (68.05ms CPU time)
+
+Ran 12 tests for test/RadixMatchingEngineFormal.t.sol:QuoteArithmeticFormalTest
+[PASS] testFuzz_DifferentialQuoteAtLargePositiveTickDown(uint160) (runs: 256, μ: 2454, ~: 2490)
+[PASS] testFuzz_DifferentialQuoteAtLargePositiveTickUp(uint160) (runs: 256, μ: 2477, ~: 2513)
+[PASS] testFuzz_DifferentialQuoteBelowZeroDown(uint160) (runs: 256, μ: 1804, ~: 1828)
+[PASS] testFuzz_DifferentialQuoteBelowZeroUp(uint160) (runs: 256, μ: 1827, ~: 1851)
+[PASS] testFuzz_FormalQuoteAboveMinTick(uint160,bool) (runs: 256, μ: 1874, ~: 1906)
+[PASS] testFuzz_FormalQuoteAboveZero(uint160,bool) (runs: 256, μ: 1871, ~: 1903)
+[PASS] testFuzz_FormalQuoteAtLargeNegativeTick(uint160,bool) (runs: 256, μ: 2548, ~: 2592)
+[PASS] testFuzz_FormalQuoteAtMaxTickDown(uint160) (runs: 256, μ: 1802, ~: 1826)
+[PASS] testFuzz_FormalQuoteAtMaxTickUp(uint160) (runs: 256, μ: 1781, ~: 1805)
+[PASS] testFuzz_FormalQuoteAtMinTick(uint160,bool) (runs: 256, μ: 1777, ~: 1805)
+[PASS] testFuzz_FormalQuoteAtZero(uint160,bool) (runs: 256, μ: 356, ~: 357)
+[PASS] testFuzz_FormalQuoteBelowMaxTick(uint160,bool) (runs: 256, μ: 1872, ~: 1897)
+Suite result: ok. 12 passed; 0 failed; 0 skipped; finished in 71.94ms (71.46ms CPU time)
+
+Ran 16 tests for test/ProductionReadinessRepro.t.sol:ProductionReadinessReproTest
+[PASS] testFuzz_AllTicksAskPartialFillAndCancelTelescopes(int32,uint128,uint128) (runs: 256, μ: 375661, ~: 383069)
+[PASS] testFuzz_AllTicksBidPartialFillAndCancelTelescopes(int32,uint128,uint128) (runs: 256, μ: 416912, ~: 419274)
+[PASS] test_EmptyDirtyBidSideCannotAliasAskRootOnNextRest() (gas: 806268)
+[PASS] test_EmptySideMaterializationNeverTraversesSharedRootAnchor() (gas: 289938)
+[PASS] test_MatchedQuotePlusRestingCollateralAboveSignedRangeRevertsAtomically() (gas: 283877)
+[PASS] test_MaxTickLargeAskCanRestInsideSignedRange() (gas: 206624)
+[PASS] test_MaxTickLargeBidCanRestInsideSignedRange() (gas: 212009)
+[PASS] test_MaxTickMixedAskSubtreeFillsBelowSignedBoundary() (gas: 479863)
+[PASS] test_MaxTickMixedBidSubtreeFillsBelowSignedBoundary() (gas: 481079)
+[PASS] test_MaxTickPartialFillAndCancelUsesFullWidthDifference() (gas: 372271)
+[PASS] test_MinTickMaxQuantityAskPartialFillAndCancelTelescopes() (gas: 382717)
+[PASS] test_MinTickMaxQuantityBidRestsAndCancelsExactCollateral() (gas: 272672)
+[PASS] test_MixedAskAggregateAboveSignedDebitRangeReverts() (gas: 635086)
+[PASS] test_MixedBidAggregateAboveSignedCreditRangeReverts() (gas: 604043)
+[PASS] test_RestingAskQuoteAboveSignedRangeReverts() (gas: 82873)
+[PASS] test_RestingQuoteAboveSignedRangeReverts() (gas: 46365)
+Suite result: ok. 16 passed; 0 failed; 0 skipped; finished in 184.23ms (182.37ms CPU time)
+
+Ran 2 tests for test/RadixMatchingEngineFormal.t.sol:DeepstateV1EpochFormalTest
+[PASS] testFuzz_FormalHistoricalAskNeverRestsRemainder(bool,bool) (runs: 256, μ: 429596, ~: 423576)
+[PASS] testFuzz_FormalHistoricalBidNeverRestsRemainder(bool,bool) (runs: 256, μ: 429166, ~: 422924)
+Suite result: ok. 2 passed; 0 failed; 0 skipped; finished in 159.07ms (157.87ms CPU time)
+
+Ran 4 tests for test/RadixMatchingEngineFormal.t.sol:NativeAccountingFormalTest
+[PASS] testFuzz_FormalNativeAskFillAndRestPreserveSolvency(uint8,uint8) (runs: 256, μ: 289272, ~: 263170)
+[PASS] testFuzz_FormalNativeBidFillPreservesSolvency(uint8,uint8) (runs: 256, μ: 323402, ~: 329083)
+[PASS] testFuzz_NativeAskWithBothFeesPreservesSolvency(uint8,uint8,uint8) (runs: 256, μ: 350427, ~: 362342)
+[PASS] testFuzz_NativeBidWithBothFeesPreservesSolvency(uint8,uint8,uint8) (runs: 256, μ: 338416, ~: 354860)
+Suite result: ok. 4 passed; 0 failed; 0 skipped; finished in 316.44ms (315.79ms CPU time)
+
+Ran 115 tests for test/RadixMatchingEngine.t.sol:RadixMatchingEngineTest
+[PASS] testFuzz_CancelUnknownOrderDoesNotMutate(int32,uint160,uint32,address) (runs: 256, μ: 122848, ~: 122830)
+[PASS] testFuzz_CancelZeroQuantityDoesNotMutate(int32,uint32,address) (runs: 256, μ: 122705, ~: 122707)
+[PASS] testFuzz_InvalidFillDoesNotMutate(bytes32,bool) (runs: 256, μ: 138129, ~: 138221)
+[PASS] test_AddressOneAndTwoCannotClaimForOriginalOwner() (gas: 744139)
+[PASS] test_AddressOneAndTwoOwnersCanCancelUnfilledOrders() (gas: 879553)
+[PASS] test_AddressOneAndTwoOwnersCanClaimFilledOrders() (gas: 988204)
+[PASS] test_AskBranchQuantityOverflowRevertsWithoutMutatingBook() (gas: 281982)
+[PASS] test_AskConsumesBestBidThenExactMixedPriceOffSpineSubtree() (gas: 1080938)
+[PASS] test_AskConsumesBestBidThenExactSamePriceOffSpineSubtree() (gas: 1089163)
+[PASS] test_AskExactRightSpineSurvivesBidRestAndRemainsExactBeforeAskInsert() (gas: 1255882)
+[PASS] test_AskFullMatchSucceedsWhenNonceExhausted() (gas: 412770)
+[PASS] test_AskInsertPreservesChildBranchWhenItReusesParentAddress() (gas: 705475)
+[PASS] test_AskMatchEventsFollowBidPricePriority() (gas: 460815)
+[PASS] test_AskMatchRevertsAtomicallyWhenBasePullFails() (gas: 491204)
+[PASS] test_AskPartiallyConsumesOffSpineBidSubtreeRecursively() (gas: 1058699)
+[PASS] test_AskPartiallyFillsBestBid() (gas: 367674)
+[PASS] test_AskPricePrefixCombFullyMatchesAndClaims() (gas: 13691940)
+[PASS] test_AskRemainderFromExhaustedBookIsAutomaticallyNoRest() (gas: 392437)
+[PASS] test_AskStopsInsideOffSpineBidSubtreeWhenNextBidDoesNotCross() (gas: 1219761)
+[PASS] test_BidAndAskBranchesCoexistInSingleMapping() (gas: 703136)
+[PASS] test_BidConsumesAskAndRestsRemainder() (gas: 485235)
+[PASS] test_BidConsumesBestAskThenExactMixedPriceOffSpineSubtree() (gas: 1027745)
+[PASS] test_BidConsumesBestAskThenExactSamePriceOffSpineSubtree() (gas: 1078114)
+[PASS] test_BidExactRightSpineSurvivesAskRestAndRemainsExactBeforeBidInsert() (gas: 1265437)
+[PASS] test_BidFullMatchSucceedsWhenNonceExhausted() (gas: 414263)
+[PASS] test_BidMatchEventsFollowAskPricePriority() (gas: 460395)
+[PASS] test_BidMatchRevertsAtomicallyWhenQuotePullFails() (gas: 489090)
+[PASS] test_BidMatchingStopsWhenNextBestAskDoesNotCross() (gas: 698208)
+[PASS] test_BidPartiallyConsumesOffSpineAskSubtreeRecursively() (gas: 1068847)
+[PASS] test_BidPartiallyFillsBestAsk() (gas: 360605)
+[PASS] test_BidRemainderFromExhaustedBookIsAutomaticallyNoRest() (gas: 392582)
+[PASS] test_BidRestMatchClaimAndCancelEvents() (gas: 514954)
+[PASS] test_BidRestsAndCancels() (gas: 266361)
+[PASS] test_BidStopsInsideOffSpineAskSubtreeWhenNextAskDoesNotCross() (gas: 1219030)
+[PASS] test_BranchQuantityOverflowRevertsWithoutMutatingBook() (gas: 283365)
+[PASS] test_CancelAskFromLeftBranchRewritesParent() (gas: 508000)
+[PASS] test_CancelCollapsesBranchFromRoot() (gas: 438209)
+[PASS] test_CancelCorruptedRemainingAboveOriginalRevertsInvalidOrder() (gas: 283999)
+[PASS] test_CancelOrphanedOrderStateWithoutCollateralRevertsAndPreservesState() (gas: 133757)
+[PASS] test_CancelOwnedZeroQuantityOrderRevertsInvalidOrder() (gas: 65069)
+[PASS] test_CancelRejectsReducedLiveAskLeafKey() (gas: 443642)
+[PASS] test_CancelRejectsReducedLiveBidLeafKey() (gas: 442919)
+[PASS] test_CancelRejectsZeroQuantitySideKey() (gas: 381090)
+[PASS] test_CorruptedEqualPackedAskBranchDoesNotAggregateMixedPriceLeaves() (gas: 220558)
+[PASS] test_CorruptedRightSpineDuplicateChildAliasRecomputesBranch() (gas: 303315)
+[PASS] test_DirtyAskRightSpineUsesContractRoutingForMixedPrices() (gas: 781072)
+[PASS] test_DirtyBidRightSpineUsesContractRoutingForMixedPrices() (gas: 786688)
+[PASS] test_DuplicateAskNonceCorruptionRevertsWithoutOverwritingOwner() (gas: 271317)
+[PASS] test_DuplicateBidNonceCorruptionRevertsWithoutOverwritingOwner() (gas: 271660)
+[PASS] test_ExactSamePriceAfterPartialAskRightSpineAggregatesAndClaims() (gas: 718948)
+[PASS] test_ExactSamePriceAfterPartialBidRightSpineAggregatesAndClaims() (gas: 724823)
+[PASS] test_ExhaustedBookAutomaticallyDisablesSameSideRest() (gas: 305428)
+[PASS] test_FalseReturnAskPartialRestBasePullRevertsAtomically() (gas: 5891032)
+[PASS] test_FalseReturnBidPartialRestQuotePullRevertsAtomically() (gas: 5890372)
+[PASS] test_FalseReturnCollateralPullRevertsBeforeRestingAsk() (gas: 5577019)
+[PASS] test_FalseReturnCollateralPullRevertsBeforeRestingBid() (gas: 5577303)
+[PASS] test_FalseReturnFilledAskClaimRevertsAndPreservesClaim() (gas: 5887078)
+[PASS] test_FalseReturnFilledBidClaimRevertsAndPreservesClaim() (gas: 5884704)
+[PASS] test_FalseReturnPartialAskCancelRevertsAfterBasePayoutAndPreservesClaim() (gas: 6128793)
+[PASS] test_FalseReturnPartialBidCancelRevertsAfterBasePayoutAndPreservesClaim() (gas: 6130049)
+[PASS] test_FilledOrderClaimCanOnlyHappenOnce() (gas: 336111)
+[PASS] test_FullDepthBidNonceCombCancelsRightmostOrder() (gas: 39745976)
+[PASS] test_FullDepthBidNonceCombFullyMatchesAndClaims() (gas: 66104417)
+[PASS] test_FullPrefixBranchAddressesHandleAliasSequence() (gas: 13370622)
+[PASS] test_FullyFilledBidClaimPaysBase() (gas: 334324)
+[PASS] test_InsertPreservesChildBranchWhenItReusesParentAddress() (gas: 682612)
+[PASS] test_InvalidOrdersRevert() (gas: 87645)
+[PASS] test_ManySamePriceBidsPreserveTimePriority() (gas: 15108415)
+[PASS] test_ManySamePriceOrdersPreserveTimePriority() (gas: 15116829)
+[PASS] test_MatchCollapsesBranchFromRoot() (gas: 466115)
+[PASS] test_MatchingStopsWhenNextBestPriceDoesNotCross() (gas: 695593)
+[PASS] test_MaxAskConsumesBidBranchAtQuantityLimit() (gas: 701845)
+[PASS] test_MaxBidConsumesAskBranchAtQuantityLimit() (gas: 658887)
+[PASS] test_MaxBidPartialMatchAndRestDoesNotOverflowCollateral() (gas: 527605)
+[PASS] test_MaxPriceAndQuantityAskCancels() (gas: 287562)
+[PASS] test_MaxPriceAndQuantityBidCancels() (gas: 287874)
+[PASS] test_MaxValidDepthAskNonceCombCancelsRightmostOrder() (gas: 34057396)
+[PASS] test_MaxValidDepthAskNonceCombFullyMatchesAndClaims() (gas: 38368799)
+[PASS] test_MultipleSamePriceBranchesDoNotAlias() (gas: 766661)
+[PASS] test_OnlyOwnerCanCancel() (gas: 221453)
+[PASS] test_OrdersStartAtMaxNonceAndDecrement() (gas: 379403)
+[PASS] test_PartialAskCorrectionSeparatesBranchAndStillClaimsAfterFullFill() (gas: 1467037)
+[PASS] test_PartialAskOriginalCanAliasRootBranchAndStillCancel() (gas: 707844)
+[PASS] test_PartialBidCorrectionSeparatesBranchAndStillCancels() (gas: 1478961)
+[PASS] test_PartialBidCorrectionSeparatesBranchAndStillClaimsAfterFullFill() (gas: 1535925)
+[PASS] test_PartialBidOriginalCanAliasRootBranchAndStillCancel() (gas: 716241)
+[PASS] test_PartialFillOriginalOrderCanAliasBranchAndStillCancel() (gas: 1389249)
+[PASS] test_PricePrefixCombFullyMatchesAndClaims() (gas: 16176710)
+[PASS] test_ReentrancyGuardClearsAfterCancelRevert() (gas: 258058)
+[PASS] test_ReentrancyGuardClearsAfterFillRevert() (gas: 207055)
+[PASS] test_ReentrantBaseCancelPayoutCannotCancelTokenOwnedAsk() (gas: 6240239)
+[PASS] test_ReentrantBaseCollateralPullCannotFill() (gas: 5811015)
+[PASS] test_ReentrantBaseCollateralPullDuringAskPartialRestCannotCancelRemainder() (gas: 6259415)
+[PASS] test_ReentrantBaseCollateralPullReverts() (gas: 5826016)
+[PASS] test_ReentrantBasePayoutCannotFill() (gas: 6215044)
+[PASS] test_ReentrantQuoteCancelPayoutCannotCancelTokenOwnedBid() (gas: 6242110)
+[PASS] test_ReentrantQuoteCollateralPullCannotFill() (gas: 5831955)
+[PASS] test_ReentrantQuoteCollateralPullDuringBidPartialRestCannotCancelRemainder() (gas: 6262688)
+[PASS] test_ReentrantQuoteCollateralPullReverts() (gas: 5827396)
+[PASS] test_ReentrantQuotePayoutCannotFill() (gas: 6235896)
+[PASS] test_ReentrantQuotePayoutReverts() (gas: 6231224)
+[PASS] test_ReentrantTokenPayoutReverts() (gas: 6230196)
+[PASS] test_RestMatchClaimAndCancelEvents() (gas: 497829)
+[PASS] test_RestingOrderSideUsesPackedOrderState() (gas: 646271)
+[PASS] test_SamePriceAskAggregateMatchStillLetsEachMakerClaim() (gas: 662451)
+[PASS] test_SamePriceAskBranchSplitsAtFinalNonceBit() (gas: 545663)
+[PASS] test_SamePriceBidAggregateMatchStillLetsEachMakerClaim() (gas: 672893)
+[PASS] test_SamePriceBidsUseEarlierNonceFirst() (gas: 519242)
+[PASS] test_SamePriceBranchSplitsAtFinalNonceBit() (gas: 554475)
+[PASS] test_SamePriceUsesEarlierNonceFirst() (gas: 519629)
+[PASS] test_StableBranchIdentityCannotAliasPartiallyFilledLeaf() (gas: 322359)
+[PASS] test_StandardTokenAskRestAndCancelTransfersBase() (gas: 306727)
+[PASS] test_StandardTokenBidRestAndCancelTransfersQuote() (gas: 307788)
+[PASS] test_StandardTokenFullMatchPaysTakerAndMakerClaim() (gas: 418369)
+[PASS] test_StorageLayoutMatchesStrictDesign() (gas: 945607)
+Suite result: ok. 115 passed; 0 failed; 0 skipped; finished in 449.10ms (445.68ms CPU time)
+
+Ran 10 tests for test/TickMath32.t.sol:TickMath32Test
+[PASS] testFuzz_PriceFactorShiftIsBounded(int32) (runs: 256, μ: 1008, ~: 1008)
+[PASS] testFuzz_PriceFactorsAreStrictlyMonotonic(int32) (runs: 256, μ: 2078, ~: 2074)
+[PASS] test_KnownPowerOfTwoPriceFactors() (gas: 1527)
+[PASS] test_ReferenceVectors_AroundZero() (gas: 6603)
+[PASS] test_ReferenceVectors_LargePositive() (gas: 8668)
+[PASS] test_ReferenceVectors_MaximumAndLargePositive() (gas: 7939)
+[PASS] test_ReferenceVectors_MinimumAndLargeNegative() (gas: 8198)
+[PASS] test_ReferenceVectors_NegativeExponentBoundaries() (gas: 7056)
+[PASS] test_ReferenceVectors_PositiveExponentBoundaries() (gas: 7241)
+[PASS] test_ZeroTickIsExactlyOneToOne() (gas: 797)
+Suite result: ok. 10 passed; 0 failed; 0 skipped; finished in 11.12ms (10.98ms CPU time)
+
+Ran 19 tests for test/DeepstateV1NativeETH.t.sol:DeepstateV1NativeETHTest
+[PASS] test_ForcedNativeSurplusPersistsWithoutReducingCollateral() (gas: 252317)
+[PASS] test_NativeAskMatchesBidAndMakerClaimsETH() (gas: 271187)
+[PASS] test_NativeAskRestsAndCancelRefundsETH() (gas: 161690)
+[PASS] test_NativeBidMatchesAskAndPaysETH() (gas: 259852)
+[PASS] test_NativeETHIsCanonicalToken0Only() (gas: 36191)
+[PASS] test_NativeIntegratorAskFeeTakesOnlyOutgoingQuoteAndRefundsExcessETH() (gas: 350364)
+[PASS] test_NativeIntegratorBidFeeMatchesProtocolTakerFee() (gas: 322468)
+[PASS] test_NativeIntegratorRouteConsolidatesRepeatedFeeToken() (gas: 490689)
+[PASS] test_NativePayoutReentrancyIsBlockedWithoutBlockingFill() (gas: 544630)
+[PASS] test_NativePoolHookReportsTheBidSideSoldToken() (gas: 499411)
+[PASS] test_NativeValueMustCoverNetDebitAndRefundsExcess() (gas: 483930)
+[PASS] test_RevertingNativeIntegratorPayoutRevertsFillAtomically() (gas: 358067)
+[PASS] test_RevertingNativeProtocolFeeRecipientCannotBlockFill() (gas: 443873)
+[PASS] test_RevertingNativeProtocolFeeRecipientCannotBlockIntegratorFill() (gas: 451665)
+[PASS] test_RevertingNativeProtocolFeeRecipientCannotBlockIntegratorRoute() (gas: 457284)
+[PASS] test_RevertingNativeProtocolFeeRecipientCannotBlockRoute() (gas: 418023)
+[PASS] test_RouteNetsNativeETHAndCollectsOnlyNetDebit() (gas: 537247)
+[PASS] test_RoutePaysPositiveNetNativeETH() (gas: 377751)
+[PASS] test_RouteTransfersNativeFeeAfterUserOutput() (gas: 403414)
+Suite result: ok. 19 passed; 0 failed; 0 skipped; finished in 7.37ms (4.86ms CPU time)
+
+Ran 1 test for test/DeepstateV1Script.t.sol:DeepstateV1ScriptTest
+[PASS] test_RunDeploysDeepstateV1() (gas: 7435649)
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 651.96µs (405.79µs CPU time)
+
+Ran 40 tests for test/RadixMatchingEngineCoverage.t.sol:RadixMatchingEngineCoverageTest
+[PASS] testCoverage_AskSubtreeAggregateAndRecursivePaths() (gas: 1019665)
+[PASS] testCoverage_AskUniformSubtreeStopsAtLimit() (gas: 931453)
+[PASS] testCoverage_BidSubtreeAggregateAndRecursivePaths() (gas: 1020344)
+[PASS] testCoverage_BidUniformSubtreeStopsAtLimit() (gas: 932169)
+[PASS] testCoverage_CancelAskLeftLeafAndAbsentDivergentOrders() (gas: 1156484)
+[PASS] testCoverage_CancelNonTopBidAndAskBranches() (gas: 674928)
+[PASS] testCoverage_CancelRevertBranches() (gas: 371360)
+[PASS] testCoverage_DirtyBidRightSpineMaterializesOnBidInsert() (gas: 731198)
+[PASS] testCoverage_DirtyBidTopCancelRetainsBook() (gas: 708476)
+[PASS] testCoverage_DirtyMixedPriceRightSpinesUseRecursiveRouting() (gas: 1035412)
+[PASS] testCoverage_DirtyRecoveryBudgetAndPriceBoundaries() (gas: 49440028)
+[PASS] testCoverage_DirtyRightSpinesMaterializeOnSameSideInsert() (gas: 722280)
+[PASS] testCoverage_DirtySamePricePartialFillsRetainFIFO() (gas: 1340961)
+[PASS] testCoverage_DirtySpineInsertionRepairsEveryDivergence() (gas: 49024185)
+[PASS] testCoverage_DirtySpinePricesUniformLeftBranchWithoutSentinelLoad() (gas: 595651)
+[PASS] testCoverage_DirtySpineRejectsMixedLeftSubtreeAsUniform() (gas: 362024)
+[PASS] testCoverage_DirtySpineRejectsNonuniformRightSubtree() (gas: 372561)
+[PASS] testCoverage_ExactMixedPriceOffSpineAggregateAskAndBid() (gas: 1510396)
+[PASS] testCoverage_ExactSamePriceOffSpineAggregateAskAndBid() (gas: 1381784)
+[PASS] testCoverage_HookEnabledTopChangesAcrossBidAndAskBooks() (gas: 1478762)
+[PASS] testCoverage_HookTracksPartialAndEmptyTopTransitions() (gas: 1208732)
+[PASS] testCoverage_HookTracksTopCancelWithBranchSuccessor() (gas: 1747393)
+[PASS] testCoverage_HookTracksTopInsertedAboveExistingBranch() (gas: 1473031)
+[PASS] testCoverage_HookTracksUniformRightSpineAggregateRemoval() (gas: 1262928)
+[PASS] testCoverage_HookTracksWholeBookConsumption() (gas: 1334065)
+[PASS] testCoverage_InsertRecursesIntoBothChildren() (gas: 1652471)
+[PASS] testCoverage_InvalidOrdersAndDuplicateCorruption() (gas: 308091)
+[PASS] testCoverage_OrderIdMatchesCanonicalHash() (gas: 14893)
+[PASS] testCoverage_OwnedAbsentOrdersSearchBranchesBeforeClaiming() (gas: 614002)
+[PASS] testCoverage_PartialUniformAskSubtreeRewritesCorrection() (gas: 748723)
+[PASS] testCoverage_PartialUniformBidSubtreeRewritesCorrection() (gas: 750126)
+[PASS] testCoverage_PartialUniformSubtreesConsumeBothChildren() (gas: 1656964)
+[PASS] testCoverage_SoldQuoteAmountsSaturateForHookAndView() (gas: 667571)
+[PASS] testCoverage_StableIdentityPreventsRightSpineLeafAlias() (gas: 271678)
+[PASS] testCoverage_StopsInsideOffSpineBidSubtree() (gas: 950987)
+[PASS] testCoverage_StopsInsideOffSpineSubtrees() (gas: 931774)
+[PASS] testCoverage_TopOrderReportsLiveSoldAmounts() (gas: 342378)
+[PASS] testCoverage_TopOrderReportsRemainingBidCollateralAfterPartialFill() (gas: 274254)
+[PASS] testCoverage_ZeroTickPartialFillThenCancelTelescopes() (gas: 316740)
+[PASS] testFuzz_DirtyRecoveryPreservesFIFOQuotesAndHooks(bool,int32,uint8,uint8,uint16,bool) (runs: 256, μ: 1406455, ~: 1359902)
+Suite result: ok. 40 passed; 0 failed; 0 skipped; finished in 412.58ms (410.73ms CPU time)
+
+Ran 10 tests for test/RadixMatchingEngineFormal.t.sol:RadixMatchingEngineFormalTest
+[PASS] testFuzz_DirtyMixedPriceAskRightSpineConserves(uint8,uint8,uint8,uint8,uint8) (runs: 256, μ: 630468, ~: 630452)
+[PASS] testFuzz_DirtyMixedPriceBidRightSpineConserves(uint8,uint8,uint8,uint8,uint8) (runs: 256, μ: 627449, ~: 627444)
+[PASS] testFuzz_DirtySamePriceAskRightSpineConserves(uint8,uint8,uint8,uint8) (runs: 256, μ: 601383, ~: 601243)
+[PASS] testFuzz_DirtySamePriceBidRightSpineConserves(uint8,uint8,uint8,uint8) (runs: 256, μ: 598309, ~: 598223)
+[PASS] testFuzz_FormalAskAgainstBidConservesAndClaims(uint8,uint8) (runs: 256, μ: 418883, ~: 382223)
+[PASS] testFuzz_FormalAskConsumesBestBidFirst(bool) (runs: 256, μ: 576877, ~: 590842)
+[PASS] testFuzz_FormalBidAgainstAskConservesAndClaims(uint8,uint8) (runs: 256, μ: 419734, ~: 381651)
+[PASS] testFuzz_FormalBidConsumesBestAskFirst(bool) (runs: 256, μ: 575972, ~: 589447)
+[PASS] testFuzz_FormalSameTickAskAggregateConserves(bool,bool,bool) (runs: 256, μ: 586401, ~: 584312)
+[PASS] testFuzz_FormalSameTickBidAggregateConserves(bool,bool,bool) (runs: 256, μ: 586869, ~: 585778)
+Suite result: ok. 10 passed; 0 failed; 0 skipped; finished in 1.04s (1.41s CPU time)
+
+Ran 55 tests for test/DeepstateV1.t.sol:DeepstateV1Test
+[PASS] testFuzz_InsertionHooksOnlyReplaceActualBest(bool,uint256,uint8) (runs: 256, μ: 3302200, ~: 2475070)
+[PASS] testFuzz_IntegratorAskFeeEqualsIndependentProtocolFormula(uint96,int24,uint8,uint8) (runs: 256, μ: 432397, ~: 444269)
+[PASS] testFuzz_IntegratorBidFeeEqualsIndependentProtocolFormula(uint128,uint8,uint8) (runs: 256, μ: 426333, ~: 441847)
+[PASS] testFuzz_MatchBuffersDoNotLeakBetweenRouteLegs(uint8) (runs: 256, μ: 2400627, ~: 1831095)
+[PASS] testFuzz_SharedRestQuoteMatchesReference(int32,uint128,bool) (runs: 256, μ: 320777, ~: 320748)
+[PASS] test_AskFillTakesFeeFromOutgoingQuoteOnly() (gas: 425797)
+[PASS] test_BidFillTakesFeeFromOutgoingBaseOnly() (gas: 424237)
+[PASS] test_BookHookFlagWithoutPoolHookReturnsCleanly() (gas: 293729)
+[PASS] test_BranchNoncesAreUniqueAndDoNotAliasOrderLeaves() (gas: 603399)
+[PASS] test_EmptyBookNoRestAndFillOrKillRevertInvalidBook() (gas: 67526)
+[PASS] test_ExhaustedBookAutomaticallyDisablesRest() (gas: 111475)
+[PASS] test_ExhaustedHookBookAutomaticallyDisablesRest() (gas: 189322)
+[PASS] test_FeeConfigValidationAndGetter() (gas: 143639)
+[PASS] test_FeeRecipientWithZeroBpsDoesNotTakeFee() (gas: 323774)
+[PASS] test_FillOrKillRevertsWhenRouteLegCannotFullyMatch() (gas: 191687)
+[PASS] test_FillRouteAccumulatesRepeatedFeesForOneToken() (gas: 368754)
+[PASS] test_FillRouteCrossesPoolsAndNetsIntermediateToken() (gas: 2749023)
+[PASS] test_FillRouteFeeIsCarvedBeforeRemainderCanRestAndCancel() (gas: 482896)
+[PASS] test_FillRouteMatchesOldEpochAndNetsTransfers() (gas: 352706)
+[PASS] test_FillRouteNetsRepeatedTouchedTokens() (gas: 279502)
+[PASS] test_FillRouteZeroDeltaLegDoesNotTouchTokens() (gas: 222287)
+[PASS] test_FinalEpochCannotAliasHookFlagsAndFailedRestIsAtomic() (gas: 206361)
+[PASS] test_FirstRestInitializesActiveBook() (gas: 191595)
+[PASS] test_GasBurningHookCannotBlockFill() (gas: 559403)
+[PASS] test_HistoricalRemainderCannotCrossActiveBook() (gas: 548248)
+[PASS] test_HistoricalRemainderDoesNotInitializeEmptyActiveBook() (gas: 304689)
+[PASS] test_HookFlagsAreCarriedAcrossNonceExhaustionRotation() (gas: 438705)
+[PASS] test_IntegratorAskFeeUsesSameGrossOutputAndRoundingAsProtocolFee() (gas: 397186)
+[PASS] test_IntegratorBidFeeUsesSameGrossOutputAndRoundingAsProtocolFee() (gas: 394555)
+[PASS] test_IntegratorFeeAppliesOnlyToMatchedOutputBeforeRemainderRests() (gas: 510168)
+[PASS] test_IntegratorFeeValidationMatchesProtocolFeeConstraints() (gas: 215169)
+[PASS] test_IntegratorLateRouteFailureRevertsMatchingAndAllFeesAtomically() (gas: 319116)
+[PASS] test_IntegratorRouteAccumulatesRepeatedFeesForOneToken() (gas: 401670)
+[PASS] test_IntegratorRouteChargesEveryLegExactlyLikeProtocolTakerFee() (gas: 2868015)
+[PASS] test_IntegratorRouteZeroOutputLegChargesNoFee() (gas: 200795)
+[PASS] test_InvalidTokenAndHookConfigBranches() (gas: 120752)
+[PASS] test_LateRouteFailureRevertsEarlierLegAtomically() (gas: 270921)
+[PASS] test_MaxSignedAskOutputFeeDoesNotOverflow() (gas: 407873)
+[PASS] test_MaxSignedAskOutputSupportsProtocolAndIntegratorFees() (gas: 443200)
+[PASS] test_OldEpochFillOrKillStillRevertsOnUnmatchedRemainder() (gas: 286106)
+[PASS] test_OldEpochMatchRemainderIsAutomaticallyNoRest() (gas: 346514)
+[PASS] test_OnlyOwnerCanConfigureAndOwnershipTransferTakesEffect() (gas: 195419)
+[PASS] test_PartialFillReusesBranchNonceAndChildSlot() (gas: 716538)
+[PASS] test_ProtocolAndIntegratorCanShareRecipientWithoutCompounding() (gas: 313133)
+[PASS] test_RestBookHarnessPreservesFullWidthBranchIdentity() (gas: 300815)
+[PASS] test_RestBookHarnessRejectsCollidingIdentityFronts() (gas: 187436)
+[PASS] test_RestBookHarnessRejectsExhaustedBranchSerial() (gas: 187530)
+[PASS] test_RestBookHarnessRejectsExhaustedNonce() (gas: 45554)
+[PASS] test_RestBookHarnessRejectsOrderInsideAllocatedBranchRange() (gas: 45686)
+[PASS] test_RestBookHarnessRotatesBeforeOrderFrontEntersAllocatedBranchRange() (gas: 293292)
+[PASS] test_RestThatExhaustsNonceRotatesAndInitializesNextBook() (gas: 270547)
+[PASS] test_RotationDoesNotOverwriteInitializedNextBook() (gas: 271370)
+[PASS] test_RotationFinalizesBothEnabledOldBookTopsBeforeDisablingHooks() (gas: 1338799)
+[PASS] test_StaleEmptyRoutedEpochCannotInitializeWhenPoolAdvanced() (gas: 281774)
+[PASS] test_UnmatchedIntegratorFillRestsAndCancelRemainsFeeFree() (gas: 237952)
+Suite result: ok. 55 passed; 0 failed; 0 skipped; finished in 1.13s (1.14s CPU time)
+
+Ran 12 test suites in 1.13s (3.85s CPU time): 293 tests passed, 0 failed, 0 skipped (293 total tests)

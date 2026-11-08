@@ -157,14 +157,16 @@ one/two-maker paths, and stateful model invariants.
 
 ### R5. Exact-summary preservation
 
-Every mutation rebuilds surviving ancestors from exact child summaries. A mixed branch's
+Every mutation updates surviving ancestors from exact summaries and the exact inserted or removed quote delta. A mixed branch's
 `quoteTotal` equals the sum of independently leaf-rounded quotes. Its packed tick is the worst
 (leftmost) live tick. Uniform branches retain their exact rounding correction. There are no stale
 anchors, dirty recovery probes, or materialization passes.
 
 Insertion descends once to a witness leaf. The first differing bit determines a pending split;
 unwinding installs it at the unique ancestor interval containing that depth. Existing ancestors are
-rebuilt once, with no repeated descendant-key searches. Cancellation likewise changes one child per
+updated once, with no repeated descendant-key searches. Price-prefix divergence can establish a
+new parent before reaching a witness nonce; only price bits, never a branch serial, justify that shortcut.
+Cancellation likewise changes one child per
 level. Branch identities remain stable across all summary rewrites.
 
 **Evidence:** source-bound arithmetic `SMT` lemmas, induction on the one-child path, stateful exact
@@ -184,7 +186,9 @@ remains, and equal-price makers fill in descending nonce order.
 ### N1. Namespace isolation
 
 Pool, book, and order state are isolated by `keccak256` domain inputs. Transient user-delta, fee,
-hook, match-buffer, and reentrancy slots are pairwise disjoint by bit domain or full constant value.
+hook, and reentrancy slots are pairwise disjoint by bit domain or full constant value. The match
+buffer pointer is call-local memory, not a transient slot. Its context field is separate from
+the buffer allocation and its nodes; route legs create independent contexts.
 
 **Evidence:** transient namespaces are `SMT` proved. Persistent namespaces are `CONDITIONAL` on
 Keccak-256 collision resistance; unconditional injectivity of a 256-bit hash over larger input

@@ -22,8 +22,7 @@ contract TraversalEngine is DeepstateV1 {
 
 contract BoundedTraversalTest is RadixMatchingEngineGasTest {
     function _afterSetUp() internal override {
-        TraversalEngine instrumented = new TraversalEngine();
-        vm.etch(address(engine), address(instrumented).code);
+        vm.etch(address(engine), vm.getDeployedCode("BoundedTraversal.t.sol:TraversalEngine"));
         quote.mint(alice, uint256(1) << 220);
         quote.mint(bob, uint256(1) << 220);
     }
@@ -81,6 +80,30 @@ contract BoundedTraversalTest is RadixMatchingEngineGasTest {
         vm.prank(alice);
         _cancel(target);
         assertEq(_walks(2), 64, "exercise full cancellation path");
+    }
+
+    function test_DifferentBidTickSplitsAboveUniformSubtreeWithoutWitnessDescent() public {
+        for (uint256 i; i < 128; ++i) {
+            vm.prank(alice);
+            _fill(_order(0, 1, 0), true);
+        }
+        _reset();
+        vm.prank(alice);
+        _fill(_order(-1, 1, 0), true);
+        assertEq(_walks(1), 1, "price prefix proves split at root");
+        _assertSummaries(_bidRoot(), true);
+    }
+
+    function test_DifferentAskTickSplitsAboveUniformSubtreeWithoutWitnessDescent() public {
+        for (uint256 i; i < 128; ++i) {
+            vm.prank(alice);
+            _fill(_order(0, 1, 0), false);
+        }
+        _reset();
+        vm.prank(alice);
+        _fill(_order(1, 1, 0), false);
+        assertEq(_walks(1), 1, "price prefix proves split at root");
+        _assertSummaries(_askRoot(), false);
     }
 
     function _buildUniqueFullDepthComb() private returns (bytes32 target) {

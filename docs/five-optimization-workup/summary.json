@@ -1,0 +1,92 @@
+[
+  {
+    "stage": 1,
+    "name": "01-shared-rest-quote",
+    "baseline": {
+      "cheaper": 72,
+      "unchanged": 123,
+      "dearer": 5,
+      "smallestDelta": -3700,
+      "largestDelta": 638
+    },
+    "previous": {
+      "cheaper": 72,
+      "unchanged": 123,
+      "dearer": 5,
+      "smallestDelta": -3700,
+      "largestDelta": 638
+    }
+  },
+  {
+    "stage": 2,
+    "name": "02-known-hook-tops",
+    "baseline": {
+      "cheaper": 56,
+      "unchanged": 27,
+      "dearer": 117,
+      "smallestDelta": -13836,
+      "largestDelta": 1048
+    },
+    "previous": {
+      "cheaper": 26,
+      "unchanged": 30,
+      "dearer": 144,
+      "smallestDelta": -13820,
+      "largestDelta": 1614
+    }
+  },
+  {
+    "stage": 3,
+    "name": "03-cached-classification",
+    "baseline": {
+      "cheaper": 113,
+      "unchanged": 0,
+      "dearer": 87,
+      "smallestDelta": -20576,
+      "largestDelta": 857
+    },
+    "previous": {
+      "cheaper": 101,
+      "unchanged": 0,
+      "dearer": 99,
+      "smallestDelta": -6740,
+      "largestDelta": 208
+    }
+  },
+  {
+    "stage": 4,
+    "name": "04-reused-branch-metadata",
+    "baseline": {
+      "cheaper": 143,
+      "unchanged": 0,
+      "dearer": 57,
+      "smallestDelta": -30497,
+      "largestDelta": 860
+    },
+    "previous": {
+      "cheaper": 102,
+      "unchanged": 20,
+      "dearer": 78,
+      "smallestDelta": -9921,
+      "largestDelta": 533
+    }
+  },
+  {
+    "stage": 5,
+    "name": "05-memory-match-buffer",
+    "baseline": {
+      "cheaper": 192,
+      "unchanged": 0,
+      "dearer": 8,
+      "smallestDelta": -30990,
+      "largestDelta": 860
+    },
+    "previous": {
+      "cheaper": 161,
+      "unchanged": 39,
+      "dearer": 0,
+      "smallestDelta": -674,
+      "largestDelta": 0
+    }
+  }
+]

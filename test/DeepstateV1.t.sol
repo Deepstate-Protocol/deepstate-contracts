@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {DeepstateV1} from "../src/DeepstateV1.sol";
 import {QuoteMath} from "./QuoteMath.sol";
@@ -94,7 +95,7 @@ contract DeepstateV1Harness is DeepstateV1 {
         bool isBid,
         address owner
     ) external returns (bytes32 restingOrder, uint32 nextNonceAfter) {
-        return _restBook(id, books[id], nonceAndFlags, price, quantity, isBid, owner, false);
+        (restingOrder, nextNonceAfter,) = _restBook(id, books[id], nonceAndFlags, price, quantity, isBid, owner, false);
     }
 }
 
@@ -1198,6 +1199,97 @@ contract DeepstateV1Test is Test {
         assertEq(token1.balanceOf(bob), bobQuoteBefore + quoteOutput - protocolFee - integratorFee);
         assertEq(token1.balanceOf(feeRecipient), protocolFee);
         assertEq(token1.balanceOf(integratorRecipient), integratorFee);
+    }
+
+    function testFuzz_SharedRestQuoteMatchesReference(int32 tick, uint128 quantitySeed, bool bid) public {
+        uint160 quantity = uint160(quantitySeed) + 1;
+        token0.mint(alice, uint256(1) << 250);
+        token1.mint(alice, uint256(1) << 250);
+        uint256 beforeBase = token0.balanceOf(alice);
+        uint256 beforeQuote = token1.balanceOf(alice);
+        vm.prank(alice);
+        bytes32 order = engine.fill(_fill(0, _order(tick, quantity, 0), bid, false, false));
+        uint256 expectedQuote = _quoteValue(tick, quantity, bid);
+        assertEq(token0.balanceOf(address(engine)), bid ? 0 : quantity);
+        assertEq(token1.balanceOf(address(engine)), bid ? expectedQuote : 0);
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(address(token0), address(token1), 0, order);
+        assertEq(baseAmount, bid ? 0 : quantity);
+        assertEq(quoteAmount, bid ? expectedQuote : 0);
+        assertEq(token0.balanceOf(alice), beforeBase);
+        assertEq(token1.balanceOf(alice), beforeQuote);
+    }
+
+    function testFuzz_InsertionHooksOnlyReplaceActualBest(bool bid, uint256 seed, uint8 countSeed) public {
+        RotationRecordingHook hook = new RotationRecordingHook(address(engine));
+        engine.setPoolHookConfig(address(token0), address(token1), address(hook), true, true);
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        bytes32 bestOrder;
+        int32 bestTick;
+        uint256 count = bound(countSeed, 2, 32);
+        for (uint256 i; i < count; ++i) {
+            int32 tick = i % 4 == 0 ? bestTick : int32(int256(uint256(keccak256(abi.encode(seed, i))) % 2001) - 1000);
+            bool improves = i == 0 || (bid ? tick > bestTick : tick < bestTick);
+            uint256 beforeCalls = hook.callCount();
+            vm.prank(alice);
+            bytes32 order = engine.fill(_fill(0, _order(tick, 10, 0), bid, false, false));
+            assertEq(hook.callCount(), beforeCalls + (improves ? 1 : 0));
+            if (improves) {
+                (,, address soldToken, uint160 outgoingAmount, uint32 incomingNonce) = hook.callAt(beforeCalls);
+                assertEq(soldToken, bid ? address(token1) : address(token0));
+                assertEq(outgoingAmount, i == 0 ? 0 : bid ? _quoteValue(bestTick, 10, true) : 10);
+                assertEq(incomingNonce, uint32(uint256(order)));
+                bestOrder = order;
+                bestTick = tick;
+            }
+            (uint32 topNonce, uint160 soldAmount) = engine.topOrder(id, bid);
+            assertEq(topNonce, uint32(uint256(bestOrder)));
+            assertEq(soldAmount, bid ? _quoteValue(bestTick, 10, true) : 10);
+        }
+    }
+
+    function testFuzz_MatchBuffersDoNotLeakBetweenRouteLegs(uint8 countSeed) public {
+        uint256 count = bound(countSeed, 2, 32);
+        bytes32[] memory orders = new bytes32[](count);
+        for (uint256 i; i < count; ++i) {
+            vm.prank(alice);
+            orders[i] = engine.fill(_fill(0, _order(0, 1, 0), false, false, false));
+        }
+        DeepstateV1.FillParams[] memory legs = new DeepstateV1.FillParams[](3);
+        legs[0] = _fill(0, _order(0, uint160(count - 1), 0), true, true, false);
+        legs[1] = _fill(0, _order(0, 1, 0), true, true, false);
+        legs[2] = legs[1];
+        vm.recordLogs();
+        vm.prank(bob);
+        engine.fillRoute(legs);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 matchEvents;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != address(engine)) continue;
+            uint256 matched;
+            if (logs[i].topics[0] == keccak256("AskMatched(bytes32,bytes32)")) {
+                (bytes32 id, bytes32 node) = abi.decode(logs[i].data, (bytes32, bytes32));
+                assertEq(id, engine.bookId(address(token0), address(token1), 0));
+                matched = uint160(uint256(node) >> 64);
+            } else if (logs[i].topics[0] == keccak256("AsksMatched(bytes32,bytes32[])")) {
+                (bytes32 id, bytes32[] memory nodes) = abi.decode(logs[i].data, (bytes32, bytes32[]));
+                assertEq(id, engine.bookId(address(token0), address(token1), 0));
+                for (uint256 j; j < nodes.length; ++j) {
+                    matched += uint160(uint256(nodes[j]) >> 64);
+                }
+            } else {
+                continue;
+            }
+            assertEq(matched, matchEvents == 0 ? count - 1 : 1);
+            ++matchEvents;
+        }
+        assertEq(matchEvents, 2);
+        for (uint256 i; i < count; ++i) {
+            vm.prank(alice);
+            engine.cancel(address(token0), address(token1), 0, orders[i]);
+        }
+        assertEq(token0.balanceOf(address(engine)), 0);
+        assertEq(token1.balanceOf(address(engine)), 0);
     }
 
     function _integratorFee(address recipient, uint16 bps)

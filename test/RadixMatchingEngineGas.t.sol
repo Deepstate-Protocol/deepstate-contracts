@@ -61,7 +61,7 @@ contract RadixMatchingEngineGasTest is Test {
             base = tokenB;
             quote = tokenA;
         }
-        engine = new DeepstateV1();
+        engine = DeepstateV1(payable(deployCode("DeepstateV1.sol:DeepstateV1")));
 
         _fundAndApprove(alice);
         _fundAndApprove(bob);
@@ -969,7 +969,7 @@ contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
 
     function setUp() public {
         usdc = new GasTestERC20();
-        engine = new DeepstateV1();
+        engine = DeepstateV1(payable(deployCode("DeepstateV1.sol:DeepstateV1")));
 
         usdc.mint(HOT_WALLET, uint256(1) << 220);
         usdc.mint(LIQUIDITY_PROVIDER, uint256(1) << 220);
@@ -1243,7 +1243,7 @@ contract DeepstateV1IntegratorFeeGasTest is Test {
         GasTestERC20 tokenA = new GasTestERC20();
         GasTestERC20 tokenB = new GasTestERC20();
         (token0, token1) = address(tokenA) < address(tokenB) ? (tokenA, tokenB) : (tokenB, tokenA);
-        engine = new DeepstateV1();
+        engine = DeepstateV1(payable(deployCode("DeepstateV1.sol:DeepstateV1")));
         _fundAndApprove(MAKER);
         _fundAndApprove(TAKER);
     }

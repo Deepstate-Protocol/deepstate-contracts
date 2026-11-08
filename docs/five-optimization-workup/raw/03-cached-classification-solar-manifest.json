@@ -1,0 +1,45 @@
+{
+  "variant": "03-cached-classification",
+  "compiler": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+  "settings": {
+    "remappings": [
+      "forge-std/=lib/forge-std/src/",
+      "solady/=lib/solady/src/"
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "compilationTarget": {
+      "src/DeepstateV1.sol": "DeepstateV1"
+    },
+    "evmVersion": "cancun",
+    "libraries": {}
+  },
+  "sourceSha256": "11b441f06da8a44b4e055f62f310766951724f32cf3c15b9106a55d31ed99da1",
+  "sourceKeccak256": "0xa36e0b4157988058098505320cc67aa8ccb29060d13aba239bfed6600276f2a6",
+  "runtimeSha256": "60af1c3539a4c976dc8fd34959327304d52d2873ab2dd5f105c935825ff8172d",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "baseline": "candidate-E:45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "03-cached-classification-solar-release.log",
+      "snapshot": "03-cached-classification-solar-release.snapshot",
+      "logSha256": "5ce643d4b0dbfc588023d21161a84632ba7bd11f7afcbbaae8c3b63080732e56",
+      "snapshotSha256": "4ae913183722b0b35db04ad4b3eab48df73fa23c28949dd8abd45c159ed88e6b"
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "03-cached-classification-solar-insertion.log",
+      "snapshot": "03-cached-classification-solar-insertion.snapshot",
+      "logSha256": "431ff7f133d8c28e0f8a45e2cdcd2b5b0f97bb124963c14d963e5458b1b305bd",
+      "snapshotSha256": "67ab043c5c3d83cc49a97c436cb86b480a552f74d96c271351b84d151fcf84be"
+    }
+  ]
+}

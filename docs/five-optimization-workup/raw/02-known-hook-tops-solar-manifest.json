@@ -1,0 +1,45 @@
+{
+  "variant": "02-known-hook-tops",
+  "compiler": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+  "settings": {
+    "remappings": [
+      "forge-std/=lib/forge-std/src/",
+      "solady/=lib/solady/src/"
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "compilationTarget": {
+      "src/DeepstateV1.sol": "DeepstateV1"
+    },
+    "evmVersion": "cancun",
+    "libraries": {}
+  },
+  "sourceSha256": "a23f649263460e5819342f17877d20c2460816bfd6ad51706b65f48ea0ced6a4",
+  "sourceKeccak256": "0x20c9e148ef049a456251b15582b406b7cc5bc42c9c72a59cae53bc3942a09142",
+  "runtimeSha256": "99f16ad9468da828503dc8fe7983ee803a4ac33c7c4c77698f8fce721696d251",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "baseline": "candidate-E:45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "02-known-hook-tops-solar-release.log",
+      "snapshot": "02-known-hook-tops-solar-release.snapshot",
+      "logSha256": "c9f13b6d8d545e3d58141220ea6c5a92683346159d34c2e6ee04785fdcec4dd8",
+      "snapshotSha256": "26e38d79b9fe0f5875ebe2f5353ded762ede6ad366deb674da3d8116d0d50682"
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "02-known-hook-tops-solar-insertion.log",
+      "snapshot": "02-known-hook-tops-solar-insertion.snapshot",
+      "logSha256": "b239e46d8ca1acc70f7f0ae236605d176a30a1a4f63e346797cba7f1755a8b50",
+      "snapshotSha256": "1310e78ab4a5e8392f9d5d13f1e37eb489dec0fe3e4dcdf2d0b7aeebdd7981d7"
+    }
+  ]
+}

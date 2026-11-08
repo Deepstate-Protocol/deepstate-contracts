@@ -14,6 +14,10 @@ against production bytecode by Halmos; structural lifting is the explicit induct
 
 ## 1. Definitions
 
+The operation-reuse implementation is measured in `five-optimization-workup/GAS_TABLES.md`.
+Its new algebraic/source bindings are checked by the SMT runner. Fresh production-bytecode
+Halmos and coverage campaigns are separate gates, not implied by the gas measurements or fuzz runs.
+
 For a side `s` and leaf `l`, define:
 
 - `P(l) = (tick(l), nonce(l))`, the raw 64-bit address path;
@@ -58,6 +62,17 @@ sign convention stated in the contract.
 All live subtrees satisfy `C(T)`, including the global rightmost path. Mixed quotes are cached
 when branches are created or rewritten; consuming them never recursively reprices descendants.
 No successful mutation leaves a stale packed quantity or representative tick.
+
+An insertion adds the incoming leaf's exact rounded quote to every surviving mixed ancestor;
+matching and cancellation subtract the exact removed quote. A surviving mixed branch retains its
+price split. Uniform corrections use the difference between old and new aggregate notionals,
+with the bid/ask signs in A5. These delta updates are algebraically equal to rebuilding the exact
+leaf sums. A collapse promotes the surviving child before any ancestor cache update.
+
+Branch identity classification uses the allocation front captured for that operation. Insertion
+refreshes the front after allocating its new branch; matching and cancellation do not allocate.
+Saved branch slots and split depths remain valid while the recursive child mutation executes:
+branch identities are stable and no external callback runs inside that mutation.
 
 ### 1.3 Book and accounting invariant `B`
 

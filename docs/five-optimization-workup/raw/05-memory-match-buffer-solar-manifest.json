@@ -1,0 +1,45 @@
+{
+  "variant": "05-memory-match-buffer",
+  "compiler": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+  "settings": {
+    "remappings": [
+      "forge-std/=lib/forge-std/src/",
+      "solady/=lib/solady/src/"
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "compilationTarget": {
+      "src/DeepstateV1.sol": "DeepstateV1"
+    },
+    "evmVersion": "cancun",
+    "libraries": {}
+  },
+  "sourceSha256": "ce755182dd007c3c578b860782ef3c9e45de2aae3287a3a4ef03fede6138b0c7",
+  "sourceKeccak256": "0x180e4fdfd8013911b42ba5c27f6ea216b45b1e516288da90f8a35fcf2d5b1b28",
+  "runtimeSha256": "868dec02e5065a5cafed60f3fa665bb0c862791116825cc4dcfefd7089795dcb",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "baseline": "candidate-E:45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "05-memory-match-buffer-solar-release.log",
+      "snapshot": "05-memory-match-buffer-solar-release.snapshot",
+      "logSha256": "95c1cfe103428220751c430b76111cdbd7d434ae18f5d73fd3503f180d5f0177",
+      "snapshotSha256": "31bd4599cae570218665965afce968ee4114e6b1f90ff5e19274b2454efad689"
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "05-memory-match-buffer-solar-insertion.log",
+      "snapshot": "05-memory-match-buffer-solar-insertion.snapshot",
+      "logSha256": "ba8349c83e43df2d8a7d9cd82c60117f3227c225124dc40b8c2af66d8f36d568",
+      "snapshotSha256": "4deeff534904eb9c57d3c649a4d991b367b84f4cca2b231a5afc2af90a840c56"
+    }
+  ]
+}

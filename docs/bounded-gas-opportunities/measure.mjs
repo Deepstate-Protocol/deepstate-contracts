@@ -34,7 +34,7 @@ const manifest = {
   sourceSha256: sha(source), sourceKeccak256: keccak,
   runtimeSha256: sha(Buffer.from(runtime.replace(/^0x/, ''), 'hex')),
   executor: 'd3167db683c001c196126c912027437a9cb0bfb9',
-  baseline: '096eab28d87debdd472b4e22e65820e2b1b8d523', runs: [],
+  baseline: process.env.GAS_COMPARISON_BASELINE ?? '096eab28d87debdd472b4e22e65820e2b1b8d523', runs: [],
 };
 for (const [group, filter, count] of [
   ['release', ['--match-contract', '(RadixMatchingEngine(Gas|HookGas|FeeGas)Test|DeepstateV1IntegratorFeeGasTest)'], 188],

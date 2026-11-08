@@ -41,7 +41,6 @@ EPOCH_MASK = (1 << 254) - 1
 FIXED_TRANSIENT_SLOTS = {
     "top-outgoing": 0x64B7215BAEA1C17E16F66DB8B03AF21431032E2E221C15AC43B0752D82A69B31,
     "top-incoming": 0xF95DFDFE2CF36F265E91FF578507AC6F6F9BFFB77B95DCB89AEF8ED16E5B1F45,
-    "match-buffer": 0x7F8FE082CCB9A281FA5FA179F118219E229BB906DF4E4AA8AEE95977B867F45D,
     "reentrancy": 0xC55A21BE1C6E869C49C7A5860F6C3A83187EB30A12BCD0421F3CF4F5871DCCFF,
 }
 
@@ -82,7 +81,6 @@ def bind_model_to_source():
         "uint256 private constant _INTEGRATOR_FEE_DELTA_DOMAIN = uint256(1) << 254;",
         "0x64b7215baea1c17e16f66db8b03af21431032e2e221c15ac43b0752d82a69b31",
         "0xf95dfdfe2cf36f265e91ff578507ac6f6f9bffb77b95dcb89aef8ed16e5b1f45",
-        "0x7f8fe082ccb9a281fa5fa179f118219e229bb906df4e4aa8aee95977b867f45d",
         "0xc55a21be1c6e869c49c7a5860f6c3a83187eb30a12bcd0421f3cf4f5871dccff",
         "key := or(shl(32, tickKey), and(order, 0xffffffff))",
         "key := or(shl(32, sub(0xffffffff, tickKey)), and(order, 0xffffffff))",
@@ -99,7 +97,31 @@ def bind_model_to_source():
         "++rotation.epoch;",
         "return (poolState & _POOL_HOOK_ACTIVE_MASK) | epoch;",
         "uint160 quantity = _quantity(a) + _quantity(b);",
-        "_subtreeQuote(book, a, isBid) + _subtreeQuote(book, b, isBid);",
+        "_subtreeQuote(book, a, isBid, branchLimit) + _subtreeQuote(book, b, isBid, branchLimit);",
+        "branch.quoteTotal -= removedQuote;",
+        "branch.quoteTotal += quoteState.addedQuote;",
+        "correction + roundedReduction - quoteState.removedQuote",
+        "correction + quoteState.removedQuote - roundedReduction",
+        "correction + quoteState.addedQuote - roundedIncrease",
+        "correction + roundedIncrease - quoteState.addedQuote",
+        "correction = oldCorrection + roundedReduction - quoteAmount;",
+        "correction = oldCorrection + quoteAmount - roundedReduction;",
+        "quoteAmount = quoteState.removedQuote;",
+        "if (restingQuote > uint256(type(int256).max)) revert InvalidOrder();",
+        "quoteState.addedQuote = restingQuote;",
+        "topState.branchLimit = _nextBranchSerial(nonceAndFlags);",
+        "quoteState.branchLimit = root == bytes32(0) ? _nextBranchSerial(nonceAndFlags) : newBranchSerial + 1;",
+        "if (_nonce(root) >= quoteState.branchLimit) {",
+        "while (_nonce(node) < branchLimit) {",
+        "if (quoteState.mayReplaceTop && nodeKey > witness) quoteState.outgoingTop = root;",
+        "if (!goRight) quoteState.mayReplaceTop = false;",
+        "if (topState.trackTop && newNode != bytes32(0)) topState.survivingNonce = _nonce(newNode);",
+        "struct MatchTopState {\n        bool trackTop;\n        uint32 survivingNonce;\n"
+        "        uint32 branchLimit;\n        uint256 bufferPointer;\n    }",
+        "mstore(add(topState, 0x60), pointer)",
+        "let pointer := mload(add(topState, 0x60))",
+        "mstore(add(topState, 0x60), 0)",
+        "sstore(add(branchSlot, iszero(leftChanged)), child)",
         "(rightNode, rightFillQuantity, rightQuoteAmount) =",
         "if (remaining != 0) {",
         "bool restAllowed = !params.noRest && routedNonce != 1;",
@@ -143,6 +165,8 @@ def bind_model_to_source():
     missing = [fragment for fragment in fragments if fragment not in source]
     if missing:
         raise ProofFailure(f"production/model binding is stale; missing source fragment: {missing[0]}")
+    if "_MATCH_BUFFER_SLOT" in source:
+        raise ProofFailure("memory-buffer model unexpectedly references a transient buffer pointer")
 
     # Every native outflow must pass through the nine modelled call sites and exactly one of the two
     # transfer helpers. A future direct ETH transfer or additional helper call must extend the proof.
@@ -801,6 +825,73 @@ def prove_tree_transition_summaries(p):
     )
 
 
+def prove_operation_reuse(p):
+    cache = Int("reuse_cache")
+    removed = Int("reuse_removed_quote")
+    added = Int("reuse_added_quote")
+    p.prove(
+        "R4.cached-removal-is-exact-and-representable",
+        And(cache - removed >= 0, cache - removed < UINT256, cache - removed + removed == cache),
+        cache >= 0, cache < UINT256, removed >= 0, removed <= cache,
+    )
+    p.prove(
+        "R4.cached-insertion-is-exact-and-representable",
+        And(cache + added >= 0, cache + added < UINT256),
+        cache >= 0, added >= 0, cache + added < UINT256,
+    )
+
+    old_aggregate = Int("reuse_old_aggregate")
+    new_aggregate = Int("reuse_new_aggregate")
+    old_correction = Int("reuse_old_correction")
+    leaves = Int("reuse_remaining_leaves")
+    for bid in (False, True):
+        old_exact = old_aggregate + old_correction if bid else old_aggregate - old_correction
+        reduction = old_aggregate - new_aggregate
+        increase = new_aggregate - old_aggregate
+        for insert in (False, True):
+            new_exact = old_exact + added if insert else old_exact - removed
+            if insert:
+                correction = old_correction + added - increase if bid else old_correction + increase - added
+            else:
+                correction = old_correction + reduction - removed if bid else old_correction + removed - reduction
+            reference_correction = new_exact - new_aggregate if bid else new_aggregate - new_exact
+            # A5 establishes this bound from the live leaves' individual rounding remainders.
+            p.prove(
+                f"R4.reused-{'bid' if bid else 'ask'}-{'insert' if insert else 'remove'}-correction",
+                And(
+                    correction == reference_correction,
+                    correction >= 0,
+                    correction + 1 <= UINT32_MAX,
+                    (new_aggregate + correction if bid else new_aggregate - correction) == new_exact,
+                ),
+                leaves >= 1, leaves < UINT32_MAX,
+                reference_correction >= 0, reference_correction <= leaves - 1,
+            )
+
+    serial = Int("reuse_new_branch_serial")
+    nonce = Int("reuse_assigned_order_nonce")
+    p.prove(
+        "N2.refreshed-classification-front-preserves-new-leaf",
+        And(serial + 1 <= UINT32_MAX, nonce >= serial + 1, serial < serial + 1),
+        serial >= 1, serial < nonce, nonce <= UINT32_MAX,
+    )
+    context = Int("reuse_match_context_pointer")
+    buffer = Int("reuse_match_buffer_pointer")
+    capacity = Int("reuse_match_buffer_capacity")
+    length = Int("reuse_match_buffer_length")
+    p.prove(
+        "E3.memory-buffer-pointer-field-does-not-overlap-nodes",
+        And(context + 96 >= context, context + 96 + 32 <= buffer),
+        context >= 0, buffer >= context + 128,
+    )
+    p.prove(
+        "E3.memory-buffer-append-remains-in-allocation",
+        And(buffer + 64 + 32 * length >= buffer + 64,
+            buffer + 64 + 32 * length + 32 <= buffer + 64 + 32 * capacity),
+        buffer >= 0, capacity >= 1, length >= 0, length < capacity,
+    )
+
+
 def prove_matching_priority_and_accounting(p):
     remaining = Int("match_remaining")
     right_quantity = Int("match_right_quantity")
@@ -1414,6 +1505,7 @@ def main():
         prove_keys_and_radix(prover)
         prove_nonce_epoch_and_namespaces(prover)
         prove_tree_transition_summaries(prover)
+        prove_operation_reuse(prover)
         prove_matching_priority_and_accounting(prover)
         prove_hook_top_transitions(prover)
         prove_route_and_signed_accounting(prover)

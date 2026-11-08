@@ -1,0 +1,12 @@
+Warning: This is a nightly build of Foundry. It is recommended to use the latest stable version. To mute this warning set `FOUNDRY_DISABLE_NIGHTLY_WARNING` in your environment. 
+
+Warning: `--ir-minimum` enables `viaIR` with minimum optimization, which can result in inaccurate source mappings.
+Only use this flag as a workaround if you are experiencing "stack too deep" errors.
+Note that `viaIR` is production ready since Solidity 0.8.13 and above.
+See more: https://github.com/foundry-rs/foundry/issues/3357
+Compiling 37 files with Solc 0.8.28
+Solc 0.8.28 finished in 1.87s
+Error: Compiler run failed:
+Error: Yul exception:Variable expr_44546_component_1 is 1 too deep in the stack [ RET var_id var_quoteAmount var_book_44371_slot expr_44546_component_1 var_node var_limitPrice zero_uint160 var_remaining var_fillQuantity var_topState_44382_mpos var_restingIsBid var_id var_topState_44382_mpos var_restingIsBid var_remaining var_limitPrice expr_44546_component var_book_44371_slot zero_uint256 zero_bytes32 ]
+memoryguard was present.
+make: *** [coverage-check] Error 1

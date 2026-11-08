@@ -1,8 +1,9 @@
 # Bounded Gas Optimization Opportunities
 
-These are measured **scratch prototypes**, not changes to the working contract or a deployment.
-The history investigation is on the working branch in local commit `3676a54`; this follow-up keeps
-the candidate patches separate so they can be reviewed before promotion. Nothing is pushed.
+This report records the original measured **scratch prototypes**, not a deployment. Candidate E
+is now the baseline for the subsequent working-source implementation and five-stage comparison
+in [Five Bounded Optimizations](five-optimization-workup/README.md). The source captures here
+remain unchanged historical evidence.
 
 The selected candidate is **E / `uniform-difference`**, without the zero-delta quote-cache guard.
 The [complete per-test tables](BOUNDED_GAS_DELTA_TABLES.md) show every measured case and every
@@ -190,9 +191,9 @@ embedding duplicate creation bytecode in the inherited test contract. Constructo
 preserved. No assertions are removed, and this patch does not affect the frozen gas measurements.
 The original compiler-failure log is retained with the evidence.
 
-Before merging an implementation, apply the chosen candidate and its test-harness adaptation,
-add the new arithmetic/source bindings, and rerun the complete release verification gates. The
-current working contract intentionally remains unchanged while these options are investigated.
+Promotion requires the chosen candidate, test-harness adaptation, new arithmetic/source bindings,
+and fresh release verification gates. The subsequent five-stage workup records those implementation
+changes and distinguishes its completed checks from gates not rerun.
 
 ## Further Candidates Not Yet Measured
 

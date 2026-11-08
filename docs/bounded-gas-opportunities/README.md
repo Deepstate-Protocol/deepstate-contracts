@@ -1,7 +1,8 @@
 # Bounded Gas Opportunity Evidence
 
-The [report](../BOUNDED_GAS_OPPORTUNITIES.md) describes exploratory prototypes, not a deployed or
-approved contract revision. The working production source is unchanged.
+The [report](../BOUNDED_GAS_OPPORTUNITIES.md) preserves the original exploratory prototypes, not a
+deployment. Candidate E is the baseline for the subsequent working-source implementation in
+[Five Bounded Optimizations](../five-optimization-workup/README.md).
 
 ## Contents
 

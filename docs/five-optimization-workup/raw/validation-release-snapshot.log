@@ -1,0 +1,261 @@
+Compiling 1 files with Solar 0.8.28
+Solar 0.8.28 finished in 66.50ms
+Compiler run successful with warnings:
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/interfaces/IHook.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/libraries/TickMath32.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/DeepstateV1.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ test/BoundedTraversalGas.t.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[2018]: function state mutability can be restricted to pure
+    ╭▸ src/DeepstateV1.sol:641:5
+    │
+641 │ ┏     function _matchAskLeaf(bytes32 root, int32 limitPrice, uint160 remaining, MatchTopState memory topState)
+642 │ ┃         private
+643 │ ┃         returns (bytes32 newRoot, uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
+    ‡ ┃
+669 │ ┃     }
+    ╰╴┗━━━━━┛
+
+
+warning[2018]: function state mutability can be restricted to pure
+    ╭▸ src/DeepstateV1.sol:679:5
+    │
+679 │ ┏     function _matchBidLeaf(bytes32 root, int32 limitPrice, uint160 remaining, MatchTopState memory topState)
+680 │ ┃         private
+681 │ ┃         returns (bytes32 newRoot, uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
+    ‡ ┃
+707 │ ┃     }
+    ╰╴┗━━━━━┛
+
+
+
+Ran 5 tests for test/RadixMatchingEngineGas.t.sol:DeepstateV1IntegratorFeeGasTest
+[PASS] testGas_IntegratorAndProtocolFeeFill() (gas: 132106)
+[PASS] testGas_IntegratorFillAskFullyMatchesSingleBid() (gas: 106820)
+[PASS] testGas_IntegratorFillBidFullyMatchesSingleAsk() (gas: 107025)
+[PASS] testGas_IntegratorFillRestBidEmptyBook() (gas: 149615)
+[PASS] testGas_IntegratorRouteNetsRepeatedFeeToken() (gas: 119564)
+Suite result: ok. 5 passed; 0 failed; 0 skipped; finished in 1.08ms (517.46µs CPU time)
+
+Ran 6 tests for test/RadixMatchingEngineGas.t.sol:RadixMatchingEngineGasTestNativeDirtySpine
+[PASS] testGas_ObservedNativeBidCancelAfterThreePartialMatches() (gas: 118291)
+[PASS] testGas_ObservedNativeBidPartialMatchAfterDirtySpineRest() (gas: 128314)
+[PASS] testGas_ObservedNativeBidRestsAfterFiveLevelDirtySpine() (gas: 213545)
+[PASS] testGas_PathologicalNativeBidCancelAfterThreePartialMatches() (gas: 656955)
+[PASS] testGas_PathologicalNativeBidPartialMatchAfterDirtySpineRest() (gas: 666528)
+[PASS] testGas_PathologicalNativeBidRestsAfterFullDepthDirtySpine() (gas: 767023)
+Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 72.22ms (71.59ms CPU time)
+
+Ran 42 tests for test/RadixMatchingEngineGas.t.sol:RadixMatchingEngineHookGasTest
+[PASS] testGas_CancelAskSkipsPathologicalBidTree() (gas: 52741)
+[PASS] testGas_CancelFilledBidClaim() (gas: 45178)
+[PASS] testGas_CancelFullDepthBidCombRightmost() (gas: 771962)
+[PASS] testGas_CancelMaxValidDepthAskCombRightmost() (gas: 681887)
+[PASS] testGas_CancelPartialBid() (gas: 65294)
+[PASS] testGas_CancelUnfilledAsk() (gas: 52781)
+[PASS] testGas_CancelUnfilledBid() (gas: 53301)
+[PASS] testGas_DirtyAskCrossLeafNonceComb() (gas: 364355)
+[PASS] testGas_DirtyAskHalfNonceComb() (gas: 267547)
+[PASS] testGas_DirtyAskNearlyWholeNonceComb() (gas: 164165)
+[PASS] testGas_DirtyAskSmallFill16Orders() (gas: 124002)
+[PASS] testGas_DirtyAskSmallFill64Orders() (gas: 141221)
+[PASS] testGas_DirtyAskSmallFillNonceComb() (gas: 366327)
+[PASS] testGas_DirtyAskWholeNonceComb() (gas: 149673)
+[PASS] testGas_DirtyBidCrossLeafNonceComb() (gas: 365302)
+[PASS] testGas_DirtyBidHalfNonceComb() (gas: 268340)
+[PASS] testGas_DirtyBidNearlyWholeNonceComb() (gas: 165052)
+[PASS] testGas_DirtyBidSmallFill16Orders() (gas: 124735)
+[PASS] testGas_DirtyBidSmallFill64Orders() (gas: 142143)
+[PASS] testGas_DirtyBidSmallFillNonceComb() (gas: 367165)
+[PASS] testGas_DirtyBidWholeNonceComb() (gas: 150450)
+[PASS] testGas_FillAskConsumesDirtySamePriceBidSubtree() (gas: 78067)
+[PASS] testGas_FillAskConsumesFullDepthBidComb() (gas: 231103)
+[PASS] testGas_FillAskFullyMatchesSingleBid() (gas: 88634)
+[PASS] testGas_FillAskPartiallyMatchesOffSpineBidBranch() (gas: 115912)
+[PASS] testGas_FillAskPartiallyMatchesSingleBid() (gas: 98604)
+[PASS] testGas_FillBidConsumesAskAndRestsRemainder() (gas: 141094)
+[PASS] testGas_FillBidConsumesDirtySamePriceAskSubtree() (gas: 77226)
+[PASS] testGas_FillBidConsumesMaxValidDepthAskComb() (gas: 230489)
+[PASS] testGas_FillBidConsumesSamePriceAskSubtree() (gas: 96504)
+[PASS] testGas_FillBidFullyMatchesSingleAsk() (gas: 87987)
+[PASS] testGas_FillBidPartiallyMatchesOffSpineAskBranch() (gas: 115070)
+[PASS] testGas_FillBidPartiallyMatchesSingleAsk() (gas: 97946)
+[PASS] testGas_FillRestAskEmptyBook() (gas: 137465)
+[PASS] testGas_FillRestBidEmptyBook() (gas: 137700)
+[PASS] testGas_LargeRandomBookAskMatchesOneBid() (gas: 170982)
+[PASS] testGas_LargeRandomBookBidMatchesOneAsk() (gas: 212327)
+[PASS] testGas_LargeRandomBookPartialFillsAsk() (gas: 214523)
+[PASS] testGas_LargeRandomBookPartialFillsBid() (gas: 175927)
+[PASS] testGas_LargeRandomBookRestsAsk() (gas: 225343)
+[PASS] testGas_LargeRandomBookRestsBid() (gas: 234498)
+[PASS] testGas_PathologicalOffSpinePartialFillBidComb() (gas: 776722)
+Suite result: ok. 42 passed; 0 failed; 0 skipped; finished in 127.14s (127.14s CPU time)
+
+Ran 42 tests for test/RadixMatchingEngineGas.t.sol:RadixMatchingEngineFeeGasTest
+[PASS] testGas_CancelAskSkipsPathologicalBidTree() (gas: 47763)
+[PASS] testGas_CancelFilledBidClaim() (gas: 44676)
+[PASS] testGas_CancelFullDepthBidCombRightmost() (gas: 752137)
+[PASS] testGas_CancelMaxValidDepthAskCombRightmost() (gas: 662911)
+[PASS] testGas_CancelPartialBid() (gas: 59604)
+[PASS] testGas_CancelUnfilledAsk() (gas: 47803)
+[PASS] testGas_CancelUnfilledBid() (gas: 47610)
+[PASS] testGas_DirtyAskCrossLeafNonceComb() (gas: 352031)
+[PASS] testGas_DirtyAskHalfNonceComb() (gas: 250049)
+[PASS] testGas_DirtyAskNearlyWholeNonceComb() (gas: 114667)
+[PASS] testGas_DirtyAskSmallFill16Orders() (gas: 117290)
+[PASS] testGas_DirtyAskSmallFill64Orders() (gas: 134107)
+[PASS] testGas_DirtyAskSmallFillNonceComb() (gas: 353987)
+[PASS] testGas_DirtyAskWholeNonceComb() (gas: 98115)
+[PASS] testGas_DirtyBidCrossLeafNonceComb() (gas: 351993)
+[PASS] testGas_DirtyBidHalfNonceComb() (gas: 249857)
+[PASS] testGas_DirtyBidNearlyWholeNonceComb() (gas: 114569)
+[PASS] testGas_DirtyBidSmallFill16Orders() (gas: 117038)
+[PASS] testGas_DirtyBidSmallFill64Orders() (gas: 134044)
+[PASS] testGas_DirtyBidSmallFillNonceComb() (gas: 353840)
+[PASS] testGas_DirtyBidWholeNonceComb() (gas: 97907)
+[PASS] testGas_FillAskConsumesDirtySamePriceBidSubtree() (gas: 64527)
+[PASS] testGas_FillAskConsumesFullDepthBidComb() (gas: 108252)
+[PASS] testGas_FillAskFullyMatchesSingleBid() (gas: 81757)
+[PASS] testGas_FillAskPartiallyMatchesOffSpineBidBranch() (gas: 106633)
+[PASS] testGas_FillAskPartiallyMatchesSingleBid() (gas: 91776)
+[PASS] testGas_FillBidConsumesAskAndRestsRemainder() (gas: 133502)
+[PASS] testGas_FillBidConsumesDirtySamePriceAskSubtree() (gas: 64671)
+[PASS] testGas_FillBidConsumesMaxValidDepthAskComb() (gas: 83676)
+[PASS] testGas_FillBidConsumesSamePriceAskSubtree() (gas: 81748)
+[PASS] testGas_FillBidFullyMatchesSingleAsk() (gas: 82016)
+[PASS] testGas_FillBidPartiallyMatchesOffSpineAskBranch() (gas: 106776)
+[PASS] testGas_FillBidPartiallyMatchesSingleAsk() (gas: 92024)
+[PASS] testGas_FillRestAskEmptyBook() (gas: 148515)
+[PASS] testGas_FillRestBidEmptyBook() (gas: 148751)
+[PASS] testGas_LargeRandomBookAskMatchesOneBid() (gas: 158954)
+[PASS] testGas_LargeRandomBookBidMatchesOneAsk() (gas: 198044)
+[PASS] testGas_LargeRandomBookPartialFillsAsk() (gas: 206591)
+[PASS] testGas_LargeRandomBookPartialFillsBid() (gas: 167446)
+[PASS] testGas_LargeRandomBookRestsAsk() (gas: 197097)
+[PASS] testGas_LargeRandomBookRestsBid() (gas: 211116)
+[PASS] testGas_PathologicalOffSpinePartialFillBidComb() (gas: 794572)
+Suite result: ok. 42 passed; 0 failed; 0 skipped; finished in 132.24s (132.24s CPU time)
+
+Ran 42 tests for test/RadixMatchingEngineGas.t.sol:RadixMatchingEngineGasTest
+[PASS] testGas_CancelAskSkipsPathologicalBidTree() (gas: 47763)
+[PASS] testGas_CancelFilledBidClaim() (gas: 44676)
+[PASS] testGas_CancelFullDepthBidCombRightmost() (gas: 752137)
+[PASS] testGas_CancelMaxValidDepthAskCombRightmost() (gas: 662911)
+[PASS] testGas_CancelPartialBid() (gas: 59604)
+[PASS] testGas_CancelUnfilledAsk() (gas: 47803)
+[PASS] testGas_CancelUnfilledBid() (gas: 47610)
+[PASS] testGas_DirtyAskCrossLeafNonceComb() (gas: 351597)
+[PASS] testGas_DirtyAskHalfNonceComb() (gas: 224789)
+[PASS] testGas_DirtyAskNearlyWholeNonceComb() (gas: 89407)
+[PASS] testGas_DirtyAskSmallFill16Orders() (gas: 116856)
+[PASS] testGas_DirtyAskSmallFill64Orders() (gas: 133673)
+[PASS] testGas_DirtyAskSmallFillNonceComb() (gas: 353553)
+[PASS] testGas_DirtyAskWholeNonceComb() (gas: 72855)
+[PASS] testGas_DirtyBidCrossLeafNonceComb() (gas: 351574)
+[PASS] testGas_DirtyBidHalfNonceComb() (gas: 224612)
+[PASS] testGas_DirtyBidNearlyWholeNonceComb() (gas: 89324)
+[PASS] testGas_DirtyBidSmallFill16Orders() (gas: 116619)
+[PASS] testGas_DirtyBidSmallFill64Orders() (gas: 133625)
+[PASS] testGas_DirtyBidSmallFillNonceComb() (gas: 353421)
+[PASS] testGas_DirtyBidWholeNonceComb() (gas: 72662)
+[PASS] testGas_FillAskConsumesDirtySamePriceBidSubtree() (gas: 64108)
+[PASS] testGas_FillAskConsumesFullDepthBidComb() (gas: 83007)
+[PASS] testGas_FillAskFullyMatchesSingleBid() (gas: 81338)
+[PASS] testGas_FillAskPartiallyMatchesOffSpineBidBranch() (gas: 106214)
+[PASS] testGas_FillAskPartiallyMatchesSingleBid() (gas: 91357)
+[PASS] testGas_FillBidConsumesAskAndRestsRemainder() (gas: 133068)
+[PASS] testGas_FillBidConsumesDirtySamePriceAskSubtree() (gas: 64237)
+[PASS] testGas_FillBidConsumesMaxValidDepthAskComb() (gas: 83242)
+[PASS] testGas_FillBidConsumesSamePriceAskSubtree() (gas: 81314)
+[PASS] testGas_FillBidFullyMatchesSingleAsk() (gas: 81582)
+[PASS] testGas_FillBidPartiallyMatchesOffSpineAskBranch() (gas: 106342)
+[PASS] testGas_FillBidPartiallyMatchesSingleAsk() (gas: 91590)
+[PASS] testGas_FillRestAskEmptyBook() (gas: 148353)
+[PASS] testGas_FillRestBidEmptyBook() (gas: 148588)
+[PASS] testGas_LargeRandomBookAskMatchesOneBid() (gas: 158535)
+[PASS] testGas_LargeRandomBookBidMatchesOneAsk() (gas: 197610)
+[PASS] testGas_LargeRandomBookPartialFillsAsk() (gas: 206157)
+[PASS] testGas_LargeRandomBookPartialFillsBid() (gas: 167027)
+[PASS] testGas_LargeRandomBookRestsAsk() (gas: 196935)
+[PASS] testGas_LargeRandomBookRestsBid() (gas: 210953)
+[PASS] testGas_PathologicalOffSpinePartialFillBidComb() (gas: 769327)
+Suite result: ok. 42 passed; 0 failed; 0 skipped; finished in 133.91s (133.91s CPU time)
+
+Ran 51 tests for test/BoundedTraversalGas.t.sol:RadixMatchingEngineGasTestWideSweep
+[PASS] testGas_CancelAskSkipsPathologicalBidTree() (gas: 47785)
+[PASS] testGas_CancelFilledBidClaim() (gas: 44720)
+[PASS] testGas_CancelFullDepthBidCombRightmost() (gas: 752137)
+[PASS] testGas_CancelMaxValidDepthAskCombRightmost() (gas: 662911)
+[PASS] testGas_CancelPartialBid() (gas: 59626)
+[PASS] testGas_CancelUnfilledAsk() (gas: 47803)
+[PASS] testGas_CancelUnfilledBid() (gas: 47610)
+[PASS] testGas_DirtyAskCrossLeafNonceComb() (gas: 351597)
+[PASS] testGas_DirtyAskHalfNonceComb() (gas: 224789)
+[PASS] testGas_DirtyAskNearlyWholeNonceComb() (gas: 89429)
+[PASS] testGas_DirtyAskSmallFill16Orders() (gas: 116856)
+[PASS] testGas_DirtyAskSmallFill64Orders() (gas: 133695)
+[PASS] testGas_DirtyAskSmallFillNonceComb() (gas: 353553)
+[PASS] testGas_DirtyAskWholeNonceComb() (gas: 72899)
+[PASS] testGas_DirtyBidCrossLeafNonceComb() (gas: 351596)
+[PASS] testGas_DirtyBidHalfNonceComb() (gas: 224612)
+[PASS] testGas_DirtyBidNearlyWholeNonceComb() (gas: 89324)
+[PASS] testGas_DirtyBidSmallFill16Orders() (gas: 116641)
+[PASS] testGas_DirtyBidSmallFill64Orders() (gas: 133625)
+[PASS] testGas_DirtyBidSmallFillNonceComb() (gas: 353421)
+[PASS] testGas_DirtyBidWholeNonceComb() (gas: 72662)
+[PASS] testGas_FillAskConsumesDirtySamePriceBidSubtree() (gas: 64108)
+[PASS] testGas_FillAskConsumesFullDepthBidComb() (gas: 83007)
+[PASS] testGas_FillAskFullyMatchesSingleBid() (gas: 81338)
+[PASS] testGas_FillAskPartiallyMatchesOffSpineBidBranch() (gas: 106214)
+[PASS] testGas_FillAskPartiallyMatchesSingleBid() (gas: 91357)
+[PASS] testGas_FillBidConsumesAskAndRestsRemainder() (gas: 133068)
+[PASS] testGas_FillBidConsumesDirtySamePriceAskSubtree() (gas: 64237)
+[PASS] testGas_FillBidConsumesMaxValidDepthAskComb() (gas: 83242)
+[PASS] testGas_FillBidConsumesSamePriceAskSubtree() (gas: 81314)
+[PASS] testGas_FillBidFullyMatchesSingleAsk() (gas: 81582)
+[PASS] testGas_FillBidPartiallyMatchesOffSpineAskBranch() (gas: 106342)
+[PASS] testGas_FillBidPartiallyMatchesSingleAsk() (gas: 91590)
+[PASS] testGas_FillRestAskEmptyBook() (gas: 148353)
+[PASS] testGas_FillRestBidEmptyBook() (gas: 148632)
+[PASS] testGas_LargeRandomBookAskMatchesOneBid() (gas: 158535)
+[PASS] testGas_LargeRandomBookBidMatchesOneAsk() (gas: 197610)
+[PASS] testGas_LargeRandomBookPartialFillsAsk() (gas: 206223)
+[PASS] testGas_LargeRandomBookPartialFillsBid() (gas: 167027)
+[PASS] testGas_LargeRandomBookRestsAsk() (gas: 196935)
+[PASS] testGas_LargeRandomBookRestsBid() (gas: 210953)
+[PASS] testGas_MixedSweep1024() (gas: 104931)
+[PASS] testGas_MixedSweep1024AndRest() (gas: 156468)
+[PASS] testGas_MixedSweep1024BurningHookAndFees() (gas: 356138)
+[PASS] testGas_MixedSweep1024FitsOneMillionGas() (gas: 104353)
+[PASS] testGas_MixedSweep1024RestBurningHooksAndFees() (gas: 609339)
+[PASS] testGas_MixedSweep256() (gas: 104695)
+[PASS] testGas_MixedSweep4096() (gas: 105699)
+[PASS] testGas_MixedSweep4096RestBurningHooksAndFees() (gas: 616600)
+[PASS] testGas_MixedSweep64() (gas: 104570)
+[PASS] testGas_PathologicalOffSpinePartialFillBidComb() (gas: 769327)
+Suite result: ok. 51 passed; 0 failed; 0 skipped; finished in 137.27s (146.57s CPU time)
+
+Ran 6 test suites in 137.27s (530.63s CPU time): 188 tests passed, 0 failed, 0 skipped (188 total tests)
