@@ -1,0 +1,46 @@
+{
+  "variant": "uniform-difference",
+  "compiler": "0.8.28+commit.7893614a",
+  "settings": {
+    "remappings": [
+      "forge-std/=/private/tmp/deepstate-solar-gas-20261107/contracts/lib/forge-std/src/",
+      "solady/=/private/tmp/deepstate-solar-gas-20261107/contracts/lib/solady/src/"
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "compilationTarget": {
+      "src/DeepstateV1.sol": "DeepstateV1"
+    },
+    "evmVersion": "cancun",
+    "libraries": {},
+    "viaIR": true
+  },
+  "sourceSha256": "45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+  "sourceKeccak256": "0xd23a1dfc7876084f329d844fbecb691403fff61bb5738c5d2ee515ed529a317d",
+  "runtimeSha256": "745c1faeae48a4daf4d037c57c7899b772a38a2ad8a204bb44039b279d2e0586",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "baseline": "096eab28d87debdd472b4e22e65820e2b1b8d523",
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "uniform-difference-release.log",
+      "snapshot": "uniform-difference-release.snapshot",
+      "logSha256": "2726c4805da804fba9b64bd860af7141dfc38218d61e6ae711121511c421f13b",
+      "snapshotSha256": "9b125de3f58c0ef133509967ebb2671ae2d4ac25fca78c6c6ad19180f29b3bf7"
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "uniform-difference-insertion.log",
+      "snapshot": "uniform-difference-insertion.snapshot",
+      "logSha256": "acae25fc27df2f03c7c70f37d9ec56808b657225b4ddc019cf037fb880d66140",
+      "snapshotSha256": "bc772d9ae1c8fc7f0c7db990c248fe346ddc441d4af7f33414a22496f732b096"
+    }
+  ]
+}

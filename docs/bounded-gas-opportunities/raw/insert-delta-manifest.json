@@ -1,0 +1,46 @@
+{
+  "variant": "insert-delta",
+  "compiler": "0.8.28+commit.7893614a",
+  "settings": {
+    "remappings": [
+      "forge-std/=/private/tmp/deepstate-solar-gas-20261107/contracts/lib/forge-std/src/",
+      "solady/=/private/tmp/deepstate-solar-gas-20261107/contracts/lib/solady/src/"
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "compilationTarget": {
+      "src/DeepstateV1.sol": "DeepstateV1"
+    },
+    "evmVersion": "cancun",
+    "libraries": {},
+    "viaIR": true
+  },
+  "sourceSha256": "42c8b8ebd4afba76715517c79349ab16aeb6989baa7d9733e2e0fb44614b8227",
+  "sourceKeccak256": "0xeca18fbb398549515ab6d20c17b2393aeaa204ebdc7cf077b41dd92d2ff042c3",
+  "runtimeSha256": "d7fdf87f1f300931dc418e437f9854ff4c15773fb97a54fa489a54ebbdab0099",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "baseline": "096eab28d87debdd472b4e22e65820e2b1b8d523",
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "insert-delta-release.log",
+      "snapshot": "insert-delta-release.snapshot",
+      "logSha256": "f44dd3c79ec03681d28f70a0fda3a5486a5a06e4b588e22cbb232926a1094341",
+      "snapshotSha256": "877b4693fdf1f34a76eed93385c9a2d08fa47e1bea0cdf778e72f9cbdebf1e7c"
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "insert-delta-insertion.log",
+      "snapshot": "insert-delta-insertion.snapshot",
+      "logSha256": "e5c83fa38f2b359f634a9b5b488d5fb33013dec1544ffc8ddbd217b193f93ec6",
+      "snapshotSha256": "bc772d9ae1c8fc7f0c7db990c248fe346ddc441d4af7f33414a22496f732b096"
+    }
+  ]
+}

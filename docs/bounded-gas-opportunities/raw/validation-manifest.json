@@ -1,0 +1,53 @@
+{
+  "sourceSha256": "45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+  "variant": "uniform-difference",
+  "runs": [
+    {
+      "group": "bounds",
+      "args": [
+        "test",
+        "--match-contract",
+        "^BoundedTraversalTest$",
+        "--match-test",
+        "^(test_|testFuzz_)",
+        "--fuzz-runs",
+        "256",
+        "--threads",
+        "4"
+      ],
+      "summary": "Ran 1 test suite in 3.32s (3.32s CPU time): 5 tests passed, 0 failed, 0 skipped (5 total tests)",
+      "log": "validation-bounds.log",
+      "logSha256": "91e41c81fe57cdda0afe722f2741fc7a123ef1058e5d75ea3a2e49b1148f5209"
+    },
+    {
+      "group": "behavioral",
+      "args": [
+        "test",
+        "--no-match-contract",
+        "(Invariant|Gas|AccessList|BoundedTraversal)",
+        "--fuzz-runs",
+        "256",
+        "--threads",
+        "4"
+      ],
+      "summary": "Ran 12 test suites in 339.96ms (1.19s CPU time): 290 tests passed, 0 failed, 0 skipped (290 total tests)",
+      "log": "validation-behavioral.log",
+      "logSha256": "e02b02482f747f028852ebf765bd9f734570ad42b1f8ff84f86579a41017ea24"
+    },
+    {
+      "group": "invariants",
+      "args": [
+        "test",
+        "--match-contract",
+        ".*(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest|DeepstateV1NativeETHInvariantTest).*",
+        "--match-test",
+        "invariant_.*",
+        "--threads",
+        "4"
+      ],
+      "summary": "Ran 3 test suites in 357.14s (824.04s CPU time): 38 tests passed, 0 failed, 0 skipped (38 total tests)",
+      "log": "validation-invariants.log",
+      "logSha256": "090dfa8d5c92825c85ca7360dcb15ebf1313c701a09d2117cb6213b2e3e0a478"
+    }
+  ]
+}

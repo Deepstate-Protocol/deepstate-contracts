@@ -1,0 +1,19 @@
+No files changed, compilation skipped
+2026-11-08T00:45:50.841502Z  WARN evm::traces::external: etherscan config not found
+
+Ran 12 tests for test/OpportunityGasProbe.t.sol:OpportunityGasProbe
+[PASS] testOpportunity_RestAsk16Orders() (gas: 160825)
+[PASS] testOpportunity_RestAsk64Orders() (gas: 170012)
+[PASS] testOpportunity_RestAskDifferentTickLeftNonceComb() (gas: 291723)
+[PASS] testOpportunity_RestAskDirtyLeftNonceComb() (gas: 434330)
+[PASS] testOpportunity_RestAskLeftNonceComb() (gas: 434023)
+[PASS] testOpportunity_RestAskWorseTickLeftNonceComb() (gas: 292666)
+[PASS] testOpportunity_RestBid16Orders() (gas: 162793)
+[PASS] testOpportunity_RestBid64Orders() (gas: 172464)
+[PASS] testOpportunity_RestBidDifferentTickLeftNonceComb() (gas: 293539)
+[PASS] testOpportunity_RestBidDirtyLeftNonceComb() (gas: 436855)
+[PASS] testOpportunity_RestBidLeftNonceComb() (gas: 436834)
+[PASS] testOpportunity_RestBidWorseTickLeftNonceComb() (gas: 294039)
+Suite result: ok. 12 passed; 0 failed; 0 skipped; finished in 16.64ms (55.38ms CPU time)
+
+Ran 1 test suite in 107.98ms (16.64ms CPU time): 12 tests passed, 0 failed, 0 skipped (12 total tests)

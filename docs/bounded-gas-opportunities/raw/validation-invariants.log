@@ -1,0 +1,1063 @@
+Compiling 31 files with Solc 0.8.28
+Solc 0.8.28 finished in 60.70s
+Compiler run successful with warnings:
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> src/DeepstateV1.sol:471:9:
+    |
+471 |         uint256 nonceAndFlags,
+    |         ^^^^^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> test/RadixMatchingEngine.t.sol:359:9:
+    |
+359 |         bytes32 lowAsk = engine.fill(_order(80, 1, 0), false);
+    |         ^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> test/RadixMatchingEngine.t.sol:362:9:
+    |
+362 |         bytes32 highAsk = engine.fill(_order(90, 1, 0), false);
+    |         ^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> test/RadixMatchingEngine.t.sol:375:9:
+    |
+375 |         bytes32 highBid = engine.fill(_order(100, 1, 0), true);
+    |         ^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+   --> test/RadixMatchingEngine.t.sol:378:9:
+    |
+378 |         bytes32 lowBid = engine.fill(_order(90, 1, 0), true);
+    |         ^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+    --> test/RadixMatchingEngine.t.sol:2143:9:
+     |
+2143 |         bytes32 subtreeRoot = _branchFor(higherBid, lowerBid, true);
+     |         ^^^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+    --> test/RadixMatchingEngine.t.sol:2574:9:
+     |
+2574 |         bytes32 reducedFirstAsk = _order(60, 1, _nonce(firstAsk));
+     |         ^^^^^^^^^^^^^^^^^^^^^^^
+
+Warning (2072): Unused local variable.
+    --> test/RadixMatchingEngine.t.sol:2618:9:
+     |
+2618 |         bytes32 reducedFirstBid = _order(80, 1, _nonce(firstBid));
+     |         ^^^^^^^^^^^^^^^^^^^^^^^
+
+2026-11-08T00:57:56.523851Z  WARN evm::traces::external: etherscan config not found
+
+Ran 3 tests for test/DeepstateV1Invariant.t.sol:DeepstateV1MultiPoolInvariantTest
+[PASS] invariant_MultiPoolAccountingAndConservation() (runs: 256, calls: 16384, reverts: 0)
+
+╭-----------------------------+----------------------------+-------+---------+----------╮
+| Contract                    | Selector                   | Calls | Reverts | Discards |
++=======================================================================================+
+| DeepstateV1MultiPoolHandler | cancel                     | 1368  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | configureFee               | 1371  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | configureHook              | 1448  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeAsk                   | 1360  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeAskWithIntegrator     | 1364  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeBid                   | 1342  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeBidWithIntegrator     | 1340  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | rotatePool                 | 1376  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeForward               | 1359  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeForwardWithIntegrator | 1385  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeReverse               | 1346  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeReverseWithIntegrator | 1325  | 0       | 0        |
+╰-----------------------------+----------------------------+-------+---------+----------╯
+
+[PASS] invariant_MultiPoolEpochFeeHookAndExecutionState() (runs: 256, calls: 16384, reverts: 0)
+
+╭-----------------------------+----------------------------+-------+---------+----------╮
+| Contract                    | Selector                   | Calls | Reverts | Discards |
++=======================================================================================+
+| DeepstateV1MultiPoolHandler | cancel                     | 1391  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | configureFee               | 1372  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | configureHook              | 1417  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeAsk                   | 1308  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeAskWithIntegrator     | 1336  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeBid                   | 1353  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeBidWithIntegrator     | 1375  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | rotatePool                 | 1325  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeForward               | 1366  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeForwardWithIntegrator | 1412  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeReverse               | 1358  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeReverseWithIntegrator | 1371  | 0       | 0        |
+╰-----------------------------+----------------------------+-------+---------+----------╯
+
+[PASS] invariant_MultiPoolOrdersBooksAndPriority() (runs: 256, calls: 16384, reverts: 0)
+
+╭-----------------------------+----------------------------+-------+---------+----------╮
+| Contract                    | Selector                   | Calls | Reverts | Discards |
++=======================================================================================+
+| DeepstateV1MultiPoolHandler | cancel                     | 1357  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | configureFee               | 1357  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | configureHook              | 1389  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeAsk                   | 1336  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeAskWithIntegrator     | 1408  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeBid                   | 1387  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeBidWithIntegrator     | 1375  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | rotatePool                 | 1370  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeForward               | 1380  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeForwardWithIntegrator | 1282  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeReverse               | 1317  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeReverseWithIntegrator | 1426  | 0       | 0        |
+╰-----------------------------+----------------------------+-------+---------+----------╯
+
+Suite result: ok. 3 passed; 0 failed; 0 skipped; finished in 109.91s (196.84s CPU time)
+
+Ran 3 tests for test/DeepstateV1NativeETHInvariant.t.sol:DeepstateV1NativeETHInvariantTest
+[PASS] invariant_NativeActorFeeAndSupplyAccounting() (runs: 256, calls: 16384, reverts: 0)
+
+╭-----------------------------+-------------------------+-------+---------+----------╮
+| Contract                    | Selector                | Calls | Reverts | Discards |
++====================================================================================+
+| DeepstateV1NativeETHHandler | cancel                  | 1652  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | configureFee            | 1647  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeAsk                | 1628  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeAskWithIntegrator  | 1590  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeBid                | 1649  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeBidWithIntegrator  | 1622  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsAsk               | 1693  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsAskWithIntegrator | 1652  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsBid               | 1627  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsBidWithIntegrator | 1624  | 0       | 0        |
+╰-----------------------------+-------------------------+-------+---------+----------╯
+
+[PASS] invariant_NativeCollateralEqualsOutstandingClaims() (runs: 256, calls: 16384, reverts: 0)
+
+╭-----------------------------+-------------------------+-------+---------+----------╮
+| Contract                    | Selector                | Calls | Reverts | Discards |
++====================================================================================+
+| DeepstateV1NativeETHHandler | cancel                  | 1649  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | configureFee            | 1580  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeAsk                | 1655  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeAskWithIntegrator  | 1605  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeBid                | 1607  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeBidWithIntegrator  | 1656  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsAsk               | 1627  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsAskWithIntegrator | 1718  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsBid               | 1609  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsBidWithIntegrator | 1678  | 0       | 0        |
+╰-----------------------------+-------------------------+-------+---------+----------╯
+
+[PASS] invariant_NativeOrdersMatchReferenceModel() (runs: 256, calls: 16384, reverts: 0)
+
+╭-----------------------------+-------------------------+-------+---------+----------╮
+| Contract                    | Selector                | Calls | Reverts | Discards |
++====================================================================================+
+| DeepstateV1NativeETHHandler | cancel                  | 1605  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | configureFee            | 1651  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeAsk                | 1669  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeAskWithIntegrator  | 1641  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeBid                | 1613  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeBidWithIntegrator  | 1638  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsAsk               | 1698  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsAskWithIntegrator | 1624  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsBid               | 1653  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsBidWithIntegrator | 1592  | 0       | 0        |
+╰-----------------------------+-------------------------+-------+---------+----------╯
+
+Suite result: ok. 3 passed; 0 failed; 0 skipped; finished in 356.99s (387.99s CPU time)
+
+Ran 32 tests for test/RadixMatchingEngineInvariant.t.sol:RadixMatchingEngineInvariantTest
+[PASS] invariant_ActiveOrderBookStateMatchesRemainingQuantity() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1658  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1641  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1642  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1768  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1583  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1592  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1642  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1597  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1672  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1589  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_ActiveOrderSideKeysAreUnique() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1672  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1644  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1613  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1588  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1652  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1697  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1598  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1594  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1682  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1644  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_ActiveOrdersHaveExpectedCancelRouting() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1617  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1670  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1659  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1633  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1576  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1685  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1607  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1661  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1680  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1596  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_ActorBalancesMatchModel() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1561  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1619  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1680  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1656  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1694  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1620  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1663  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1630  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1592  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1669  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_AllActiveOrdersCanCancelAndClaimSequentially() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1653  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1648  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1656  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1685  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1645  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1628  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1638  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1638  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1585  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1608  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_BestOrdersMatchTrackedPriority() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1700  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1576  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1610  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1636  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1574  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1682  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1670  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1656  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1622  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1658  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_BestPricesMatchTrackedOrders() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1644  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1649  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1564  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1571  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1602  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1810  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1659  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1572  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1681  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1632  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_BidAskBranchesDoNotShareStorage() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1616  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1703  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1603  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1594  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1662  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1568  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1700  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1627  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1684  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1627  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_BooksAreNotCrossed() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1622  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1677  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1647  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1666  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1645  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1621  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1617  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1643  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1642  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1604  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_CollateralEqualsOutstandingClaims() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1622  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1588  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1614  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1619  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1637  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1620  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1622  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1666  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1671  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1725  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_EachActiveOrderClaimIsIndividuallyCollateralized() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1685  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1651  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1576  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1654  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1633  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1615  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1599  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1680  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1670  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1621  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_InactiveTrackedOrdersAreAbsentFromBooks() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1576  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1613  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1639  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1668  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1631  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1606  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1665  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1617  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1679  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1690  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_LiveBookNodesAreUnique() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1674  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1587  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1658  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1626  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1659  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1670  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1584  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1586  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1638  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1702  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_LiveBranchesAreReachableByContractRouting() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1611  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1657  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1654  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1581  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1609  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1682  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1628  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1646  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1638  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1678  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_LiveLeafSideKeysAreUnique() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1630  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1692  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1672  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1686  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1618  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1659  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1576  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1636  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1614  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1601  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_LiveLeavesAreBackedByActiveOrders() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1626  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1604  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1631  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1671  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1631  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1623  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1679  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1610  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1653  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1656  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_ModelRemainingQuantitiesMatchBook() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1621  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1656  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1649  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1669  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1610  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1660  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1627  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1594  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1618  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1680  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_NoUnexpectedHandlerReverts() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1673  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1664  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1647  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1644  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1642  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1637  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1680  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1605  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1628  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1564  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_NonceAccountingMatchesRestedOrders() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1624  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1601  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1606  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1648  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1674  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1647  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1627  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1610  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1664  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1683  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_OpenTrackedLeavesHaveNoBranchStorage() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1673  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1639  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1609  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1645  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1650  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1599  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1614  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1613  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1615  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1727  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_OrderSideMatchesTrackedOrders() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1642  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1679  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1600  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1604  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1641  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1673  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1617  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1723  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1631  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1574  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_OwnedLiveBranchesAreBackedByPartialOrders() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1581  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1559  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1621  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1621  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1608  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1648  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1653  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1704  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1681  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1708  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_OwnerMappingMatchesTrackedOrders() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1645  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1641  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1626  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1621  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1670  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1589  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1649  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1654  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1586  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1703  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_ReducedLiveLeafKeysAreNotOwnedOrders() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1629  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1672  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1622  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1607  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1688  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1629  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1603  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1631  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1638  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1665  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_RepresentativeActiveOrdersCanCancelAndClaim() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1642  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1677  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1625  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1630  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1622  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1593  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1660  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1659  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1669  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1607  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_RightSpineQuantitiesNeverUnderstateLiveLeaves() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1665  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1616  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1649  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1670  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1683  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1687  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1607  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1592  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1631  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1584  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_TotalTokenSupplyConserved() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1643  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1611  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1668  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1670  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1661  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1618  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1635  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1688  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1658  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1532  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_TrackedOrderNoncesAreStrictlyDecrementing() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1635  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1640  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1627  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1587  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1675  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1619  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1613  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1683  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1674  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1631  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_TrackedOrdersAppearOnlyOnExpectedSide() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1636  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1606  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1616  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1710  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1616  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1610  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1624  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1659  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1676  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1631  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_TreeAggregatesAndBranchShape() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1661  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1564  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1625  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1691  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1638  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1609  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1641  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1636  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1627  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1692  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_TreeQuantitiesMatchTrackedRemaining() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1653  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1641  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1559  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1642  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1628  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1643  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1656  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1656  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1657  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1649  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+[PASS] invariant_ZeroQuantityKeysHaveNoBranchStorage() (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1606  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1695  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1613  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1660  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1622  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1664  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1587  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1661  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1627  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1649  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+Suite result: ok. 32 passed; 0 failed; 0 skipped; finished in 357.14s (1438.81s CPU time)
+
+Ran 3 test suites in 357.14s (824.04s CPU time): 38 tests passed, 0 failed, 0 skipped (38 total tests)

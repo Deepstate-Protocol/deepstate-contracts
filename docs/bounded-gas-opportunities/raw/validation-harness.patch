@@ -1,0 +1,76 @@
+diff --git a/test/BoundedTraversal.t.sol b/test/BoundedTraversal.t.sol
+index 48786b0..6116171 100644
+--- a/test/BoundedTraversal.t.sol
++++ b/test/BoundedTraversal.t.sol
+@@ -22,8 +22,7 @@ contract TraversalEngine is DeepstateV1 {
+ 
+ contract BoundedTraversalTest is RadixMatchingEngineGasTest {
+     function _afterSetUp() internal override {
+-        TraversalEngine instrumented = new TraversalEngine();
+-        vm.etch(address(engine), address(instrumented).code);
++        vm.etch(address(engine), vm.getDeployedCode("BoundedTraversal.t.sol:TraversalEngine"));
+         quote.mint(alice, uint256(1) << 220);
+         quote.mint(bob, uint256(1) << 220);
+     }
+@@ -83,6 +82,30 @@ contract BoundedTraversalTest is RadixMatchingEngineGasTest {
+         assertEq(_walks(2), 64, "exercise full cancellation path");
+     }
+ 
++    function test_DifferentBidTickSplitsAboveUniformSubtreeWithoutWitnessDescent() public {
++        for (uint256 i; i < 128; ++i) {
++            vm.prank(alice);
++            _fill(_order(0, 1, 0), true);
++        }
++        _reset();
++        vm.prank(alice);
++        _fill(_order(-1, 1, 0), true);
++        assertEq(_walks(1), 1, "price prefix proves split at root");
++        _assertSummaries(_bidRoot(), true);
++    }
++
++    function test_DifferentAskTickSplitsAboveUniformSubtreeWithoutWitnessDescent() public {
++        for (uint256 i; i < 128; ++i) {
++            vm.prank(alice);
++            _fill(_order(0, 1, 0), false);
++        }
++        _reset();
++        vm.prank(alice);
++        _fill(_order(1, 1, 0), false);
++        assertEq(_walks(1), 1, "price prefix proves split at root");
++        _assertSummaries(_askRoot(), false);
++    }
++
+     function _buildUniqueFullDepthComb() private returns (bytes32 target) {
+         // Skip nonce ranges as a finite history of rests/cancels in an otherwise empty opposite
+         // side could do. Every live nonce is unique, above the branch front, and assigned descending.
+diff --git a/test/RadixMatchingEngineGas.t.sol b/test/RadixMatchingEngineGas.t.sol
+index 1b45577..33d3842 100644
+--- a/test/RadixMatchingEngineGas.t.sol
++++ b/test/RadixMatchingEngineGas.t.sol
+@@ -61,7 +61,7 @@ contract RadixMatchingEngineGasTest is Test {
+             base = tokenB;
+             quote = tokenA;
+         }
+-        engine = new DeepstateV1();
++        engine = DeepstateV1(payable(deployCode("DeepstateV1.sol:DeepstateV1")));
+ 
+         _fundAndApprove(alice);
+         _fundAndApprove(bob);
+@@ -969,7 +969,7 @@ contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
+ 
+     function setUp() public {
+         usdc = new GasTestERC20();
+-        engine = new DeepstateV1();
++        engine = DeepstateV1(payable(deployCode("DeepstateV1.sol:DeepstateV1")));
+ 
+         usdc.mint(HOT_WALLET, uint256(1) << 220);
+         usdc.mint(LIQUIDITY_PROVIDER, uint256(1) << 220);
+@@ -1243,7 +1243,7 @@ contract DeepstateV1IntegratorFeeGasTest is Test {
+         GasTestERC20 tokenA = new GasTestERC20();
+         GasTestERC20 tokenB = new GasTestERC20();
+         (token0, token1) = address(tokenA) < address(tokenB) ? (tokenA, tokenB) : (tokenB, tokenA);
+-        engine = new DeepstateV1();
++        engine = DeepstateV1(payable(deployCode("DeepstateV1.sol:DeepstateV1")));
+         _fundAndApprove(MAKER);
+         _fundAndApprove(TAKER);
+     }

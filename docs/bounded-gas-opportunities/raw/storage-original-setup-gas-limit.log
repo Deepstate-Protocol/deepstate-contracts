@@ -1,0 +1,42 @@
+Compiling 28 files with Solc 0.8.28
+Solc 0.8.28 finished in 29.77s
+Compiler run successful with warnings:
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> src/DeepstateV1.sol:447:99:
+    |
+447 |     function _removeOrderFromBook(Book storage book, bytes32 order, bool isBid, bool hookEnabled, uint256 nonceAndFlags)
+    |                                                                                                   ^^^^^^^^^^^^^^^^^^^^^
+
+2026-11-08T01:06:50.699525Z  WARN evm::traces::external: etherscan config not found
+
+Ran 4 tests for test/StorageAccessProbe.t.sol:StorageAccessProbe
+[PASS] testStorage_DeepBidCancellation() (gas: 15061778)
+Logs:
+  engine recorded reads: 258
+  engine recorded writes: 97
+  unchanged engine writes: 0
+
+[PASS] testStorage_DeepBidFill() (gas: 15084271)
+Logs:
+  engine recorded reads: 257
+  engine recorded writes: 96
+  unchanged engine writes: 0
+
+[FAIL: EvmError: Revert] testStorage_LargeBookMatch() (gas: 1056942513)
+[PASS] testStorage_ZeroQuoteAskCancellation() (gas: 822378)
+Logs:
+  engine recorded reads: 17
+  engine recorded writes: 6
+  unchanged engine writes: 2
+
+Suite result: FAILED. 3 passed; 1 failed; 0 skipped; finished in 614.97ms (647.42ms CPU time)
+
+Ran 1 test suite in 616.60ms (614.97ms CPU time): 3 tests passed, 1 failed, 0 skipped (4 total tests)
+
+Failing tests:
+Encountered 1 failing test in test/StorageAccessProbe.t.sol:StorageAccessProbe
+[FAIL: EvmError: Revert] testStorage_LargeBookMatch() (gas: 1056942513)
+
+Encountered a total of 1 failing tests, 3 tests succeeded
+
+Tip: Run `forge test --rerun` to retry only the 1 failed test

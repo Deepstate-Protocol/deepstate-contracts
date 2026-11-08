@@ -1,0 +1,306 @@
+diff --git a/src/DeepstateV1.sol b/src/DeepstateV1.sol
+index 90c3e8d..8363fa1 100644
+--- a/src/DeepstateV1.sol
++++ b/src/DeepstateV1.sol
+@@ -93,6 +93,18 @@ contract DeepstateV1 is Ownable {
+         bool isBid;
+     }
+ 
++    struct CancelQuoteState {
++        uint256 factor;
++        uint16 shift;
++        uint256 removedQuote;
++    }
++
++    struct InsertQuoteState {
++        uint256 factor;
++        uint16 shift;
++        uint256 addedQuote;
++    }
++
+     /// @notice One isolated radix book for one token pair epoch.
+     /// @dev The low 32 bits of `nonceAndFlags` are the decrementing order nonce, bits 32-63 are
+     /// reserved, and bits 64-95 are the ascending branch serial. The zero
+@@ -394,9 +406,10 @@ contract DeepstateV1 is Ownable {
+         isBid = state.isBid;
+         bool hookEnabled = hookFlags & (isBid ? _CANCEL_HOOK_BID : _CANCEL_HOOK_ASK) != 0;
+ 
+-        bytes32 removed = _removeOrderFromBook(book, order, isBid, hookEnabled, nonceAndFlags);
++        CancelQuoteState memory quoteState = CancelQuoteState({factor: 0, shift: 0, removedQuote: 0});
++        bytes32 removed = _removeOrderFromBook(book, order, isBid, hookEnabled, nonceAndFlags, quoteState);
+ 
+-        (baseAmount, quoteAmount) = _cancelAmounts(order, removed, isBid, originalQuantity);
++        (baseAmount, quoteAmount) = _cancelAmounts(order, removed, isBid, originalQuantity, quoteState);
+ 
+         delete orderOf[orderKey];
+ 
+@@ -414,11 +427,13 @@ contract DeepstateV1 is Ownable {
+     /// For bids, filled quantity pays base and unfilled quantity returns quote collateral. For asks,
+     /// unfilled quantity returns base and filled quantity pays quote. A removed live leaf may have a
+     /// smaller quantity than the original order because partial fills rewrite the leaf quantity.
+-    function _cancelAmounts(bytes32 order, bytes32 removed, bool isBid, uint160 originalQuantity)
+-        private
+-        pure
+-        returns (uint256 baseAmount, uint256 quoteAmount)
+-    {
++    function _cancelAmounts(
++        bytes32 order,
++        bytes32 removed,
++        bool isBid,
++        uint160 originalQuantity,
++        CancelQuoteState memory quoteState
++    ) private pure returns (uint256 baseAmount, uint256 quoteAmount) {
+         uint160 remainingQuantity = 0;
+         if (removed != bytes32(0)) {
+             remainingQuantity = _quantity(removed);
+@@ -431,10 +446,14 @@ contract DeepstateV1 is Ownable {
+         int32 limitPrice = _price(order);
+         if (isBid) {
+             baseAmount = filledQuantity;
+-            quoteAmount = _quoteValue(limitPrice, remainingQuantity, true);
++            quoteAmount = quoteState.removedQuote;
+         } else {
+             baseAmount = remainingQuantity;
+-            quoteAmount = _quoteDifference(limitPrice, originalQuantity, remainingQuantity, false);
++            quoteAmount = removed == bytes32(0)
++                ? _quoteValue(limitPrice, originalQuantity, false)
++                : _quoteDifferenceAtFactor(
++                    quoteState.factor, quoteState.shift, originalQuantity, remainingQuantity, false
++                );
+         }
+     }
+ 
+@@ -444,16 +463,20 @@ contract DeepstateV1 is Ownable {
+     /// @param isBid True to remove from the bid tree, false from the ask tree.
+     /// @param hookEnabled True to record a top-order change when the removed leaf was best.
+     /// @return removed Live leaf removed from the tree, or zero if the order was already absent.
+-    function _removeOrderFromBook(Book storage book, bytes32 order, bool isBid, bool hookEnabled, uint256 nonceAndFlags)
+-        private
+-        returns (bytes32 removed)
+-    {
++    function _removeOrderFromBook(
++        Book storage book,
++        bytes32 order,
++        bool isBid,
++        bool hookEnabled,
++        uint256 nonceAndFlags,
++        CancelQuoteState memory quoteState
++    ) private returns (bytes32 removed) {
+         if (isBid) {
+             bytes32 root = book.tree[_ROOT_NODE].rightNode;
+             bytes32 newRoot;
+             if (root != bytes32(0)) {
+                 bool removedTop;
+-                (newRoot, removed, removedTop) = _removeByKey(book, root, _bidSortKey(order), true, true);
++                (newRoot, removed, removedTop) = _removeByKey(book, root, _bidSortKey(order), true, true, quoteState);
+                 if (removed != bytes32(0) && newRoot != root) {
+                     book.tree[_ROOT_NODE].rightNode = newRoot;
+                 }
+@@ -466,7 +489,7 @@ contract DeepstateV1 is Ownable {
+             bytes32 newRoot;
+             if (root != bytes32(0)) {
+                 bool removedTop;
+-                (newRoot, removed, removedTop) = _removeByKey(book, root, _askSortKey(order), false, true);
++                (newRoot, removed, removedTop) = _removeByKey(book, root, _askSortKey(order), false, true, quoteState);
+                 if (removed != bytes32(0) && newRoot != root) {
+                     book.tree[_ROOT_NODE].leftNode = newRoot;
+                 }
+@@ -573,7 +596,8 @@ contract DeepstateV1 is Ownable {
+             uint64 key = isBid ? _bidSortKey(restingOrder) : _askSortKey(restingOrder);
+             uint64 witness;
+             uint8 split;
+-            (newRoot, witness, split) = _insertPath(book, root, restingOrder, key, isBid, newBranchSerial);
++            InsertQuoteState memory quoteState = InsertQuoteState({factor: 0, shift: 0, addedQuote: 0});
++            (newRoot, witness, split) = _insertPath(book, root, restingOrder, key, isBid, newBranchSerial, quoteState);
+             if (split != 255) {
+                 newRoot = _storeBranch(book, newRoot, restingOrder, witness, key, isBid, newBranchSerial);
+             }
+@@ -704,17 +728,22 @@ contract DeepstateV1 is Ownable {
+             (leftNode, fillQuantity, quoteAmount) =
+                 _matchSubtree(id, book, leftNode, limitPrice, remaining, restingIsBid);
+         }
+-        newNode = _replaceBranchAfterSingleChildChange(book, node, leftNode, rightNode, restingIsBid, false);
+         fillQuantity += rightFill;
+         quoteAmount += rightQuote;
++        newNode = _replaceMixedBranchAfterRemoval(book, node, leftNode, rightNode, quoteAmount, false);
+     }
+ 
+     /// @dev Descend once to a witness leaf, then place the new Patricia split while unwinding.
+     /// A pending split above this frame is returned unchanged. 255 means it was already inserted.
+-    function _insertPath(Book storage book, bytes32 root, bytes32 node, uint64 nodeKey, bool isBid, uint32 serial)
+-        private
+-        returns (bytes32 newRoot, uint64 witness, uint8 split)
+-    {
++    function _insertPath(
++        Book storage book,
++        bytes32 root,
++        bytes32 node,
++        uint64 nodeKey,
++        bool isBid,
++        uint32 serial,
++        InsertQuoteState memory quoteState
++    ) private returns (bytes32 newRoot, uint64 witness, uint8 split) {
+         (bytes32 rightNode, uint256 slot) = _rightNodeAndBranchSlot(book, root);
+         if (rightNode == bytes32(0)) {
+             witness = isBid ? _bidSortKey(root) : _askSortKey(root);
+@@ -724,9 +753,18 @@ contract DeepstateV1 is Ownable {
+         }
+         _observeTreeWalk(1);
+         (bytes32 leftNode, uint8 depth) = _leftNodeAndDepthAt(slot, root, rightNode);
++        if (_price(root) != _price(node)) {
++            uint64 representative = isBid ? _bidSortKey(root) : _askSortKey(root);
++            uint8 priceSplit = _commonPrefix(nodeKey, representative);
++            // Only tick bits are meaningful in a branch representative. A split before this
++            // subtree's depth can be placed without descending to a witness order nonce.
++            if (priceSplit < 32 && priceSplit < depth) {
++                return (_storeBranch(book, root, node, representative, nodeKey, isBid, serial), 0, 255);
++            }
++        }
+         bool goRight = _bit(nodeKey, depth);
+         bytes32 child = goRight ? rightNode : leftNode;
+-        (child, witness, split) = _insertPath(book, child, node, nodeKey, isBid, serial);
++        (child, witness, split) = _insertPath(book, child, node, nodeKey, isBid, serial, quoteState);
+         if (split != 255) {
+             if (split < depth) return (root, witness, split);
+             child = _storeBranch(book, child, node, witness, nodeKey, isBid, serial);
+@@ -734,7 +772,7 @@ contract DeepstateV1 is Ownable {
+         }
+         if (goRight) rightNode = child;
+         else leftNode = child;
+-        newRoot = _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, isBid, !goRight);
++        newRoot = _replaceBranchAfterInsert(book, root, leftNode, rightNode, node, isBid, !goRight, quoteState);
+     }
+ 
+     /// @dev Test harnesses override this observer; the empty production body is optimized away.
+@@ -743,24 +781,34 @@ contract DeepstateV1 is Ownable {
+ 
+     /// @dev Cancellation follows one price/nonce path. Unwinding updates exact summaries and
+     /// promotes a surviving sibling when its parent loses a child.
+-    function _removeByKey(Book storage book, bytes32 root, uint64 targetKey, bool isBid, bool rightmost)
+-        private
+-        returns (bytes32 newRoot, bytes32 removed, bool removedTop)
+-    {
++    function _removeByKey(
++        Book storage book,
++        bytes32 root,
++        uint64 targetKey,
++        bool isBid,
++        bool rightmost,
++        CancelQuoteState memory quoteState
++    ) private returns (bytes32 newRoot, bytes32 removed, bool removedTop) {
+         (bytes32 rightNode, uint256 slot) = _rightNodeAndBranchSlot(book, root);
+         if (rightNode == bytes32(0)) {
+             uint64 key = isBid ? _bidSortKey(root) : _askSortKey(root);
+-            return key == targetKey ? (bytes32(0), root, rightmost) : (root, bytes32(0), false);
++            if (key != targetKey) return (root, bytes32(0), false);
++            (quoteState.factor, quoteState.shift) = TickMath32.getPriceFactorAtTick(_price(root));
++            quoteState.removedQuote = _quoteAtFactor(quoteState.factor, quoteState.shift, _quantity(root), isBid);
++            return (bytes32(0), root, rightmost);
+         }
+         _observeTreeWalk(2);
+         (bytes32 leftNode, uint8 depth) = _leftNodeAndDepthAt(slot, root, rightNode);
+         bool goRight = _bit(targetKey, depth);
+-        if (goRight) (rightNode, removed, removedTop) = _removeByKey(book, rightNode, targetKey, isBid, rightmost);
+-        else (leftNode, removed, removedTop) = _removeByKey(book, leftNode, targetKey, isBid, false);
++        if (goRight) {
++            (rightNode, removed, removedTop) = _removeByKey(book, rightNode, targetKey, isBid, rightmost, quoteState);
++        } else {
++            (leftNode, removed, removedTop) = _removeByKey(book, leftNode, targetKey, isBid, false, quoteState);
++        }
+         if (removed == bytes32(0)) return (root, bytes32(0), false);
+         return
+             (
+-                _replaceBranchAfterSingleChildChange(book, root, leftNode, rightNode, isBid, !goRight),
++                _replaceBranchAfterCancel(book, root, leftNode, rightNode, isBid, !goRight, quoteState),
+                 removed,
+                 removedTop
+             );
+@@ -784,6 +832,88 @@ contract DeepstateV1 is Ownable {
+         _rewriteSingleBranchChild(book, newBranch, leftNode, rightNode, leftChanged);
+     }
+ 
++    /// @dev A surviving mixed branch retains its price split; subtract the exact matched quote.
++    function _replaceMixedBranchAfterRemoval(
++        Book storage book,
++        bytes32 oldBranch,
++        bytes32 leftNode,
++        bytes32 rightNode,
++        uint256 removedQuote,
++        bool leftChanged
++    ) private returns (bytes32 newBranch) {
++        if (leftNode == bytes32(0)) return rightNode;
++        if (rightNode == bytes32(0)) return leftNode;
++
++        book.tree[_branchKey(oldBranch)].quoteTotal -= removedQuote;
++        newBranch = _branchNode(_price(leftNode), _quantity(leftNode) + _quantity(rightNode), 0, _nonce(oldBranch));
++        _rewriteSingleBranchChild(book, newBranch, leftNode, rightNode, leftChanged);
++    }
++
++    /// @dev Cancelled leaf value is removed once from every ancestor. Surviving uniform ancestors
++    /// share that leaf's price factor, and surviving mixed ancestors retain their price split.
++    function _replaceBranchAfterCancel(
++        Book storage book,
++        bytes32 oldBranch,
++        bytes32 leftNode,
++        bytes32 rightNode,
++        bool isBid,
++        bool leftChanged,
++        CancelQuoteState memory quoteState
++    ) private returns (bytes32 newBranch) {
++        if (leftNode == bytes32(0)) return rightNode;
++        if (rightNode == bytes32(0)) return leftNode;
++        uint32 oldCode = _correctionCode(oldBranch);
++        if (oldCode == 0) {
++            return
++                _replaceMixedBranchAfterRemoval(
++                    book, oldBranch, leftNode, rightNode, quoteState.removedQuote, leftChanged
++                );
++        }
++
++        uint160 quantity = _quantity(leftNode) + _quantity(rightNode);
++        uint256 roundedReduction =
++            _quoteDifferenceAtFactor(quoteState.factor, quoteState.shift, _quantity(oldBranch), quantity, isBid);
++        uint256 correction = uint256(oldCode) - 1;
++        correction = isBid
++            ? correction + roundedReduction - quoteState.removedQuote
++            : correction + quoteState.removedQuote - roundedReduction;
++        newBranch = _withQuantityAndCorrection(oldBranch, quantity, uint32(correction + 1));
++        _rewriteSingleBranchChild(book, newBranch, leftNode, rightNode, leftChanged);
++    }
++
++    /// @dev Adding one leaf changes every surviving ancestor by the same exact quote delta.
++    function _replaceBranchAfterInsert(
++        Book storage book,
++        bytes32 oldBranch,
++        bytes32 leftNode,
++        bytes32 rightNode,
++        bytes32 inserted,
++        bool isBid,
++        bool leftChanged,
++        InsertQuoteState memory quoteState
++    ) private returns (bytes32 newBranch) {
++        // Every valid decoded factor is positive, so zero denotes an as-yet unused context.
++        if (quoteState.factor == 0) {
++            (quoteState.factor, quoteState.shift) = TickMath32.getPriceFactorAtTick(_price(inserted));
++            quoteState.addedQuote = _quoteAtFactor(quoteState.factor, quoteState.shift, _quantity(inserted), isBid);
++        }
++        uint160 quantity = _quantity(oldBranch) + _quantity(inserted);
++        uint32 oldCode = _correctionCode(oldBranch);
++        if (oldCode == 0) {
++            book.tree[_branchKey(oldBranch)].quoteTotal += quoteState.addedQuote;
++            newBranch = _branchNode(_price(leftNode), quantity, 0, _nonce(oldBranch));
++        } else {
++            uint256 roundedIncrease =
++                _quoteDifferenceAtFactor(quoteState.factor, quoteState.shift, quantity, _quantity(oldBranch), isBid);
++            uint256 correction = uint256(oldCode) - 1;
++            correction = isBid
++                ? correction + quoteState.addedQuote - roundedIncrease
++                : correction + roundedIncrease - quoteState.addedQuote;
++            newBranch = _withQuantityAndCorrection(oldBranch, quantity, uint32(correction + 1));
++        }
++        _rewriteSingleBranchChild(book, newBranch, leftNode, rightNode, leftChanged);
++    }
++
+     /// @dev Persist the only child pointer changed by a stable-identity branch rewrite.
+     function _rewriteSingleBranchChild(
+         Book storage book,
