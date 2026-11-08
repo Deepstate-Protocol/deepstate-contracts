@@ -1,0 +1,16 @@
+"variant","case","engine_recorded_reads","engine_recorded_writes","unchanged_engine_writes"
+"baseline","testStorage_DeepAskCancellation",258,97,32
+"baseline","testStorage_DeepBidCancellation",258,97,0
+"baseline","testStorage_DeepBidFill",257,96,0
+"baseline","testStorage_LargeBookMatch",70,19,0
+"baseline","testStorage_ZeroQuoteAskCancellation",17,6,2
+"combined","testStorage_DeepAskCancellation",164,97,32
+"combined","testStorage_DeepBidCancellation",164,97,0
+"combined","testStorage_DeepBidFill",195,96,0
+"combined","testStorage_LargeBookMatch",43,19,0
+"combined","testStorage_ZeroQuoteAskCancellation",12,6,2
+"zero-delta","testStorage_DeepAskCancellation",132,65,0
+"zero-delta","testStorage_DeepBidCancellation",164,97,0
+"zero-delta","testStorage_DeepBidFill",195,96,0
+"zero-delta","testStorage_LargeBookMatch",43,19,0
+"zero-delta","testStorage_ZeroQuoteAskCancellation",10,4,0

@@ -1,0 +1,157 @@
+{
+  "baselineCommit": "83ce527995e1e44932de281d5d732ed1afa80204",
+  "compiler": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "variants": {
+    "baseline": {
+      "sourceSha256": "b0aefaca2ec79252222720e1472297800affce1c804cdcaf6beb5d5b0b051550",
+      "runtimeSha256": "64296c92c77ec4292af4c983f005a4663b39930907d8d75d98f0e3153f124b11"
+    },
+    "candidate": {
+      "sourceSha256": "b85ad09b308c69cb9ba2b309ce0f15dbaee8b0e5d51087650f7cff0a918e796f",
+      "runtimeSha256": "836d16260ea6a2c2ec87fc37b593b5cb94533251dbcc60fb7d1da6fe60dbb670"
+    }
+  },
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "baseline-release.log",
+      "snapshot": "baseline-release.snapshot",
+      "logSha256": "944f6a31b073f8cbf6adb13ca5805ebbd12ef6eb23d6d173116c8faae7589279",
+      "snapshotSha256": "786e198eabbf87f848d96e6e1fe01f8b045027563729e1640e81c0c92b4dd865",
+      "name": "baseline-release",
+      "variant": "baseline",
+      "reusedValidatedBaseline": true
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "baseline-insertion.log",
+      "snapshot": "baseline-insertion.snapshot",
+      "logSha256": "914966a7a496225f7de0e52b0e643df53332dbbabdd14e31823501bcd29127af",
+      "snapshotSha256": "309985fa14e0c121daebc86559f16d0d0b2d571d75e7f1ec5b33fe6fe489c974",
+      "name": "baseline-insertion",
+      "variant": "baseline",
+      "reusedValidatedBaseline": true
+    },
+    {
+      "group": "production",
+      "count": 23,
+      "log": "baseline-production.log",
+      "snapshot": "baseline-production.snapshot",
+      "logSha256": "0637c1ceec59d966d686db50c59d4cb030f63b881a6d2fd44dcbe2faf54dbc0a",
+      "snapshotSha256": "407f5b35d93b9e9602b175d97b2f4665b42320e31bb8a4baf5e9ab528e5a52ba",
+      "name": "baseline-production",
+      "variant": "baseline",
+      "reusedValidatedBaseline": true
+    },
+    {
+      "command": "/tmp/deepstate-rebase-pr34-20261107/toolchain/forge",
+      "args": [
+        "snapshot",
+        "--match-contract",
+        "^ProductionCategoriesTest$",
+        "--match-test",
+        "^testProduction_",
+        "-vv",
+        "--threads",
+        "4",
+        "--isolate",
+        "--snap",
+        "/tmp/deepstate-fused-accepted-20261108/results/candidate-production.snapshot"
+      ],
+      "log": "candidate-production.log",
+      "sha256": "a499845a02ce242b5a983851416576d83fe58756d03fe57ce0b73bb841dea262",
+      "status": 0,
+      "name": "candidate-production",
+      "variant": "candidate",
+      "group": "production",
+      "count": 23,
+      "logSha256": "a499845a02ce242b5a983851416576d83fe58756d03fe57ce0b73bb841dea262",
+      "snapshot": "candidate-production.snapshot",
+      "snapshotSha256": "ae2a1bb9b7179dc4f44449ca4286d79b969f88508c7bd2fc62ddb099b929b16a"
+    },
+    {
+      "command": "/tmp/deepstate-rebase-pr34-20261107/toolchain/forge",
+      "args": [
+        "snapshot",
+        "--match-contract",
+        "^OpportunityGasProbe$",
+        "--match-test",
+        "^testOpportunity_",
+        "--threads",
+        "4",
+        "--isolate",
+        "--snap",
+        "/tmp/deepstate-fused-accepted-20261108/results/candidate-insertion.snapshot"
+      ],
+      "log": "candidate-insertion.log",
+      "sha256": "97eb45b6edbc675babff5beb8d7b2d2ca03a785f636691508903ed9e798700b9",
+      "status": 0,
+      "name": "candidate-insertion",
+      "variant": "candidate",
+      "group": "insertion",
+      "count": 12,
+      "logSha256": "97eb45b6edbc675babff5beb8d7b2d2ca03a785f636691508903ed9e798700b9",
+      "snapshot": "candidate-insertion.snapshot",
+      "snapshotSha256": "309985fa14e0c121daebc86559f16d0d0b2d571d75e7f1ec5b33fe6fe489c974"
+    },
+    {
+      "command": "/tmp/deepstate-rebase-pr34-20261107/toolchain/forge",
+      "args": [
+        "snapshot",
+        "--match-contract",
+        "(RadixMatchingEngine(Gas|HookGas|FeeGas)Test|DeepstateV1IntegratorFeeGasTest)",
+        "--threads",
+        "4",
+        "--isolate",
+        "--snap",
+        "/tmp/deepstate-fused-accepted-20261108/results/candidate-release.snapshot"
+      ],
+      "log": "candidate-release.log",
+      "sha256": "92575e753dfa40e13f7eacebbea593a4d6573abbd5b25d95b51d7e4dfe9d9ffb",
+      "status": 0,
+      "name": "candidate-release",
+      "variant": "candidate",
+      "group": "release",
+      "count": 188,
+      "logSha256": "92575e753dfa40e13f7eacebbea593a4d6573abbd5b25d95b51d7e4dfe9d9ffb",
+      "snapshot": "candidate-release.snapshot",
+      "snapshotSha256": "4b91e204f813ab2b2d2be24ab75b9cb3ad77dbd1422147ac4e65e8aae98b3958"
+    }
+  ],
+  "settings": {
+    "remappings": [
+      "forge-std/=lib/forge-std/src/",
+      "solady/=lib/solady/src/"
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "compilationTarget": {
+      "src/DeepstateV1.sol": "DeepstateV1"
+    },
+    "evmVersion": "cancun",
+    "libraries": {}
+  },
+  "imports": {
+    "lib/solady/src/auth/Ownable.sol": "0xc208cdd9de02bbf4b5edad18b88e23a2be7ff56d2287d5649329dc7cda64b9a3",
+    "lib/solady/src/utils/LibBit.sol": "0x71752d8322c7b0b5e4997befe36b254a306c6abc7fd24f65d79f47ce2e1a8278",
+    "lib/solady/src/utils/SafeTransferLib.sol": "0xf53a25143307304d9de7186f93f11faae3cc4f722c4b088aed6f4f8f87a02f7a",
+    "src/interfaces/IHook.sol": "0xba60a445ce718ae34db38f70506fa9932261f868241e104cf2f5a8412fed1bb7",
+    "src/libraries/TickMath32.sol": "0x20a3ca51c741d0e4dd3cd76742111d7e186f7e082f2153986a43d0580dcfa60a"
+  },
+  "fixtures": {
+    "foundry.toml": "910ee6c2be5f85557cbfd3d9ea560dd28964d1f9fc3cccd48b1bcf66c13142a1",
+    "src/DeepstateV1.sol": "b05662e0d6bb55ecf655c3c89cc90d1ab09d464915a24719808be07e3fe5ba5c",
+    "test/RadixMatchingEngineGas.t.sol": "6be3690d081f954edb144fdedfc582c00f7e54a9fa82596995108182d6e84df6",
+    "test/BoundedTraversalGas.t.sol": "65d6484336e5d30b49ed7d5bc45836a27de46de8c0b96b572675d04414517034",
+    "test/OpportunityGasProbe.t.sol": "b26806ea074fe6c6928f613bfd12b018bb68a916827f79ac6797fcdfebf41b86",
+    "test/ProductionCategories.t.sol": "62066e98fe58b2fb9e539e3efab721706f76fa89f8f7732786acd8721bd16ec7"
+  }
+}

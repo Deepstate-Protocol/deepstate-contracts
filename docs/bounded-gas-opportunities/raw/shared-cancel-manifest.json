@@ -1,0 +1,46 @@
+{
+  "variant": "shared-cancel",
+  "compiler": "0.8.28+commit.7893614a",
+  "settings": {
+    "remappings": [
+      "forge-std/=/private/tmp/deepstate-solar-gas-20261107/contracts/lib/forge-std/src/",
+      "solady/=/private/tmp/deepstate-solar-gas-20261107/contracts/lib/solady/src/"
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "compilationTarget": {
+      "src/DeepstateV1.sol": "DeepstateV1"
+    },
+    "evmVersion": "cancun",
+    "libraries": {},
+    "viaIR": true
+  },
+  "sourceSha256": "e1bf74883470fe7cd44f19713aec1fcf8c0ffa783d82071b74300b757b65e4a7",
+  "sourceKeccak256": "0x4a3def6864f69c1ab18c1e48288fed97573a9a8941a8aae3888788dcda861b06",
+  "runtimeSha256": "f92daeaef420dc59ffd0f68c28e09f194188ba64577a9388b8ebab30a43bdee8",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "baseline": "096eab28d87debdd472b4e22e65820e2b1b8d523",
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "shared-cancel-release.log",
+      "snapshot": "shared-cancel-release.snapshot",
+      "logSha256": "30c56f7066c3ea7404f16a144ea586fe687344c3117c2f7bc89e9a8454bf8492",
+      "snapshotSha256": "ca4a2d87f15cf991ebcde3dfc23928568682ef6fd8b4e57d53ae198983ba7c87"
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "shared-cancel-insertion.log",
+      "snapshot": "shared-cancel-insertion.snapshot",
+      "logSha256": "a7354029f0417cf15f26038a63cd173e82b7fdcd177d671c14564972ce22d13c",
+      "snapshotSha256": "f045baa0e41241316e4033729604c0659f015d42f81f89a4b6a883ca5d414351"
+    }
+  ]
+}

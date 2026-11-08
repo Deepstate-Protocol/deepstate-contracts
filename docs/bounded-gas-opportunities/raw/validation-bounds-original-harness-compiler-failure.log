@@ -1,0 +1,4 @@
+Compiling 3 files with Solc 0.8.28
+Solc 0.8.28 finished in 31.20s
+Error: Compiler run failed:
+Error: Internal compiler error (/solidity/libsolidity/interface/CompilerStack.cpp:1417):Assembly exception for bytecode: Tag too large for reserved space.

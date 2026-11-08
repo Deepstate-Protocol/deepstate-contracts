@@ -1,0 +1,299 @@
+{
+  "sourceSha256": "ce755182dd007c3c578b860782ef3c9e45de2aae3287a3a4ef03fede6138b0c7",
+  "runs": [
+    {
+      "group": "behavior",
+      "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+      "args": [
+        "test",
+        "--no-dynamic-test-linking",
+        "--out",
+        "out-five-validation",
+        "--cache-path",
+        "cache-five-validation",
+        "--threads",
+        "4",
+        "--no-match-contract",
+        "(Invariant|Gas|AccessList|BoundedTraversal)",
+        "--fuzz-runs",
+        "256"
+      ],
+      "log": "validation-behavior.log",
+      "sha256": "a012502c0da397779ed2dc2372851bfc610c12b4987211fdcff5b59d96d791de",
+      "status": 0
+    },
+    {
+      "group": "bounds",
+      "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+      "args": [
+        "test",
+        "--no-dynamic-test-linking",
+        "--out",
+        "out-five-validation",
+        "--cache-path",
+        "cache-five-validation",
+        "--threads",
+        "4",
+        "--match-contract",
+        "^BoundedTraversalTest$",
+        "--match-test",
+        "^(test_|testFuzz_)",
+        "--fuzz-runs",
+        "256"
+      ],
+      "log": "validation-bounds.log",
+      "sha256": "c108efcc87c18db0537f8d8e486279d4a401187e35c7a464a35ceb57bedc1303",
+      "status": 0
+    },
+    {
+      "group": "invariants",
+      "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+      "args": [
+        "test",
+        "--no-dynamic-test-linking",
+        "--out",
+        "out-five-validation",
+        "--cache-path",
+        "cache-five-validation",
+        "--threads",
+        "4",
+        "--match-contract",
+        "(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest|DeepstateV1NativeETHInvariantTest)",
+        "--match-test",
+        "invariant_.*"
+      ],
+      "log": "validation-invariants.log",
+      "sha256": "00aa4a3e9430f04f73a33e5840ac61deeb56a53d7cfe501e280c3f7b4583be88",
+      "status": 0
+    },
+    {
+      "group": "release-snapshot",
+      "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+      "args": [
+        "snapshot",
+        "--no-dynamic-test-linking",
+        "--out",
+        "out-five-validation",
+        "--cache-path",
+        "cache-five-validation",
+        "--threads",
+        "4",
+        "--isolate",
+        "--match-contract",
+        "(RadixMatchingEngine(Gas|HookGas|FeeGas)Test|DeepstateV1IntegratorFeeGasTest)",
+        "--snap",
+        ".gas-snapshot.solar"
+      ],
+      "log": "validation-release-snapshot.log",
+      "sha256": "62f319c1224baad40fcff14eed77ec1b3b2fac91f92a656fdc4006dfbde5abe4",
+      "status": 0
+    },
+    {
+      "group": "smt",
+      "command": "python3",
+      "args": [
+        "script/prove_protocol.py"
+      ],
+      "log": "validation-smt.log",
+      "sha256": "6d5f54cd8f73c950ca64e68f970a48c34712eab81c6c6ffcac0ea6f2d806eec3",
+      "status": 0
+    },
+    {
+      "group": "format",
+      "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+      "args": [
+        "fmt",
+        "--check",
+        "src/DeepstateV1.sol",
+        "test/DeepstateV1.t.sol",
+        "test/BoundedTraversal.t.sol",
+        "test/RadixMatchingEngineGas.t.sol"
+      ],
+      "log": "validation-format.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "status": 0
+    }
+  ],
+  "compatibility": {
+    "publicAbiEqual": true,
+    "storageLayoutEqual": true,
+    "layout": {
+      "storage": [
+        {
+          "astId": 226,
+          "contract": "src/DeepstateV1.sol:DeepstateV1",
+          "label": "books",
+          "offset": 0,
+          "slot": "0",
+          "type": "t_mapping(t_bytes32,t_struct(Book)1461_storage)"
+        },
+        {
+          "astId": 227,
+          "contract": "src/DeepstateV1.sol:DeepstateV1",
+          "label": "orderOf",
+          "offset": 0,
+          "slot": "1",
+          "type": "t_mapping(t_bytes32,t_struct(OrderState)1457_storage)"
+        },
+        {
+          "astId": 257,
+          "contract": "src/DeepstateV1.sol:DeepstateV1",
+          "label": "_poolEpochAndHookFlags",
+          "offset": 0,
+          "slot": "2",
+          "type": "t_mapping(t_bytes32,t_uint256)"
+        },
+        {
+          "astId": 258,
+          "contract": "src/DeepstateV1.sol:DeepstateV1",
+          "label": "poolHook",
+          "offset": 0,
+          "slot": "3",
+          "type": "t_mapping(t_bytes32,t_address)"
+        },
+        {
+          "astId": 259,
+          "contract": "src/DeepstateV1.sol:DeepstateV1",
+          "label": "_feeConfig",
+          "offset": 0,
+          "slot": "4",
+          "type": "t_uint256"
+        }
+      ],
+      "types": {
+        "t_address": {
+          "encoding": "inplace",
+          "label": "address",
+          "numberOfBytes": "20"
+        },
+        "t_bool": {
+          "encoding": "inplace",
+          "label": "bool",
+          "numberOfBytes": "1"
+        },
+        "t_bytes32": {
+          "encoding": "inplace",
+          "label": "bytes32",
+          "numberOfBytes": "32"
+        },
+        "t_mapping(t_bytes32,t_address)": {
+          "encoding": "mapping",
+          "key": "t_bytes32",
+          "label": "mapping(bytes32 => address)",
+          "numberOfBytes": "32",
+          "value": "t_address"
+        },
+        "t_mapping(t_bytes32,t_struct(Book)1461_storage)": {
+          "encoding": "mapping",
+          "key": "t_bytes32",
+          "label": "mapping(bytes32 => struct DeepstateV1.Book)",
+          "numberOfBytes": "32",
+          "value": "t_struct(Book)1461_storage"
+        },
+        "t_mapping(t_bytes32,t_struct(Branch)1456_storage)": {
+          "encoding": "mapping",
+          "key": "t_bytes32",
+          "label": "mapping(bytes32 => struct DeepstateV1.Branch)",
+          "numberOfBytes": "32",
+          "value": "t_struct(Branch)1456_storage"
+        },
+        "t_mapping(t_bytes32,t_struct(OrderState)1457_storage)": {
+          "encoding": "mapping",
+          "key": "t_bytes32",
+          "label": "mapping(bytes32 => struct DeepstateV1.OrderState)",
+          "numberOfBytes": "32",
+          "value": "t_struct(OrderState)1457_storage"
+        },
+        "t_mapping(t_bytes32,t_uint256)": {
+          "encoding": "mapping",
+          "key": "t_bytes32",
+          "label": "mapping(bytes32 => uint256)",
+          "numberOfBytes": "32",
+          "value": "t_uint256"
+        },
+        "t_struct(Book)1461_storage": {
+          "encoding": "inplace",
+          "label": "struct DeepstateV1.Book",
+          "numberOfBytes": "64",
+          "members": [
+            {
+              "astId": 279,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "nonceAndFlags",
+              "offset": 0,
+              "slot": "0",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 280,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "tree",
+              "offset": 0,
+              "slot": "1",
+              "type": "t_mapping(t_bytes32,t_struct(Branch)1456_storage)"
+            }
+          ]
+        },
+        "t_struct(Branch)1456_storage": {
+          "encoding": "inplace",
+          "label": "struct DeepstateV1.Branch",
+          "numberOfBytes": "96",
+          "members": [
+            {
+              "astId": 260,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "leftNode",
+              "offset": 0,
+              "slot": "0",
+              "type": "t_bytes32"
+            },
+            {
+              "astId": 261,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "rightNode",
+              "offset": 0,
+              "slot": "1",
+              "type": "t_bytes32"
+            },
+            {
+              "astId": 262,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "quoteTotal",
+              "offset": 0,
+              "slot": "2",
+              "type": "t_uint256"
+            }
+          ]
+        },
+        "t_struct(OrderState)1457_storage": {
+          "encoding": "inplace",
+          "label": "struct DeepstateV1.OrderState",
+          "numberOfBytes": "32",
+          "members": [
+            {
+              "astId": 263,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "owner",
+              "offset": 0,
+              "slot": "0",
+              "type": "t_address"
+            },
+            {
+              "astId": 264,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "isBid",
+              "offset": 20,
+              "slot": "0",
+              "type": "t_bool"
+            }
+          ]
+        },
+        "t_uint256": {
+          "encoding": "inplace",
+          "label": "uint256",
+          "numberOfBytes": "32"
+        }
+      }
+    }
+  }
+}

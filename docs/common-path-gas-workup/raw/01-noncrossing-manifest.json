@@ -1,0 +1,34 @@
+{
+  "variant": "01-noncrossing",
+  "sourceSha256": "689c58d7ca80258485ee5875989d298e607f92da0735b8991b19b3356465db6e",
+  "runtimeSha256": "3a7f5dfbc3335dddf88bb1c60fb75bd8734cb3d71d76b16cb4d3863c9de9f334",
+  "fixtureSha256": "62066e98fe58b2fb9e539e3efab721706f76fa89f8f7732786acd8721bd16ec7",
+  "compiler": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "01-noncrossing-release.log",
+      "snapshot": "01-noncrossing-release.snapshot",
+      "logSha256": "127d433c8dd905fdf2d7392f6b7eee9722c0902461f431483d1803b95964dda4",
+      "snapshotSha256": "c17d9b1c5c5b1fb541b5767df72853fa4938e27c6391b3b2f4d9468efef6e9b4"
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "01-noncrossing-insertion.log",
+      "snapshot": "01-noncrossing-insertion.snapshot",
+      "logSha256": "3e043f315a7842843f40e8222c5d7ba9b9c17ffa2c305fa4adf31b93b9ba949a",
+      "snapshotSha256": "309985fa14e0c121daebc86559f16d0d0b2d571d75e7f1ec5b33fe6fe489c974"
+    },
+    {
+      "group": "production",
+      "count": 23,
+      "log": "01-noncrossing-production.log",
+      "snapshot": "01-noncrossing-production.snapshot",
+      "logSha256": "2e7a58131ff36b2ce7d9a322485987c89ed0a53cf175686c8085c1fd24855d9a",
+      "snapshotSha256": "e6ce4a0177ed89c77bb2c928eb13a104f91be527ce4feae19e02d8f40aa0ffb3"
+    }
+  ]
+}

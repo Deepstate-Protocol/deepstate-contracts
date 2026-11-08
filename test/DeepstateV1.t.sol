@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {ERC20} from "solady/tokens/ERC20.sol";
 import {DeepstateV1} from "../src/DeepstateV1.sol";
 import {QuoteMath} from "./QuoteMath.sol";
@@ -94,7 +95,7 @@ contract DeepstateV1Harness is DeepstateV1 {
         bool isBid,
         address owner
     ) external returns (bytes32 restingOrder, uint32 nextNonceAfter) {
-        return _restBook(id, books[id], nonceAndFlags, price, quantity, isBid, owner, false);
+        (restingOrder, nextNonceAfter,) = _restBook(id, books[id], nonceAndFlags, price, quantity, isBid, owner, false);
     }
 }
 
@@ -142,6 +143,65 @@ contract DeepstateV1Test is Test {
         assertEq(engine.ownerOfOrder(orderId), alice);
         assertTrue(engine.isBidOrder(orderId));
         assertEq(token1.balanceOf(address(engine)), _quoteValue(10, 5, true));
+    }
+
+    function test_BranchNoncesAreUniqueAndDoNotAliasOrderLeaves() public {
+        bytes32[4] memory orders;
+        for (uint256 i; i < orders.length; ++i) {
+            vm.prank(alice);
+            orders[i] = engine.fill(_fill(0, _order(10, 10, 0), false, false, false));
+            assertEq(uint32(uint256(orders[i])), MAX_ORDER_NONCE - uint32(i), "order nonce sequence");
+        }
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        (bytes32 root,) = engine.roots(address(token0), address(token1), 0);
+        (bytes32 leftBranch, bytes32 rightBranch) = engine.tree(id, root);
+
+        assertLe(uint32(uint256(root)), 3, "root branch serial not separately allocated");
+        assertLe(uint32(uint256(leftBranch)), 3, "left branch serial not separately allocated");
+        assertLe(uint32(uint256(rightBranch)), 3, "right branch serial not separately allocated");
+        assertTrue(uint32(uint256(root)) != uint32(uint256(leftBranch)), "root/left branch nonce collision");
+        assertTrue(uint32(uint256(root)) != uint32(uint256(rightBranch)), "root/right branch nonce collision");
+        assertTrue(uint32(uint256(leftBranch)) != uint32(uint256(rightBranch)), "left/right branch nonce collision");
+
+        for (uint256 i; i < orders.length; ++i) {
+            (bytes32 leafLeft, bytes32 leafRight) = engine.tree(id, orders[i]);
+            assertEq(leafLeft, bytes32(0), "order leaf aliased branch children");
+            assertEq(leafRight, bytes32(0), "order leaf aliased branch children");
+        }
+    }
+
+    function test_PartialFillReusesBranchNonceAndChildSlot() public {
+        for (uint256 i; i < 4; ++i) {
+            vm.prank(alice);
+            engine.fill(_fill(0, _order(10, 10, 0), false, false, false));
+        }
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        (bytes32 oldRoot,) = engine.roots(address(token0), address(token1), 0);
+        (bytes32 oldLeftBranch, bytes32 oldRightBranch) = engine.tree(id, oldRoot);
+        assertTrue(oldLeftBranch != bytes32(0) && oldRightBranch != bytes32(0), "expected balanced branch");
+
+        (bytes32 oldLeftChild, bytes32 oldRightChild) = engine.tree(id, oldLeftBranch);
+
+        // Consume the two best leaves and half of the next one. The former left subtree survives
+        // with a different aggregate quantity and is promoted to the root.
+        vm.prank(bob);
+        engine.fill(_fill(0, _order(10, 25, 0), true, true, false));
+
+        (bytes32 newRoot,) = engine.roots(address(token0), address(token1), 0);
+        assertTrue(newRoot != oldLeftBranch, "aggregate word should change");
+        assertEq(uint32(uint256(newRoot)), uint32(uint256(oldLeftBranch)), "branch identity changed");
+        assertEq(uint160(uint256(newRoot) >> 64), 15, "surviving aggregate quantity");
+
+        (bytes32 newLeftChild, bytes32 newRightChild) = engine.tree(id, newRoot);
+        assertEq(newLeftChild, oldLeftChild, "unchanged child moved");
+        assertTrue(newRightChild != oldRightChild, "partially filled child was not rewritten");
+
+        // The old packed branch word resolves through the same nonce-addressed mapping slot.
+        (bytes32 oldKeyLeft, bytes32 oldKeyRight) = engine.tree(id, oldLeftBranch);
+        assertEq(oldKeyLeft, newLeftChild);
+        assertEq(oldKeyRight, newRightChild);
     }
 
     function test_InvalidTokenAndHookConfigBranches() public {
@@ -1021,6 +1081,67 @@ contract DeepstateV1Test is Test {
         engine.restBookForTest(id, 1, 10, 5, true, alice);
     }
 
+    function test_RestBookHarnessRejectsExhaustedBranchSerial() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        uint256 exhaustedBranchSerial = uint256(type(uint32).max) << 64;
+
+        vm.expectRevert(bytes4(keccak256("NonceExhausted()")));
+        engine.restBookForTest(id, exhaustedBranchSerial | MAX_ORDER_NONCE, 11, 5, true, alice);
+    }
+
+    function test_RestBookHarnessRejectsCollidingIdentityFronts() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        // The branch and descending order fronts may not allocate the same identity.
+        uint256 collidingFronts = (uint256(127) << 64) | 127;
+
+        vm.expectRevert(bytes4(keccak256("NonceExhausted()")));
+        engine.restBookForTest(id, collidingFronts, 11, 5, true, alice);
+    }
+
+    function test_RestBookHarnessRejectsOrderInsideAllocatedBranchRange() public {
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        uint256 crossedFronts = (uint256(3) << 64) | 2;
+
+        vm.expectRevert(bytes4(keccak256("NonceExhausted()")));
+        engine.restBookForTest(id, crossedFronts, 11, 5, true, alice);
+    }
+
+    function test_RestBookHarnessPreservesFullWidthBranchIdentity() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        uint32 branchIdentity = uint32(1) << 31;
+        uint256 fullWidthFronts = (uint256(branchIdentity) << 64) | MAX_ORDER_NONCE;
+
+        engine.restBookForTest(id, fullWidthFronts, 11, 5, true, alice);
+
+        (, bytes32 bidRoot) = engine.roots(address(token0), address(token1), 0);
+        assertEq(uint32(uint256(bidRoot)), branchIdentity);
+        assertEq(engine.nextNonce(address(token0), address(token1), 0), MAX_ORDER_NONCE - 1);
+    }
+
+    function test_RestBookHarnessRotatesBeforeOrderFrontEntersAllocatedBranchRange() public {
+        vm.prank(alice);
+        engine.fill(_fill(0, _order(10, 5, 0), true, false, false));
+
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        // Branch serial 127 and order nonce 128 are adjacent, so this is the final safe rest.
+        uint256 adjacentFronts = (uint256(127) << 64) | 128;
+
+        (bytes32 restingOrder, uint32 nextNonceAfter) = engine.restBookForTest(id, adjacentFronts, 11, 5, true, alice);
+
+        assertEq(uint32(uint256(restingOrder)), 128);
+        assertEq(nextNonceAfter, 1);
+        assertEq(engine.nextNonce(address(token0), address(token1), 0), 1);
+    }
+
     function testFuzz_IntegratorBidFeeEqualsIndependentProtocolFormula(
         uint128 quantitySeed,
         uint8 protocolBpsSeed,
@@ -1078,6 +1199,171 @@ contract DeepstateV1Test is Test {
         assertEq(token1.balanceOf(bob), bobQuoteBefore + quoteOutput - protocolFee - integratorFee);
         assertEq(token1.balanceOf(feeRecipient), protocolFee);
         assertEq(token1.balanceOf(integratorRecipient), integratorFee);
+    }
+
+    function testFuzz_SharedRestQuoteMatchesReference(int32 tick, uint128 quantitySeed, bool bid) public {
+        uint160 quantity = uint160(quantitySeed) + 1;
+        token0.mint(alice, uint256(1) << 250);
+        token1.mint(alice, uint256(1) << 250);
+        uint256 beforeBase = token0.balanceOf(alice);
+        uint256 beforeQuote = token1.balanceOf(alice);
+        vm.prank(alice);
+        bytes32 order = engine.fill(_fill(0, _order(tick, quantity, 0), bid, false, false));
+        uint256 expectedQuote = _quoteValue(tick, quantity, bid);
+        assertEq(token0.balanceOf(address(engine)), bid ? 0 : quantity);
+        assertEq(token1.balanceOf(address(engine)), bid ? expectedQuote : 0);
+        vm.prank(alice);
+        (uint256 baseAmount, uint256 quoteAmount) = engine.cancel(address(token0), address(token1), 0, order);
+        assertEq(baseAmount, bid ? 0 : quantity);
+        assertEq(quoteAmount, bid ? expectedQuote : 0);
+        assertEq(token0.balanceOf(alice), beforeBase);
+        assertEq(token1.balanceOf(alice), beforeQuote);
+    }
+
+    function testFuzz_InsertionHooksOnlyReplaceActualBest(bool bid, uint256 seed, uint8 countSeed) public {
+        RotationRecordingHook hook = new RotationRecordingHook(address(engine));
+        engine.setPoolHookConfig(address(token0), address(token1), address(hook), true, true);
+        bytes32 id = engine.bookId(address(token0), address(token1), 0);
+        bytes32 bestOrder;
+        int32 bestTick;
+        uint256 count = bound(countSeed, 2, 32);
+        for (uint256 i; i < count; ++i) {
+            int32 tick = i % 4 == 0 ? bestTick : int32(int256(uint256(keccak256(abi.encode(seed, i))) % 2001) - 1000);
+            bool improves = i == 0 || (bid ? tick > bestTick : tick < bestTick);
+            uint256 beforeCalls = hook.callCount();
+            vm.prank(alice);
+            bytes32 order = engine.fill(_fill(0, _order(tick, 10, 0), bid, false, false));
+            assertEq(hook.callCount(), beforeCalls + (improves ? 1 : 0));
+            if (improves) {
+                (,, address soldToken, uint160 outgoingAmount, uint32 incomingNonce) = hook.callAt(beforeCalls);
+                assertEq(soldToken, bid ? address(token1) : address(token0));
+                assertEq(outgoingAmount, i == 0 ? 0 : bid ? _quoteValue(bestTick, 10, true) : 10);
+                assertEq(incomingNonce, uint32(uint256(order)));
+                bestOrder = order;
+                bestTick = tick;
+            }
+            (uint32 topNonce, uint160 soldAmount) = engine.topOrder(id, bid);
+            assertEq(topNonce, uint32(uint256(bestOrder)));
+            assertEq(soldAmount, bid ? _quoteValue(bestTick, 10, true) : 10);
+        }
+    }
+
+    function testFuzz_NonCrossingRouteLegThenExactBestMatch(bool restingBid, uint8 countSeed, uint256 seed) public {
+        RotationRecordingHook hook = new RotationRecordingHook(address(engine));
+        engine.setPoolHookConfig(address(token0), address(token1), address(hook), true, true);
+        uint256 count = bound(countSeed, 2, 32);
+        int32 bestTick;
+        bytes32 bestOrder;
+        for (uint256 i; i < count; ++i) {
+            int32 tick = int32(int256(uint256(keccak256(abi.encode(seed, i))) % 2001) - 1000);
+            vm.prank(alice);
+            bytes32 order = engine.fill(_fill(0, _order(tick, 10, 0), restingBid, false, false));
+            if (i == 0 || (restingBid ? tick > bestTick : tick < bestTick)) {
+                bestTick = tick;
+                bestOrder = order;
+            }
+        }
+        DeepstateV1.FillParams[] memory legs = new DeepstateV1.FillParams[](2);
+        int32 outside = restingBid ? bestTick + 1 : bestTick - 1;
+        legs[0] = _fill(0, _order(outside, 5, 0), !restingBid, true, false);
+        legs[1] = _fill(0, _order(bestTick, 5, 0), !restingBid, true, false);
+        uint256 beforeCalls = hook.callCount();
+        uint256 beforeBase = token0.balanceOf(bob);
+        uint256 beforeQuote = token1.balanceOf(bob);
+        vm.prank(bob);
+        engine.fillRoute(legs);
+        assertEq(hook.callCount(), beforeCalls + 1);
+        (,, address soldToken, uint160 outgoingAmount, uint32 incomingNonce) = hook.callAt(beforeCalls);
+        assertEq(soldToken, restingBid ? address(token1) : address(token0));
+        assertEq(outgoingAmount, restingBid ? _quoteValue(bestTick, 10, true) : 10);
+        assertEq(incomingNonce, uint32(uint256(bestOrder)));
+        uint256 quoteFilled = _quoteValue(bestTick, 10, restingBid) - _quoteValue(bestTick, 5, restingBid);
+        assertEq(token0.balanceOf(bob), restingBid ? beforeBase - 5 : beforeBase + 5);
+        assertEq(token1.balanceOf(bob), restingBid ? beforeQuote + quoteFilled : beforeQuote - quoteFilled);
+    }
+
+    function testFuzz_CancelBestHookReportsActualSuccessor(bool bid, uint8 countSeed, uint256 seed) public {
+        RotationRecordingHook hook = new RotationRecordingHook(address(engine));
+        engine.setPoolHookConfig(address(token0), address(token1), address(hook), true, true);
+        uint256 count = bound(countSeed, 2, 32);
+        bytes32[] memory orders = new bytes32[](count);
+        int32[] memory ticks = new int32[](count);
+        bool[] memory active = new bool[](count);
+        for (uint256 i; i < count; ++i) {
+            ticks[i] = i % 3 == 0 ? int32(0) : int32(int256(uint256(keccak256(abi.encode(seed, i))) % 2001) - 1000);
+            vm.prank(alice);
+            orders[i] = engine.fill(_fill(0, _order(ticks[i], 10, 0), bid, false, false));
+            active[i] = true;
+        }
+        for (uint256 remaining = count; remaining != 0; --remaining) {
+            uint256 best = _bestActiveOrder(ticks, active, bid);
+            uint256 beforeCalls = hook.callCount();
+            vm.prank(alice);
+            engine.cancel(address(token0), address(token1), 0, orders[best]);
+            active[best] = false;
+            assertEq(hook.callCount(), beforeCalls + 1);
+            (,, address soldToken, uint160 outgoingAmount, uint32 incomingNonce) = hook.callAt(beforeCalls);
+            assertEq(soldToken, bid ? address(token1) : address(token0));
+            assertEq(outgoingAmount, bid ? _quoteValue(ticks[best], 10, true) : 10);
+            uint32 expected = remaining == 1 ? 0 : uint32(uint256(orders[_bestActiveOrder(ticks, active, bid)]));
+            assertEq(incomingNonce, expected);
+        }
+    }
+
+    function _bestActiveOrder(int32[] memory ticks, bool[] memory active, bool bid)
+        private
+        pure
+        returns (uint256 best)
+    {
+        best = type(uint256).max;
+        for (uint256 i; i < ticks.length; ++i) {
+            if (!active[i]) continue;
+            if (best == type(uint256).max || (bid ? ticks[i] > ticks[best] : ticks[i] < ticks[best])) best = i;
+        }
+    }
+
+    function testFuzz_MatchBuffersDoNotLeakBetweenRouteLegs(uint8 countSeed) public {
+        uint256 count = bound(countSeed, 2, 32);
+        bytes32[] memory orders = new bytes32[](count);
+        for (uint256 i; i < count; ++i) {
+            vm.prank(alice);
+            orders[i] = engine.fill(_fill(0, _order(0, 1, 0), false, false, false));
+        }
+        DeepstateV1.FillParams[] memory legs = new DeepstateV1.FillParams[](3);
+        legs[0] = _fill(0, _order(0, uint160(count - 1), 0), true, true, false);
+        legs[1] = _fill(0, _order(0, 1, 0), true, true, false);
+        legs[2] = legs[1];
+        vm.recordLogs();
+        vm.prank(bob);
+        engine.fillRoute(legs);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        uint256 matchEvents;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != address(engine)) continue;
+            uint256 matched;
+            if (logs[i].topics[0] == keccak256("AskMatched(bytes32,bytes32)")) {
+                (bytes32 id, bytes32 node) = abi.decode(logs[i].data, (bytes32, bytes32));
+                assertEq(id, engine.bookId(address(token0), address(token1), 0));
+                matched = uint160(uint256(node) >> 64);
+            } else if (logs[i].topics[0] == keccak256("AsksMatched(bytes32,bytes32[])")) {
+                (bytes32 id, bytes32[] memory nodes) = abi.decode(logs[i].data, (bytes32, bytes32[]));
+                assertEq(id, engine.bookId(address(token0), address(token1), 0));
+                for (uint256 j; j < nodes.length; ++j) {
+                    matched += uint160(uint256(nodes[j]) >> 64);
+                }
+            } else {
+                continue;
+            }
+            assertEq(matched, matchEvents == 0 ? count - 1 : 1);
+            ++matchEvents;
+        }
+        assertEq(matchEvents, 2);
+        for (uint256 i; i < count; ++i) {
+            vm.prank(alice);
+            engine.cancel(address(token0), address(token1), 0, orders[i]);
+        }
+        assertEq(token0.balanceOf(address(engine)), 0);
+        assertEq(token1.balanceOf(address(engine)), 0);
     }
 
     function _integratorFee(address recipient, uint16 bps)

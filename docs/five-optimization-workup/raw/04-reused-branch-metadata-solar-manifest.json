@@ -1,0 +1,45 @@
+{
+  "variant": "04-reused-branch-metadata",
+  "compiler": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+  "settings": {
+    "remappings": [
+      "forge-std/=lib/forge-std/src/",
+      "solady/=lib/solady/src/"
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "compilationTarget": {
+      "src/DeepstateV1.sol": "DeepstateV1"
+    },
+    "evmVersion": "cancun",
+    "libraries": {}
+  },
+  "sourceSha256": "8df3ab990f3fb15d547a3fbc1f271caefc674fff04365e984e6abcff3b45d7ac",
+  "sourceKeccak256": "0xca9fb5a943cac83263123dcb4f809c9f10c0e61ec6a0e9046045c4d3087edc40",
+  "runtimeSha256": "de989e2b086f04001a5da46db4f90beeccbbad54de8d6f4838baf3dd24ac0eed",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "baseline": "candidate-E:45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "04-reused-branch-metadata-solar-release.log",
+      "snapshot": "04-reused-branch-metadata-solar-release.snapshot",
+      "logSha256": "72f1959fe4ec9fcfb8886d471b29a11d6cb2909648c472c18862045b505437f0",
+      "snapshotSha256": "f9bb20dc2f127bf69d96d7da8682cdf33ad28f21413839f31649028d4110026b"
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "04-reused-branch-metadata-solar-insertion.log",
+      "snapshot": "04-reused-branch-metadata-solar-insertion.snapshot",
+      "logSha256": "1492a2d3db8cf00c7021b0fda4d68f40391a9c778977c91fab56d7f48f3a42ff",
+      "snapshotSha256": "199022d36ec4c8037bd8a33c87b7bc0f5c51ea039ea84e4d14f3719bbf0317be"
+    }
+  ]
+}

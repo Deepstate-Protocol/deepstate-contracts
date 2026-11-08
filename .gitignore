@@ -1,6 +1,8 @@
 cache/
 out/
 out-halmos/
+out-solar/
+cache-solar/
 .venv/
 broadcast/
 .DS_Store

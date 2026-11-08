@@ -1,0 +1,234 @@
+{
+  "baseline": "096eab28d87debdd472b4e22e65820e2b1b8d523",
+  "summary": [
+    {
+      "compiler": "solc",
+      "variant": "mixed-delta",
+      "independent": 157,
+      "saveAtLeast1000": 17,
+      "addAtLeast1000": 0,
+      "medianPercent": -0.021608893922684867,
+      "peak": {
+        "id": "RadixMatchingEngineHookGasTest:testGas_CancelFullDepthBidCombRightmost()",
+        "before": 911245,
+        "gas": 911245,
+        "delta": 0,
+        "percent": 0
+      },
+      "worstIncrease": {
+        "id": "DeepstateV1IntegratorFeeGasTest:testGas_IntegratorFillRestBidEmptyBook()",
+        "before": 151826,
+        "gas": 151826,
+        "delta": 0,
+        "percent": 0
+      }
+    },
+    {
+      "compiler": "solc",
+      "variant": "shared-cancel",
+      "independent": 157,
+      "saveAtLeast1000": 25,
+      "addAtLeast1000": 0,
+      "medianPercent": -0.025186141325735514,
+      "peak": {
+        "id": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_PathologicalNativeBidRestsAfterFullDepthDirtySpine()",
+        "before": 874932,
+        "gas": 874338,
+        "delta": -594,
+        "percent": -0.06789099038553853
+      },
+      "worstIncrease": {
+        "id": "RadixMatchingEngineFeeGasTest:testGas_CancelAskSkipsPathologicalBidTree()",
+        "before": 40044,
+        "gas": 40367,
+        "delta": 323,
+        "percent": 0.8066127260013984
+      }
+    },
+    {
+      "compiler": "solc",
+      "variant": "early-split",
+      "independent": 157,
+      "saveAtLeast1000": 35,
+      "addAtLeast1000": 10,
+      "medianPercent": -0.02499804702757597,
+      "peak": {
+        "id": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_PathologicalNativeBidRestsAfterFullDepthDirtySpine()",
+        "before": 874932,
+        "gas": 896282,
+        "delta": 21350,
+        "percent": 2.440189637594693
+      },
+      "worstIncrease": {
+        "id": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_PathologicalNativeBidRestsAfterFullDepthDirtySpine()",
+        "before": 874932,
+        "gas": 896282,
+        "delta": 21350,
+        "percent": 2.440189637594693
+      }
+    },
+    {
+      "compiler": "solc",
+      "variant": "early-split-gated",
+      "independent": 157,
+      "saveAtLeast1000": 35,
+      "addAtLeast1000": 6,
+      "medianPercent": -0.02499804702757597,
+      "peak": {
+        "id": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_PathologicalNativeBidRestsAfterFullDepthDirtySpine()",
+        "before": 874932,
+        "gas": 891654,
+        "delta": 16722,
+        "percent": 1.9112342444898576
+      },
+      "worstIncrease": {
+        "id": "RadixMatchingEngineGasTestNativeDirtySpine:testGas_PathologicalNativeBidRestsAfterFullDepthDirtySpine()",
+        "before": 874932,
+        "gas": 891654,
+        "delta": 16722,
+        "percent": 1.9112342444898576
+      }
+    },
+    {
+      "compiler": "solc",
+      "variant": "insert-delta",
+      "independent": 157,
+      "saveAtLeast1000": 41,
+      "addAtLeast1000": 0,
+      "medianPercent": -0.02825023866580942,
+      "peak": {
+        "id": "RadixMatchingEngineHookGasTest:testGas_PathologicalOffSpinePartialFillBidComb()",
+        "before": 903202,
+        "gas": 835887,
+        "delta": -67315,
+        "percent": -7.45292858076045
+      },
+      "worstIncrease": {
+        "id": "OpportunityGasProbe:testOpportunity_RestAsk64Orders()",
+        "before": 170012,
+        "gas": 170558,
+        "delta": 546,
+        "percent": 0.3211538009081712
+      }
+    },
+    {
+      "compiler": "solc",
+      "variant": "uniform-difference",
+      "independent": 157,
+      "saveAtLeast1000": 62,
+      "addAtLeast1000": 0,
+      "medianPercent": -0.05026344980587909,
+      "peak": {
+        "id": "RadixMatchingEngineHookGasTest:testGas_PathologicalOffSpinePartialFillBidComb()",
+        "before": 903202,
+        "gas": 833615,
+        "delta": -69587,
+        "percent": -7.704478068029079
+      },
+      "worstIncrease": {
+        "id": "OpportunityGasProbe:testOpportunity_RestAsk64Orders()",
+        "before": 170012,
+        "gas": 170558,
+        "delta": 546,
+        "percent": 0.3211538009081712
+      }
+    },
+    {
+      "compiler": "solc",
+      "variant": "zero-delta",
+      "independent": 157,
+      "saveAtLeast1000": 62,
+      "addAtLeast1000": 0,
+      "medianPercent": -0.05026344980587909,
+      "peak": {
+        "id": "RadixMatchingEngineHookGasTest:testGas_PathologicalOffSpinePartialFillBidComb()",
+        "before": 903202,
+        "gas": 835007,
+        "delta": -68195,
+        "percent": -7.550359720195482
+      },
+      "worstIncrease": {
+        "id": "OpportunityGasProbe:testOpportunity_RestAsk64Orders()",
+        "before": 170012,
+        "gas": 170558,
+        "delta": 546,
+        "percent": 0.3211538009081712
+      }
+    },
+    {
+      "compiler": "solar",
+      "variant": "uniform-difference",
+      "independent": 157,
+      "saveAtLeast1000": 59,
+      "addAtLeast1000": 0,
+      "medianPercent": -0.09025520118621122,
+      "peak": {
+        "id": "RadixMatchingEngineFeeGasTest:testGas_PathologicalOffSpinePartialFillBidComb()",
+        "before": 869999,
+        "gas": 810225,
+        "delta": -59774,
+        "percent": -6.870582609865068
+      },
+      "worstIncrease": {
+        "id": "OpportunityGasProbe:testOpportunity_RestAsk64Orders()",
+        "before": 166494,
+        "gas": 166859,
+        "delta": 365,
+        "percent": 0.21922711929559024
+      }
+    }
+  ],
+  "validation": {
+    "sourceSha256": "45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+    "variant": "uniform-difference",
+    "runs": [
+      {
+        "group": "bounds",
+        "args": [
+          "test",
+          "--match-contract",
+          "^BoundedTraversalTest$",
+          "--match-test",
+          "^(test_|testFuzz_)",
+          "--fuzz-runs",
+          "256",
+          "--threads",
+          "4"
+        ],
+        "summary": "Ran 1 test suite in 3.32s (3.32s CPU time): 5 tests passed, 0 failed, 0 skipped (5 total tests)",
+        "log": "validation-bounds.log",
+        "logSha256": "91e41c81fe57cdda0afe722f2741fc7a123ef1058e5d75ea3a2e49b1148f5209"
+      },
+      {
+        "group": "behavioral",
+        "args": [
+          "test",
+          "--no-match-contract",
+          "(Invariant|Gas|AccessList|BoundedTraversal)",
+          "--fuzz-runs",
+          "256",
+          "--threads",
+          "4"
+        ],
+        "summary": "Ran 12 test suites in 339.96ms (1.19s CPU time): 290 tests passed, 0 failed, 0 skipped (290 total tests)",
+        "log": "validation-behavioral.log",
+        "logSha256": "e02b02482f747f028852ebf765bd9f734570ad42b1f8ff84f86579a41017ea24"
+      },
+      {
+        "group": "invariants",
+        "args": [
+          "test",
+          "--match-contract",
+          ".*(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest|DeepstateV1NativeETHInvariantTest).*",
+          "--match-test",
+          "invariant_.*",
+          "--threads",
+          "4"
+        ],
+        "summary": "Ran 3 test suites in 357.14s (824.04s CPU time): 38 tests passed, 0 failed, 0 skipped (38 total tests)",
+        "log": "validation-invariants.log",
+        "logSha256": "090dfa8d5c92825c85ca7360dcb15ebf1313c701a09d2117cb6213b2e3e0a478"
+      }
+    ]
+  }
+}

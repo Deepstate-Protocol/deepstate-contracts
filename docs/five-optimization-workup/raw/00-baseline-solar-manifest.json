@@ -1,0 +1,45 @@
+{
+  "variant": "00-baseline",
+  "compiler": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+  "settings": {
+    "remappings": [
+      "forge-std/=lib/forge-std/src/",
+      "solady/=lib/solady/src/"
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "compilationTarget": {
+      "src/DeepstateV1.sol": "DeepstateV1"
+    },
+    "evmVersion": "cancun",
+    "libraries": {}
+  },
+  "sourceSha256": "45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+  "sourceKeccak256": "0xd23a1dfc7876084f329d844fbecb691403fff61bb5738c5d2ee515ed529a317d",
+  "runtimeSha256": "9b75787f4302cf3b807dc5d20451f48ad6d005d0e61df832bf972d58e276c0d0",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "baseline": "candidate-E:45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "00-baseline-solar-release.log",
+      "snapshot": "00-baseline-solar-release.snapshot",
+      "logSha256": "51321d1687b67417815d862a76213f5a6c87fe05b0c930adf0e7720bd367a030",
+      "snapshotSha256": "da2f9f02270cb5fa424c46077f5b2bd53a9ec240a5c354ace40a8769f2b0cc27"
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "00-baseline-solar-insertion.log",
+      "snapshot": "00-baseline-solar-insertion.snapshot",
+      "logSha256": "5c02c76622e7c7b7a7f2ec047618308db11e000e9c463efd6427feb70c2cf0d9",
+      "snapshotSha256": "c0956a0747479110dca864c3daff02dd128a2e8858fb403cb6e9689f3e0248de"
+    }
+  ]
+}

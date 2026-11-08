@@ -1,0 +1,56 @@
+Compiling 2 files with Solar 0.8.28
+Solar 0.8.28 finished in 282.16ms
+Compiler run successful with warnings:
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/interfaces/IHook.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/libraries/TickMath32.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/DeepstateV1.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[2018]: function state mutability can be restricted to pure
+    ╭▸ src/DeepstateV1.sol:641:5
+    │
+641 │ ┏     function _matchAskLeaf(bytes32 root, int32 limitPrice, uint160 remaining, MatchTopState memory topState)
+642 │ ┃         private
+643 │ ┃         returns (bytes32 newRoot, uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
+    ‡ ┃
+669 │ ┃     }
+    ╰╴┗━━━━━┛
+
+
+warning[2018]: function state mutability can be restricted to pure
+    ╭▸ src/DeepstateV1.sol:679:5
+    │
+679 │ ┏     function _matchBidLeaf(bytes32 root, int32 limitPrice, uint160 remaining, MatchTopState memory topState)
+680 │ ┃         private
+681 │ ┃         returns (bytes32 newRoot, uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
+    ‡ ┃
+707 │ ┃     }
+    ╰╴┗━━━━━┛
+
+
+
+Ran 5 tests for test/BoundedTraversal.t.sol:BoundedTraversalTest
+[PASS] testFuzz_QuantityAndLimitBoundariesUseOnePath(uint256,bool) (runs: 256, μ: 43914733, ~: 42988480)
+[PASS] test_DifferentAskTickSplitsAboveUniformSubtreeWithoutWitnessDescent() (gas: 25655707)
+[PASS] test_DifferentBidTickSplitsAboveUniformSubtreeWithoutWitnessDescent() (gas: 25693712)
+[PASS] test_Full64LevelCombMatchInsertAndCancelStayBounded() (gas: 25359981)
+[PASS] test_WideSweep4096ExpandsNoBranchesAndAllMakersClaim() (gas: 3018)
+Suite result: ok. 5 passed; 0 failed; 0 skipped; finished in 11.73s (16.41s CPU time)
+
+Ran 1 test suite in 11.73s (11.73s CPU time): 5 tests passed, 0 failed, 0 skipped (5 total tests)

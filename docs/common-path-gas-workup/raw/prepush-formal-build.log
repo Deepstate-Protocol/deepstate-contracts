@@ -1,0 +1,11 @@
+Warning: This is a nightly build of Foundry. It is recommended to use the latest stable version. To mute this warning set `FOUNDRY_DISABLE_NIGHTLY_WARNING` in your environment. 
+
+Compiling 28 files with Solc 0.8.28
+Solc 0.8.28 finished in 5.60s
+Error: Compiler run failed:
+Error: Yul exception:Cannot swap Variable var_remaining with Variable expr_component_4: too deep in the stack by 1 slots in [ var_hookEnabled expr_2 var_remaining RET var_token0 var_isBid var_id var_token1 expr var_nonceAndFlags zero_struct_InsertQuoteState_mpos expr_2 expr_1 var_isBid var_book_48855_slot result var_limitPrice expr_component_2 expr_component_3 expr_component_4 ]
+No memoryguard was present. Consider using memory-safe assembly only and annotating it via 'assembly ("memory-safe") { ... }'.
+   --> src/DeepstateV1.sol:559:38:
+    |
+559 |             quoteState.branchLimit = root == bytes32(0) ? _nextBranchSerial(nonceAndFlags) : newBranchSerial + 1;
+    |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,0 +1,248 @@
+--- a/src/DeepstateV1.sol
++++ b/src/DeepstateV1.sol
+@@ -97,6 +97,7 @@
+         uint256 factor;
+         uint16 shift;
+         uint256 removedQuote;
++        uint32 branchLimit;
+     }
+ 
+     struct InsertQuoteState {
+@@ -105,11 +106,13 @@
+         uint256 addedQuote;
+         bool mayReplaceTop;
+         bytes32 outgoingTop;
++        uint32 branchLimit;
+     }
+ 
+     struct MatchTopState {
+         bool trackTop;
+         uint32 survivingNonce;
++        uint32 branchLimit;
+     }
+ 
+     /// @notice One isolated radix book for one token pair epoch.
+@@ -353,10 +356,11 @@
+         bool restingIsBid = !isBid;
+         bytes32 root = restingIsBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
+         if (root != bytes32(0)) {
+-            bytes32 oldTop;
+-            if (hookEnabled) oldTop = _rightmostLeaf(book, root);
+             MatchTopState memory topState;
+             topState.trackTop = hookEnabled;
++            topState.branchLimit = _nextBranchSerial(nonceAndFlags);
++            bytes32 oldTop;
++            if (hookEnabled) oldTop = _rightmostLeaf(book, root, topState.branchLimit);
+             bytes32 newRoot;
+             (newRoot, baseFilled, quoteAmount) =
+                 _matchSubtree(id, book, root, limitPrice, remaining, restingIsBid, topState);
+@@ -367,7 +371,7 @@
+             }
+             if (hookEnabled && baseFilled != 0) {
+                 uint32 incomingNonce = topState.survivingNonce;
+-                if (incomingNonce == 0) incomingNonce = _replacementTopNonce(book, newRoot);
++                if (incomingNonce == 0) incomingNonce = _replacementTopNonce(book, newRoot, topState.branchLimit);
+                 _recordTopOrderChange(oldTop, incomingNonce);
+             }
+         }
+@@ -418,7 +422,8 @@
+         isBid = state.isBid;
+         bool hookEnabled = hookFlags & (isBid ? _CANCEL_HOOK_BID : _CANCEL_HOOK_ASK) != 0;
+ 
+-        CancelQuoteState memory quoteState = CancelQuoteState({factor: 0, shift: 0, removedQuote: 0});
++        CancelQuoteState memory quoteState;
++        quoteState.branchLimit = _nextBranchSerial(nonceAndFlags);
+         bytes32 removed = _removeOrderFromBook(book, order, isBid, hookEnabled, nonceAndFlags, quoteState);
+ 
+         (baseAmount, quoteAmount) = _cancelAmounts(order, removed, isBid, originalQuantity, quoteState);
+@@ -493,7 +498,7 @@
+                     book.tree[_ROOT_NODE].rightNode = newRoot;
+                 }
+                 if (hookEnabled && removedTop) {
+-                    _recordTopOrderChange(removed, _replacementTopNonce(book, newRoot));
++                    _recordTopOrderChange(removed, _replacementTopNonce(book, newRoot, quoteState.branchLimit));
+                 }
+             }
+         } else {
+@@ -506,7 +511,7 @@
+                     book.tree[_ROOT_NODE].leftNode = newRoot;
+                 }
+                 if (hookEnabled && removedTop) {
+-                    _recordTopOrderChange(removed, _replacementTopNonce(book, newRoot));
++                    _recordTopOrderChange(removed, _replacementTopNonce(book, newRoot, quoteState.branchLimit));
+                 }
+             }
+         }
+@@ -548,6 +553,7 @@
+             uint32 nonce;
+             uint32 newBranchSerial;
+             (nonce, newBranchSerial, nextNonceAfter) = _allocateNodeNonces(book, nonceAndFlags, root != bytes32(0));
++            quoteState.branchLimit = root == bytes32(0) ? _nextBranchSerial(nonceAndFlags) : newBranchSerial + 1;
+ 
+             restingOrder = _pack(price, quantity, nonce);
+             _insertRestingOrder(book, root, restingOrder, isBid, insertFlags, newBranchSerial, quoteState);
+@@ -720,7 +726,7 @@
+             if (restingIsBid ? tick < limitPrice : tick > limitPrice) return (node, 0, 0);
+             return _matchUniformSubtree(book, node, remaining, restingIsBid, tick, topState);
+         }
+-        if (_nonce(node) >= _nextBranchSerial(book.nonceAndFlags)) {
++        if (_nonce(node) >= topState.branchLimit) {
+             if (restingIsBid) (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(node, limitPrice, remaining);
+             else (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(node, limitPrice, remaining);
+             if (topState.trackTop && newNode != bytes32(0)) topState.survivingNonce = _nonce(newNode);
+@@ -763,14 +769,14 @@
+         uint32 serial,
+         InsertQuoteState memory quoteState
+     ) private returns (bytes32 newRoot, uint64 witness, uint8 split) {
+-        (bytes32 rightNode, uint256 slot) = _rightNodeAndBranchSlot(book, root);
+-        if (rightNode == bytes32(0)) {
++        if (_nonce(root) >= quoteState.branchLimit) {
+             witness = isBid ? _bidSortKey(root) : _askSortKey(root);
+             split = _commonPrefix(nodeKey, witness);
+             if (split == 64) revert DuplicateOrder();
+             if (quoteState.mayReplaceTop && nodeKey > witness) quoteState.outgoingTop = root;
+             return (root, witness, split);
+         }
++        (bytes32 rightNode, uint256 slot) = _rightNodeAndBranchSlot(book, root);
+         _observeTreeWalk(1);
+         (bytes32 leftNode, uint8 depth) = _leftNodeAndDepthAt(slot, root, rightNode);
+         if (_price(root) != _price(node)) {
+@@ -780,7 +786,7 @@
+             // subtree's depth can be placed without descending to a witness order nonce.
+             if (priceSplit < 32 && priceSplit < depth) {
+                 if (quoteState.mayReplaceTop && _bit(nodeKey, priceSplit)) {
+-                    quoteState.outgoingTop = _rightmostLeaf(book, root);
++                    quoteState.outgoingTop = _rightmostLeaf(book, root, quoteState.branchLimit);
+                 }
+                 return (_storeBranch(book, root, node, representative, nodeKey, isBid, serial, quoteState), 0, 255);
+             }
+@@ -813,14 +819,14 @@
+         bool rightmost,
+         CancelQuoteState memory quoteState
+     ) private returns (bytes32 newRoot, bytes32 removed, bool removedTop) {
+-        (bytes32 rightNode, uint256 slot) = _rightNodeAndBranchSlot(book, root);
+-        if (rightNode == bytes32(0)) {
++        if (_nonce(root) >= quoteState.branchLimit) {
+             uint64 key = isBid ? _bidSortKey(root) : _askSortKey(root);
+             if (key != targetKey) return (root, bytes32(0), false);
+             (quoteState.factor, quoteState.shift) = TickMath32.getPriceFactorAtTick(_price(root));
+             quoteState.removedQuote = _quoteAtFactor(quoteState.factor, quoteState.shift, _quantity(root), isBid);
+             return (bytes32(0), root, rightmost);
+         }
++        (bytes32 rightNode, uint256 slot) = _rightNodeAndBranchSlot(book, root);
+         _observeTreeWalk(2);
+         (bytes32 leftNode, uint8 depth) = _leftNodeAndDepthAt(slot, root, rightNode);
+         bool goRight = _bit(targetKey, depth);
+@@ -1109,14 +1115,15 @@
+         uint160 quantity = _quantity(a) + _quantity(b);
+         uint32 correctionCode;
+         // `b` is the incoming leaf; its exact quote and factor were validated before insertion.
+-        if (_price(a) == _price(b) && _uniformNode(book, a)) {
++        if (_price(a) == _price(b) && _uniformNode(a, quoteState.branchLimit)) {
+             uint256 childQuote = _uniformNodeQuoteAtFactor(book, a, isBid, quoteState.factor, quoteState.shift)
+                 + quoteState.addedQuote;
+             uint256 aggregateQuote = _quoteAtFactor(quoteState.factor, quoteState.shift, quantity, isBid);
+             uint256 correction = isBid ? childQuote - aggregateQuote : aggregateQuote - childQuote;
+             correctionCode = uint32(correction + 1);
+         } else {
+-            book.tree[bytes32(uint256(branchSerial))].quoteTotal = _subtreeQuote(book, a, isBid) + quoteState.addedQuote;
++            book.tree[bytes32(uint256(branchSerial))].quoteTotal =
++                _subtreeQuote(book, a, isBid, quoteState.branchLimit) + quoteState.addedQuote;
+         }
+         branchNode = _branchNode(_price(leftNode), quantity, correctionCode, branchSerial);
+         // Walkers use leftNode as the branch sentinel, so stored branches are always two-child.
+@@ -1137,8 +1144,9 @@
+         // needed when rebuilding an aggregate summary.
+         int32 tick = _price(a);
+         uint32 correctionCode = 0;
++        uint32 branchLimit = _nextBranchSerial(book.nonceAndFlags);
+ 
+-        if (_price(a) == _price(b) && _uniformNode(book, a) && _uniformNode(book, b)) {
++        if (_price(a) == _price(b) && _uniformNode(a, branchLimit) && _uniformNode(b, branchLimit)) {
+             tick = _price(a);
+             (uint256 factor, uint16 shift) = TickMath32.getPriceFactorAtTick(tick);
+             uint256 childQuote = _uniformNodeQuoteAtFactor(book, a, isBid, factor, shift)
+@@ -1153,7 +1161,7 @@
+ 
+         if (correctionCode == 0) {
+             book.tree[bytes32(uint256(branchNonce))].quoteTotal =
+-                _subtreeQuote(book, a, isBid) + _subtreeQuote(book, b, isBid);
++                _subtreeQuote(book, a, isBid, branchLimit) + _subtreeQuote(book, b, isBid, branchLimit);
+         }
+         return _branchNode(tick, quantity, correctionCode, branchNonce);
+     }
+@@ -1177,8 +1185,8 @@
+     }
+ 
+     /// @notice Return whether a node represents one tick exactly.
+-    function _uniformNode(Book storage book, bytes32 node) private view returns (bool) {
+-        return _correctionCode(node) != 0 || _nonce(node) >= _nextBranchSerial(book.nonceAndFlags);
++    function _uniformNode(bytes32 node, uint32 branchLimit) private pure returns (bool) {
++        return _correctionCode(node) != 0 || _nonce(node) >= branchLimit;
+     }
+ 
+     /// @dev Return a uniform branch's exact rounded quote when branch status is already known.
+@@ -1271,21 +1279,19 @@
+     /// @param node Subtree root.
+     /// @return leaf Rightmost live leaf under `node`.
+     /// @dev The right child is always the better sort-key side for both bid and ask trees.
+-    function _rightmostLeaf(Book storage book, bytes32 node) private view returns (bytes32 leaf) {
+-        while (true) {
+-            bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
+-            if (rightNode == bytes32(0)) return node;
+-            node = rightNode;
++    function _rightmostLeaf(Book storage book, bytes32 node, uint32 branchLimit) private view returns (bytes32 leaf) {
++        while (_nonce(node) < branchLimit) {
++            node = book.tree[_branchKey(node)].rightNode;
+         }
++        return node;
+     }
+ 
+     /// @notice Return the nonce of a replacement subtree's best leaf.
+     /// @dev If the replacement is a leaf, the nonce is already known. `_rightmostLeaf` is only needed
+     /// when a top removal leaves a branch root and the successor leaf is not encoded in that root.
+-    function _replacementTopNonce(Book storage book, bytes32 newNode) private view returns (uint32) {
++    function _replacementTopNonce(Book storage book, bytes32 newNode, uint32 branchLimit) private view returns (uint32) {
+         if (newNode == bytes32(0)) return 0;
+-        if (book.tree[_branchKey(newNode)].leftNode == bytes32(0)) return _nonce(newNode);
+-        return _nonce(_rightmostLeaf(book, newNode));
++        return _nonce(_rightmostLeaf(book, newNode, branchLimit));
+     }
+ 
+     /// @notice Start an empty, dynamically growing match buffer for one fill leg.
+@@ -1398,7 +1404,7 @@
+         returns (uint256 quoteAmount)
+     {
+         uint160 quantity = _quantity(node);
+-        quoteAmount = _subtreeQuote(book, node, restingIsBid);
++        quoteAmount = book.tree[_branchKey(node)].quoteTotal;
+ 
+         // Keep logs in execution-priority order across buffered leaf matches and subtree summaries.
+         _emitBufferedMatches(id, restingIsBid);
+@@ -1415,7 +1421,7 @@
+     /// @notice Compute the exact quote sum for a fully consumed subtree without emitting child logs.
+     /// @dev Uniform branches use their correction code; mixed branches use the stored quote sum.
+     /// Both paths preserve leaf-level rounding without recursive pricing.
+-    function _subtreeQuote(Book storage book, bytes32 node, bool restingIsBid)
++    function _subtreeQuote(Book storage book, bytes32 node, bool restingIsBid, uint32 branchLimit)
+         private
+         view
+         returns (uint256 quoteAmount)
+@@ -1425,7 +1431,7 @@
+             return _uniformBranchQuote(node, restingIsBid);
+         }
+ 
+-        if (_nonce(node) >= _nextBranchSerial(book.nonceAndFlags)) {
++        if (_nonce(node) >= branchLimit) {
+             return _quoteValue(_price(node), quantity, restingIsBid);
+         }
+         return book.tree[_branchKey(node)].quoteTotal;
+@@ -2592,7 +2598,7 @@
+     /// @notice Return one side's live best order, or zero when that side is empty.
+     function _topOrder(Book storage book, bool isBid) private view returns (bytes32 order) {
+         bytes32 root = isBid ? book.tree[_ROOT_NODE].rightNode : book.tree[_ROOT_NODE].leftNode;
+-        if (root != bytes32(0)) order = _rightmostLeaf(book, root);
++        if (root != bytes32(0)) order = _rightmostLeaf(book, root, _nextBranchSerial(book.nonceAndFlags));
+     }
+ 
+     /// @notice Convert one live order into the collateral amount it is offering to sell.

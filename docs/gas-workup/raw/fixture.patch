@@ -1,0 +1,86 @@
+diff --git a/test/RadixMatchingEngineGas.t.sol b/test/RadixMatchingEngineGas.t.sol
+index 1b45577..83bdd76 100644
+--- a/test/RadixMatchingEngineGas.t.sol
++++ b/test/RadixMatchingEngineGas.t.sol
+@@ -62,6 +62,7 @@ contract RadixMatchingEngineGasTest is Test {
+             quote = tokenA;
+         }
+         engine = new DeepstateV1();
++        vm.etch(address(engine), vm.envBytes("VARIANT_BYTECODE"));
+ 
+         _fundAndApprove(alice);
+         _fundAndApprove(bob);
+@@ -711,6 +712,13 @@ contract RadixMatchingEngineGasTest is Test {
+     }
+ 
+     function _buildLargeRandomBook() internal returns (LargeRandomBook memory book) {
++        book = this.seedLargeBookForWorkup();
++        vm.cool(address(engine));
++    }
++
++    // Keep setup in one outer call; the subsequent measured fill remains a separate isolated call.
++    function seedLargeBookForWorkup() external returns (LargeRandomBook memory book) {
++        require(msg.sender == address(this));
+         _fundLargeAndApprove(alice);
+         _fundLargeAndApprove(bob);
+         _fundLargeAndApprove(carol);
+@@ -970,6 +978,7 @@ contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
+     function setUp() public {
+         usdc = new GasTestERC20();
+         engine = new DeepstateV1();
++        vm.etch(address(engine), vm.envBytes("VARIANT_BYTECODE"));
+ 
+         usdc.mint(HOT_WALLET, uint256(1) << 220);
+         usdc.mint(LIQUIDITY_PROVIDER, uint256(1) << 220);
+@@ -1124,7 +1133,11 @@ contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
+ 
+         vm.prank(TAKER);
+         _fillAskNoRest(targetTick, 1);
+-        assertEq(_nonceAndFlags() & BID_RIGHT_SPINE_DIRTY, 0, "summaries remain exact");
++        if (vm.envBool("EXACT_SUMMARIES")) {
++            assertEq(_nonceAndFlags() & BID_RIGHT_SPINE_DIRTY, 0, "summaries remain exact");
++        } else {
++            assertTrue(_nonceAndFlags() & BID_RIGHT_SPINE_DIRTY != 0, "legacy summary flag");
++        }
+     }
+ 
+     function _fillObservedOrderThreeTimes() internal {
+@@ -1244,6 +1257,7 @@ contract DeepstateV1IntegratorFeeGasTest is Test {
+         GasTestERC20 tokenB = new GasTestERC20();
+         (token0, token1) = address(tokenA) < address(tokenB) ? (tokenA, tokenB) : (tokenB, tokenA);
+         engine = new DeepstateV1();
++        vm.etch(address(engine), vm.envBytes("VARIANT_BYTECODE"));
+         _fundAndApprove(MAKER);
+         _fundAndApprove(TAKER);
+     }
+diff --git a/test/BoundedTraversalGas.t.sol b/test/BoundedTraversalGas.t.sol
+index 9538bc6..64a5c57 100644
+--- a/test/BoundedTraversalGas.t.sol
++++ b/test/BoundedTraversalGas.t.sol
+@@ -51,11 +51,24 @@ contract RadixMatchingEngineGasTestWideSweep is RadixMatchingEngineGasTest {
+         (, uint256 quoteAmount) = _seed(1024);
+         bytes memory data = abi.encodeCall(engine.fill, (_params(1024, 0)));
+         uint256 input = quote.balanceOf(SWEEPER);
++        bytes32 rootBefore = _askRoot();
++        uint256 collateralBefore = base.balanceOf(address(engine));
+         vm.prank(SWEEPER);
+         vm.resumeGasMetering();
+-        (bool success,) = address(engine).call{gas: 1_000_000}(data);
++        (bool success, bytes memory result) = address(engine).call{gas: 1_000_000}(data);
+         vm.pauseGasMetering();
+-        assertTrue(success, "cached sweep must fit one million gas");
++        if (vm.envBool("EXACT_SUMMARIES")) {
++            assertTrue(success, "cached sweep must fit one million gas");
++        } else {
++            assertFalse(success, "legacy sweep must exhaust its budget");
++            assertEq(result.length, 0, "not a protocol revert");
++            assertEq(_askRoot(), rootBefore);
++            assertEq(base.balanceOf(address(engine)), collateralBefore);
++            assertEq(base.balanceOf(SWEEPER), 0);
++            assertEq(quote.balanceOf(SWEEPER), input);
++            vm.prank(SWEEPER);
++            engine.fill(_params(1024, 0));
++        }
+         assertEq(_askRoot(), bytes32(0));
+         assertEq(base.balanceOf(SWEEPER), 1024);
+         assertEq(quote.balanceOf(SWEEPER), input - quoteAmount);

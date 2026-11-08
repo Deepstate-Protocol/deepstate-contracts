@@ -1,0 +1,165 @@
+--- a/src/DeepstateV1.sol
++++ b/src/DeepstateV1.sol
+@@ -521,8 +521,12 @@
+         bool isBid,
+         address owner,
+         bool hookEnabled
+-    ) internal returns (bytes32 restingOrder, uint32 nextNonceAfter) {
+-        _validateRestingQuoteDomain(price, quantity, isBid);
++    ) internal returns (bytes32 restingOrder, uint32 nextNonceAfter, uint256 restingQuote) {
++        InsertQuoteState memory quoteState;
++        (quoteState.factor, quoteState.shift) = TickMath32.getPriceFactorAtTick(price);
++        restingQuote = _quoteAtFactor(quoteState.factor, quoteState.shift, quantity, isBid);
++        if (restingQuote > uint256(type(int256).max)) revert InvalidOrder();
++        quoteState.addedQuote = restingQuote;
+ 
+         uint256 insertFlags = hookEnabled ? _MATCH_HOOK : 0;
+         nonceAndFlags &= ~(uint256(3) << 32);
+@@ -534,7 +538,7 @@
+             (nonce, newBranchSerial, nextNonceAfter) = _allocateNodeNonces(book, nonceAndFlags, root != bytes32(0));
+ 
+             restingOrder = _pack(price, quantity, nonce);
+-            _insertRestingOrder(book, root, restingOrder, isBid, insertFlags, newBranchSerial);
++            _insertRestingOrder(book, root, restingOrder, isBid, insertFlags, newBranchSerial, quoteState);
+         }
+ 
+         orderOf[_orderId(id, restingOrder)] = OrderState({owner: owner, isBid: isBid});
+@@ -587,7 +591,8 @@
+         bytes32 restingOrder,
+         bool isBid,
+         uint256 insertFlags,
+-        uint32 newBranchSerial
++        uint32 newBranchSerial,
++        InsertQuoteState memory quoteState
+     ) private {
+         bytes32 oldTop;
+         if (insertFlags & _MATCH_HOOK != 0 && root != bytes32(0)) oldTop = _rightmostLeaf(book, root);
+@@ -596,10 +601,9 @@
+             uint64 key = isBid ? _bidSortKey(restingOrder) : _askSortKey(restingOrder);
+             uint64 witness;
+             uint8 split;
+-            InsertQuoteState memory quoteState = InsertQuoteState({factor: 0, shift: 0, addedQuote: 0});
+             (newRoot, witness, split) = _insertPath(book, root, restingOrder, key, isBid, newBranchSerial, quoteState);
+             if (split != 255) {
+-                newRoot = _storeBranch(book, newRoot, restingOrder, witness, key, isBid, newBranchSerial);
++                newRoot = _storeBranch(book, newRoot, restingOrder, witness, key, isBid, newBranchSerial, quoteState);
+             }
+         }
+         if (isBid) book.tree[_ROOT_NODE].rightNode = newRoot;
+@@ -759,7 +763,7 @@
+             // Only tick bits are meaningful in a branch representative. A split before this
+             // subtree's depth can be placed without descending to a witness order nonce.
+             if (priceSplit < 32 && priceSplit < depth) {
+-                return (_storeBranch(book, root, node, representative, nodeKey, isBid, serial), 0, 255);
++                return (_storeBranch(book, root, node, representative, nodeKey, isBid, serial, quoteState), 0, 255);
+             }
+         }
+         bool goRight = _bit(nodeKey, depth);
+@@ -767,7 +771,7 @@
+         (child, witness, split) = _insertPath(book, child, node, nodeKey, isBid, serial, quoteState);
+         if (split != 255) {
+             if (split < depth) return (root, witness, split);
+-            child = _storeBranch(book, child, node, witness, nodeKey, isBid, serial);
++            child = _storeBranch(book, child, node, witness, nodeKey, isBid, serial, quoteState);
+             split = 255;
+         }
+         if (goRight) rightNode = child;
+@@ -892,11 +896,6 @@
+         bool leftChanged,
+         InsertQuoteState memory quoteState
+     ) private returns (bytes32 newBranch) {
+-        // Every valid decoded factor is positive, so zero denotes an as-yet unused context.
+-        if (quoteState.factor == 0) {
+-            (quoteState.factor, quoteState.shift) = TickMath32.getPriceFactorAtTick(_price(inserted));
+-            quoteState.addedQuote = _quoteAtFactor(quoteState.factor, quoteState.shift, _quantity(inserted), isBid);
+-        }
+         uint160 quantity = _quantity(oldBranch) + _quantity(inserted);
+         uint32 oldCode = _correctionCode(oldBranch);
+         if (oldCode == 0) {
+@@ -1066,7 +1065,8 @@
+         uint64 aKey,
+         uint64 bKey,
+         bool isBid,
+-        uint32 branchSerial
++        uint32 branchSerial,
++        InsertQuoteState memory quoteState
+     ) private returns (bytes32 branchNode) {
+         uint8 branchDepth = _commonPrefix(aKey, bKey);
+ 
+@@ -1077,7 +1077,19 @@
+             rightNode = a;
+         }
+ 
+-        branchNode = _branchNodeForChildren(book, leftNode, rightNode, isBid, branchSerial);
++        uint160 quantity = _quantity(a) + _quantity(b);
++        uint32 correctionCode;
++        // `b` is the incoming leaf; its exact quote and factor were validated before insertion.
++        if (_price(a) == _price(b) && _uniformNode(book, a)) {
++            uint256 childQuote = _uniformNodeQuoteAtFactor(book, a, isBid, quoteState.factor, quoteState.shift)
++                + quoteState.addedQuote;
++            uint256 aggregateQuote = _quoteAtFactor(quoteState.factor, quoteState.shift, quantity, isBid);
++            uint256 correction = isBid ? childQuote - aggregateQuote : aggregateQuote - childQuote;
++            correctionCode = uint32(correction + 1);
++        } else {
++            book.tree[bytes32(uint256(branchSerial))].quoteTotal = _subtreeQuote(book, a, isBid) + quoteState.addedQuote;
++        }
++        branchNode = _branchNode(_price(leftNode), quantity, correctionCode, branchSerial);
+         // Walkers use leftNode as the branch sentinel, so stored branches are always two-child.
+         _setNewBranchChildren(book, branchNode, leftNode, rightNode, branchDepth);
+     }
+@@ -2229,7 +2241,8 @@
+             token1Delta = _debitDelta(0, quoteAmount);
+ 
+             if (remaining != 0 && restAllowed) {
+-                restingOrder = _restRemaining(
++                uint256 collateral;
++                (restingOrder, collateral) = _restRemaining(
+                     params.token0,
+                     params.token1,
+                     params.epoch,
+@@ -2241,7 +2254,6 @@
+                     remaining,
+                     true
+                 );
+-                uint256 collateral = _quoteValue(limitPrice, remaining, true);
+                 token1Delta = _debitDelta(token1Delta, collateral);
+             }
+         } else {
+@@ -2250,7 +2262,7 @@
+             token1Delta = _creditDelta(quoteAmount);
+ 
+             if (remaining != 0 && restAllowed) {
+-                restingOrder = _restRemaining(
++                (restingOrder,) = _restRemaining(
+                     params.token0,
+                     params.token1,
+                     params.epoch,
+@@ -2389,7 +2401,7 @@
+         int32 limitPrice,
+         uint160 remaining,
+         bool isBid
+-    ) private returns (bytes32 restingOrder) {
++    ) private returns (bytes32 restingOrder, uint256 restingQuote) {
+         bytes32 restBookId = routedBookId;
+         Book storage restBook = routedBook;
+         uint256 restNonceAndFlags;
+@@ -2400,7 +2412,7 @@
+         }
+         uint32 nextNonceAfter;
+         bool hookEnabled = _bookHookEnabled(restNonceAndFlags, isBid);
+-        (restingOrder, nextNonceAfter) = _restSelectedBook(
++        (restingOrder, nextNonceAfter, restingQuote) = _restSelectedBook(
+             token0, token1, restBookId, restBook, restNonceAndFlags, limitPrice, remaining, isBid, hookEnabled
+         );
+         if (nextNonceAfter == 1) _rotateIfExhausted(token0, token1);
+@@ -2419,8 +2431,8 @@
+         uint160 remaining,
+         bool isBid,
+         bool hookEnabled
+-    ) private returns (bytes32 restingOrder, uint32 nextNonceAfter) {
+-        (restingOrder, nextNonceAfter) =
++    ) private returns (bytes32 restingOrder, uint32 nextNonceAfter, uint256 restingQuote) {
++        (restingOrder, nextNonceAfter, restingQuote) =
+             _restBook(id, book, nonceAndFlags, limitPrice, remaining, isBid, msg.sender, hookEnabled);
+         if (hookEnabled) _executeTopOrderHook(token0, token1, id, isBid);
+     }

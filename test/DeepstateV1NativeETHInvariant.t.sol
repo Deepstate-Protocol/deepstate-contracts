@@ -639,12 +639,21 @@ contract DeepstateV1NativeETHInvariantTest is StdInvariant, Test {
             (bytes32 leftNode, bytes32 rightNode) = engine.tree(id, root);
             if (leftNode == bytes32(0)) return _sortKey(root, isBid) == targetKey ? root : bytes32(0);
 
-            uint64 leftKey = _sortKey(leftNode, isBid);
-            uint8 depth = _commonPrefix(leftKey, _sortKey(rightNode, isBid));
+            uint64 leftKey = _nodeKey(id, leftNode, isBid);
+            uint8 depth = _commonPrefix(leftKey, _nodeKey(id, rightNode, isBid));
             if (_commonPrefix(targetKey, leftKey) < depth) return bytes32(0);
             root = _bit(targetKey, depth) ? rightNode : leftNode;
         }
         return bytes32(0);
+    }
+
+    function _nodeKey(bytes32 id, bytes32 node, bool isBid) private view returns (uint64) {
+        while (node != bytes32(0)) {
+            (bytes32 leftNode,) = engine.tree(id, node);
+            if (leftNode == bytes32(0)) return _sortKey(node, isBid);
+            node = leftNode;
+        }
+        return 0;
     }
 
     function _sortKey(bytes32 order, bool isBid) private pure returns (uint64) {

@@ -1,0 +1,37 @@
+No files changed, compilation skipped
+2026-11-08T01:08:02.279176Z  WARN evm::traces::external: etherscan config not found
+
+Ran 5 tests for test/StorageAccessProbe.t.sol:StorageAccessProbe
+[PASS] testStorage_DeepAskCancellation() (gas: 369092)
+Logs:
+  engine recorded reads: 132
+  engine recorded writes: 65
+  unchanged engine writes: 0
+
+[PASS] testStorage_DeepBidCancellation() (gas: 462504)
+Logs:
+  engine recorded reads: 164
+  engine recorded writes: 97
+  unchanged engine writes: 0
+
+[PASS] testStorage_DeepBidFill() (gas: 567665)
+Logs:
+  engine recorded reads: 195
+  engine recorded writes: 96
+  unchanged engine writes: 0
+
+[PASS] testStorage_LargeBookMatch() (gas: 137853)
+Logs:
+  engine recorded reads: 43
+  engine recorded writes: 19
+  unchanged engine writes: 0
+
+[PASS] testStorage_ZeroQuoteAskCancellation() (gas: 39811)
+Logs:
+  engine recorded reads: 10
+  engine recorded writes: 4
+  unchanged engine writes: 0
+
+Suite result: ok. 5 passed; 0 failed; 0 skipped; finished in 1.21s (1.25s CPU time)
+
+Ran 1 test suite in 1.21s (1.21s CPU time): 5 tests passed, 0 failed, 0 skipped (5 total tests)

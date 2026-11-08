@@ -1,0 +1,183 @@
+--- a/src/DeepstateV1.sol
++++ b/src/DeepstateV1.sol
+@@ -741,8 +741,11 @@
+         }
+ 
+         _observeTreeWalk(0);
+-        bytes32 leftNode = _leftNode(book, node);
+-        bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
++        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, node);
++        bytes32 leftNode;
++        assembly ("memory-safe") {
++            leftNode := sload(branchSlot)
++        }
+         uint160 rightFill;
+         uint256 rightQuote;
+         (rightNode, rightFill, rightQuote) =
+@@ -755,7 +758,7 @@
+         }
+         fillQuantity += rightFill;
+         quoteAmount += rightQuote;
+-        newNode = _replaceMixedBranchAfterRemoval(book, node, leftNode, rightNode, quoteAmount, false);
++        newNode = _replaceMixedBranchAfterRemoval(book, node, leftNode, rightNode, quoteAmount, false, branchSlot);
+     }
+ 
+     /// @dev Descend once to a witness leaf, then place the new Patricia split while unwinding.
+@@ -802,7 +805,7 @@
+         }
+         if (goRight) rightNode = child;
+         else leftNode = child;
+-        newRoot = _replaceBranchAfterInsert(book, root, leftNode, rightNode, node, isBid, !goRight, quoteState);
++        newRoot = _replaceBranchAfterInsert(book, root, leftNode, rightNode, node, isBid, !goRight, quoteState, slot, depth);
+     }
+ 
+     /// @dev Test harnesses override this observer; the empty production body is optimized away.
+@@ -838,7 +841,7 @@
+         if (removed == bytes32(0)) return (root, bytes32(0), false);
+         return
+             (
+-                _replaceBranchAfterCancel(book, root, leftNode, rightNode, isBid, !goRight, quoteState),
++                _replaceBranchAfterCancel(book, root, leftNode, rightNode, isBid, !goRight, quoteState, slot, depth),
+                 removed,
+                 removedTop
+             );
+@@ -869,14 +872,19 @@
+         bytes32 leftNode,
+         bytes32 rightNode,
+         uint256 removedQuote,
+-        bool leftChanged
++        bool leftChanged,
++        uint256 branchSlot
+     ) private returns (bytes32 newBranch) {
+         if (leftNode == bytes32(0)) return rightNode;
+         if (rightNode == bytes32(0)) return leftNode;
+ 
+-        book.tree[_branchKey(oldBranch)].quoteTotal -= removedQuote;
++        Branch storage branch;
++        assembly ("memory-safe") {
++            branch.slot := branchSlot
++        }
++        branch.quoteTotal -= removedQuote;
+         newBranch = _branchNode(_price(leftNode), _quantity(leftNode) + _quantity(rightNode), 0, _nonce(oldBranch));
+-        _rewriteSingleBranchChild(book, newBranch, leftNode, rightNode, leftChanged);
++        _rewriteSingleBranchChildAt(branchSlot, newBranch, leftNode, rightNode, leftChanged, 0);
+     }
+ 
+     /// @dev Cancelled leaf value is removed once from every ancestor. Surviving uniform ancestors
+@@ -888,7 +896,9 @@
+         bytes32 rightNode,
+         bool isBid,
+         bool leftChanged,
+-        CancelQuoteState memory quoteState
++        CancelQuoteState memory quoteState,
++        uint256 branchSlot,
++        uint8 depth
+     ) private returns (bytes32 newBranch) {
+         if (leftNode == bytes32(0)) return rightNode;
+         if (rightNode == bytes32(0)) return leftNode;
+@@ -896,7 +906,7 @@
+         if (oldCode == 0) {
+             return
+                 _replaceMixedBranchAfterRemoval(
+-                    book, oldBranch, leftNode, rightNode, quoteState.removedQuote, leftChanged
++                    book, oldBranch, leftNode, rightNode, quoteState.removedQuote, leftChanged, branchSlot
+                 );
+         }
+ 
+@@ -908,7 +918,7 @@
+             ? correction + roundedReduction - quoteState.removedQuote
+             : correction + quoteState.removedQuote - roundedReduction;
+         newBranch = _withQuantityAndCorrection(oldBranch, quantity, uint32(correction + 1));
+-        _rewriteSingleBranchChild(book, newBranch, leftNode, rightNode, leftChanged);
++        _rewriteSingleBranchChildAt(branchSlot, newBranch, leftNode, rightNode, leftChanged, depth);
+     }
+ 
+     /// @dev Adding one leaf changes every surviving ancestor by the same exact quote delta.
+@@ -920,12 +930,18 @@
+         bytes32 inserted,
+         bool isBid,
+         bool leftChanged,
+-        InsertQuoteState memory quoteState
++        InsertQuoteState memory quoteState,
++        uint256 branchSlot,
++        uint8 depth
+     ) private returns (bytes32 newBranch) {
+         uint160 quantity = _quantity(oldBranch) + _quantity(inserted);
+         uint32 oldCode = _correctionCode(oldBranch);
+         if (oldCode == 0) {
+-            book.tree[_branchKey(oldBranch)].quoteTotal += quoteState.addedQuote;
++            Branch storage branch;
++            assembly ("memory-safe") {
++                branch.slot := branchSlot
++            }
++            branch.quoteTotal += quoteState.addedQuote;
+             newBranch = _branchNode(_price(leftNode), quantity, 0, _nonce(oldBranch));
+         } else {
+             uint256 roundedIncrease =
+@@ -936,7 +952,22 @@
+                 : correction + roundedIncrease - quoteState.addedQuote;
+             newBranch = _withQuantityAndCorrection(oldBranch, quantity, uint32(correction + 1));
+         }
+-        _rewriteSingleBranchChild(book, newBranch, leftNode, rightNode, leftChanged);
++        _rewriteSingleBranchChildAt(branchSlot, newBranch, leftNode, rightNode, leftChanged, depth);
++    }
++
++    /// @dev Reuse the branch slot and split depth loaded before the recursive child mutation.
++    function _rewriteSingleBranchChildAt(
++        uint256 branchSlot,
++        bytes32 branchNode,
++        bytes32 leftNode,
++        bytes32 rightNode,
++        bool leftChanged,
++        uint8 depth
++    ) private {
++        bytes32 child = leftChanged ? _encodeStoredLeftNode(branchNode, leftNode, depth) : rightNode;
++        assembly ("memory-safe") {
++            sstore(add(branchSlot, iszero(leftChanged)), child)
++        }
+     }
+ 
+     /// @dev Persist the only child pointer changed by a stable-identity branch rewrite.
+@@ -1020,8 +1051,12 @@
+         }
+ 
+         _observeTreeWalk(0);
+-        bytes32 leftNode = _leftNode(book, node);
+-        bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
++        (bytes32 rightNode, uint256 branchSlot) = _rightNodeAndBranchSlot(book, node);
++        bytes32 storedLeftNode;
++        assembly ("memory-safe") {
++            storedLeftNode := sload(branchSlot)
++        }
++        bytes32 leftNode = _decodeStoredLeftNode(node, storedLeftNode);
+         uint160 rightFillQuantity;
+         uint256 rightQuoteAmount;
+         (rightNode, rightFillQuantity, rightQuoteAmount) =
+@@ -1040,7 +1075,7 @@
+             quoteAmount += rightQuoteAmount;
+         }
+         newNode = _replaceUniformBranchAfterFill(
+-            book, node, leftNode, rightNode, restingIsBid, fillQuantity, quoteAmount, factor, shift
++            book, node, leftNode, rightNode, restingIsBid, fillQuantity, quoteAmount, factor, shift, branchSlot
+         );
+     }
+ 
+@@ -1054,7 +1089,8 @@
+         uint160 fillQuantity,
+         uint256 quoteAmount,
+         uint256 factor,
+-        uint16 shift
++        uint16 shift,
++        uint256 branchSlot
+     ) private returns (bytes32 newNode) {
+         // Uniform matching consumes the right child first. If this branch survives, the left child
+         // therefore cannot be empty; an empty right child collapses to the untouched left child.
+@@ -1080,7 +1116,7 @@
+         newNode = _branchNode(_price(oldNode), newQuantity, uint32(correction + 1), _nonce(oldNode));
+         // A surviving uniform branch cannot have changed its left child: matching is right-first,
+         // and reaching the left child requires consuming the right child and collapsing the branch.
+-        _rewriteSingleBranchChild(book, newNode, leftNode, rightNode, false);
++        _rewriteSingleBranchChildAt(branchSlot, newNode, leftNode, rightNode, false, 0);
+     }
+ 
+     /// @notice Create and store a two-child branch for two nonzero nodes.

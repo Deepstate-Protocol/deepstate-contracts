@@ -1,0 +1,93 @@
+Warning: This is a nightly build of Foundry. It is recommended to use the latest stable version. To mute this warning set `FOUNDRY_DISABLE_NIGHTLY_WARNING` in your environment. 
+
+No files changed, compilation skipped
+2026-11-07T23:58:01.616432Z  WARN evm::traces::external: etherscan config not found
+
+Ran 6 tests for test/RadixMatchingEngineAccessList.t.sol:RadixMatchingEngineAccessListBenchmark
+[PASS] testBenchmark_FillAskConsumesDirtySamePriceBidSubtree() (gas: 1528013)
+Logs:
+  FillAskConsumesDirtySamePriceBidSubtree
+  engine keys: 3
+  base keys: 3
+  quote keys: 2
+  total keys: 8
+  cold execution: 29629
+  warm execution: 13617
+  execution-only saving: 16012
+  access-list intrinsic: 22400
+  warm plus intrinsic: 36017
+  transaction-net saving: -6388
+
+[PASS] testBenchmark_FillAskConsumesFullDepthBidComb() (gas: 13299199)
+Logs:
+  FillAskConsumesFullDepthBidComb
+  engine keys: 4
+  base keys: 3
+  quote keys: 2
+  total keys: 9
+  cold execution: 52025
+  warm execution: 36005
+  execution-only saving: 16020
+  access-list intrinsic: 24300
+  warm plus intrinsic: 60305
+  transaction-net saving: -8280
+
+[PASS] testBenchmark_FillBidConsumesAskAndRestsRemainder() (gas: 398679)
+Logs:
+  FillBidConsumesAskAndRestsRemainder
+  engine keys: 5
+  base keys: 2
+  quote keys: 3
+  total keys: 10
+  cold execution: 107547
+  warm execution: 97036
+  execution-only saving: 10511
+  access-list intrinsic: 26200
+  warm plus intrinsic: 123236
+  transaction-net saving: -15689
+
+[PASS] testBenchmark_FillBidConsumesDirtySamePriceAskSubtree() (gas: 1509481)
+Logs:
+  FillBidConsumesDirtySamePriceAskSubtree
+  engine keys: 3
+  base keys: 2
+  quote keys: 3
+  total keys: 8
+  cold execution: 29767
+  warm execution: 13755
+  execution-only saving: 16012
+  access-list intrinsic: 22400
+  warm plus intrinsic: 36155
+  transaction-net saving: -6388
+
+[PASS] testBenchmark_FillBidConsumesMaxValidDepthAskComb() (gas: 12507021)
+Logs:
+  FillBidConsumesMaxValidDepthAskComb
+  engine keys: 4
+  base keys: 2
+  quote keys: 3
+  total keys: 9
+  cold execution: 52167
+  warm execution: 36147
+  execution-only saving: 16020
+  access-list intrinsic: 24300
+  warm plus intrinsic: 60447
+  transaction-net saving: -8280
+
+[PASS] testBenchmark_FillBidConsumesSamePriceAskSubtree() (gas: 1552125)
+Logs:
+  FillBidConsumesSamePriceAskSubtree
+  engine keys: 3
+  base keys: 2
+  quote keys: 3
+  total keys: 8
+  cold execution: 57766
+  warm execution: 47255
+  execution-only saving: 10511
+  access-list intrinsic: 22400
+  warm plus intrinsic: 69655
+  transaction-net saving: -11889
+
+Suite result: ok. 6 passed; 0 failed; 0 skipped; finished in 49.43ms (93.69ms CPU time)
+
+Ran 1 test suite in 370.21ms (49.43ms CPU time): 6 tests passed, 0 failed, 0 skipped (6 total tests)

@@ -70,7 +70,8 @@ Consequently, fill partitioning cannot create or destroy quote units.
 
 For `n` same-tick leaves, the encoded correction reconstructs the exact sum of independently rounded
 leaf notionals from the rounded aggregate notional. Its magnitude is at most `n - 1`; since a book
-admits at most `2^32 - 2` leaves, `correction + 1` fits in `uint32`.
+admits at most `2^31` leaves before its order- and branch-identity allocation fronts meet,
+`correction + 1` fits in `uint32`.
 
 **Evidence:** `SMT` binary-merge and inductive-capacity lemmas, plus `BYTECODE` correction proofs.
 
@@ -136,35 +137,40 @@ right key. Recursive insertion and removal advance the split depth, so a key wal
 
 ### R3. Live-node address uniqueness
 
-Assume every live leaf has a unique nonce and every branch quantity sum is representable. Two
-disjoint branches have different maximum descendant path keys. An ancestor and descendant that
-share a maximum path have strictly different positive aggregate quantities. A branch and one of its
-live leaves likewise differ in quantity. Thus no two simultaneously live tree nodes share a
-`bytes32` mapping key. Original order ownership keys may equal historical branch words without
-aliasing because ownership is stored in `orderOf`, not `tree`.
+Order identities descend from `2^32 - 1`, while branch identities ascend from one. Every nonempty
+insertion consumes one fresh branch identity, and the book becomes non-restable before the fronts
+meet. Branches therefore cannot alias leaves, and two live branches cannot alias each other.
+Quantity and correction rewrites preserve the branch identity and continue addressing the same
+`tree[bytes32(branchNonce)]` slot; only topology creation consumes a new branch identity.
 
-**Evidence:** `SMT` local strict-sum lemmas and `INDUCTION` over the tree. Keccak-scoped ownership is
+**Evidence:** `SMT` allocation-front and radix-split lemmas and `INDUCTION` over the tree. Keccak-scoped ownership is
 covered separately by N1.
 
 ### R4. Aggregate quantity and quote correctness
 
-Every clean branch quantity equals the sum of its leaves. Every uniform branch quote equals the sum
-of leaf-rounded quotes by A5. Every mixed subtree quote equals the recursive sum of its children.
+Every live branch quantity equals the sum of its leaves. Every uniform branch quote equals the sum
+of leaf-rounded quotes by A5. Every mixed branch stores the exact sum of its children's quotes in `quoteTotal`.
 Insertion, partial fill, full removal, cancellation, and branch collapse preserve these statements.
 
 **Evidence:** local arithmetic `SMT` lemmas, `INDUCTION` on subtree height, production symbolic
 one/two-maker paths, and stateful model invariants.
 
-### R5. Dirty right-spine safety
+### R5. Exact-summary preservation
 
-Only right-child rewrites can make a right-spine anchor stale. Its child pointers remain valid, every
-left subtree remains exact, and matching never treats a stale mixed-price aggregate as exact. The
-dirty same-tick recovery recursively adds exact left summaries and the right suffix. Materialization
-rebuilds the right child before its parent. Hence dirty execution preserves membership, priority,
-quantity, and quote accounting; same-side insertion restores clean aggregates first.
+Every mutation updates surviving ancestors from exact summaries and the exact inserted or removed quote delta. A mixed branch's
+`quoteTotal` equals the sum of independently leaf-rounded quotes. Its packed tick is the worst
+(leftmost) live tick. Uniform branches retain their exact rounding correction. There are no stale
+anchors, dirty recovery probes, or materialization passes.
 
-**Evidence:** `INDUCTION` over the dirty suffix length, production formal dirty-spine paths, corruption
-regressions, and stateful right-spine invariants.
+Insertion descends once to a witness leaf. The first differing bit determines a pending split;
+unwinding installs it at the unique ancestor interval containing that depth. Existing ancestors are
+updated once, with no repeated descendant-key searches. Price-prefix divergence can establish a
+new parent before reaching a witness nonce; only price bits, never a branch serial, justify that shortcut.
+Cancellation likewise changes one child per
+level. Branch identities remain stable across all summary rewrites.
+
+**Evidence:** source-bound arithmetic `SMT` lemmas, induction on the one-child path, stateful exact
+quantity/price/quote invariants, and instrumented full-depth and wide-book tests.
 
 ### R6. Best-price matching
 
@@ -180,7 +186,9 @@ remains, and equal-price makers fill in descending nonce order.
 ### N1. Namespace isolation
 
 Pool, book, and order state are isolated by `keccak256` domain inputs. Transient user-delta, fee,
-hook, match-buffer, and reentrancy slots are pairwise disjoint by bit domain or full constant value.
+hook, and reentrancy slots are pairwise disjoint by bit domain or full constant value. The match
+buffer pointer is call-local memory, not a transient slot. Its context field is separate from
+the buffer allocation and its nodes; route legs create independent contexts.
 
 **Evidence:** transient namespaces are `SMT` proved. Persistent namespaces are `CONDITIONAL` on
 Keccak-256 collision resistance; unconditional injectivity of a 256-bit hash over larger input
@@ -188,9 +196,11 @@ domains is mathematically impossible.
 
 ### N2. Nonce uniqueness and exhaustion
 
-An initialized book assigns strictly decreasing nonces from `2^32 - 1` through `2`, never assigns
-zero or one, and rotates immediately after assigning nonce two. A nonce-one book stays matchable and
-cancelable but cannot rest an unmatched taker remainder. For every epoch below `2^254 - 1`, rotation
+An initialized book assigns strictly decreasing order nonces from `2^32 - 1` and strictly increasing
+branch nonces from one. A rest into a nonempty side allocates one identity from each front; a rest
+into an empty side allocates only an order identity. The fronts never alias, and the book rotates as
+soon as their next values would meet or cross. A nonce-one book stays matchable and cancelable but
+cannot rest an unmatched taker remainder. For every epoch below `2^254 - 1`, rotation
 increments the epoch without altering either packed hook bit. At `2^254 - 1`, rotation reverts with
 `EpochExhausted`; EVM rollback leaves the book, owner, collateral, nonce, roots, and pool state
 unchanged.
@@ -266,16 +276,21 @@ claimed.
 
 ### E4. Termination and gas-bounded liveness
 
-Pure radix walks are bounded by 64 key bits. Partial matching visits at most one unresolved path per
-level while whole uniform subtrees are O(1). Exact quote calculation for a fully consumed mixed-price
-subtree is O(number of mixed descendants), route execution is additive over legs, and touched-token
-deduplication is quadratic in the number of distinct route tokens. Thus every finite call terminates
-in the unmetered model, but a sufficiently large mixed tree or route may exceed a particular block gas
-limit and revert.
+A side key has 32 price bits and 32 nonce bits, so each root-to-leaf path expands at most
+64 branches. A wholly crossing subtree that fits the quantity budget is consumed in O(1), using
+its exact quote summary. Otherwise the matcher tries the right child first. If it survives, either
+the budget is exhausted or the price boundary has been reached, so the left child is not visited.
+If it is completely consumed, that child was handled in O(1) and only the left boundary can expand.
+Thus at most one child per level expands, independent of the number of resting orders.
 
-**Evidence:** `INDUCTION` on key depth, subtree size, and route length; isolated gas benchmarks for
-concrete limits. “Live under every block gas limit” is false for every nontrivial EVM contract and is
-not claimed.
+Insertion and cancellation each descend one path and rebuild it once. Optional outgoing/incoming
+top-order lookups are additional bounded walks, not repeated searches inside matching frames.
+This is a bound on branch expansions, not a claim of 64 total SLOAD instructions or a transaction
+gas constant. Routes remain additive over books/legs, token settlement is additional, and each
+changed side retains its separately capped hook callback under the existing ABI.
+
+**Evidence:** source-bound `SMT` height/one-boundary recurrence, structural induction, instrumented
+64-level and 4,096-leaf regression tests, and isolated three-version gas comparisons.
 
 ## Proof Boundary
 

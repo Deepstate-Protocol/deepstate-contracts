@@ -1,0 +1,31 @@
+{
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "count": 15,
+  "metric": "Ordered engine storage accesses recorded by vm.startStateDiffRecording; no gas totals inferred.",
+  "fixtureSha256": {
+    "src/DeepstateV1.sol": "b05662e0d6bb55ecf655c3c89cc90d1ab09d464915a24719808be07e3fe5ba5c",
+    "test/RadixMatchingEngineGas.t.sol": "6be3690d081f954edb144fdedfc582c00f7e54a9fa82596995108182d6e84df6",
+    "test/StorageAccessProbe.t.sol": "c2429e062f6197ac6936a488bc66c13cd2f264f3479c018b274ad913aa7d10dc",
+    "foundry.toml": "910ee6c2be5f85557cbfd3d9ea560dd28964d1f9fc3cccd48b1bcf66c13142a1"
+  },
+  "runs": [
+    {
+      "variant": "baseline",
+      "log": "storage-baseline.log",
+      "logSha256": "8e742cfd418aa10e859521c2e44f1345965153b585c0e92212702168b0b995fe",
+      "runtimeSha256": "adabf6b35cb280ad4314ef815f6810f9dd7ea1b3ecca054b5f53a5a4d09ded72"
+    },
+    {
+      "variant": "combined",
+      "log": "storage-combined.log",
+      "logSha256": "f747b8d08c94cd552484b44dbd2e67cbe8cf84123221ac86a9885ae1974125cc",
+      "runtimeSha256": "745c1faeae48a4daf4d037c57c7899b772a38a2ad8a204bb44039b279d2e0586"
+    },
+    {
+      "variant": "zero-delta",
+      "log": "storage-zero-delta.log",
+      "logSha256": "1d44bcca399e3d66fa033ba088aa3121dcf91c0c8f03222d7bf12ffc08b39240",
+      "runtimeSha256": "c9b7031872c35c06f64bca7464ee799448ad31428500b90cd78f8199927f5d22"
+    }
+  ]
+}

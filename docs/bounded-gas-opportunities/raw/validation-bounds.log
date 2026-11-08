@@ -1,0 +1,20 @@
+Compiling 3 files with Solc 0.8.28
+Solc 0.8.28 finished in 29.17s
+Compiler run successful with warnings:
+Warning (5667): Unused function parameter. Remove or comment out the variable name to silence this warning.
+   --> src/DeepstateV1.sol:471:9:
+    |
+471 |         uint256 nonceAndFlags,
+    |         ^^^^^^^^^^^^^^^^^^^^^
+
+2026-11-08T00:55:30.169522Z  WARN evm::traces::external: etherscan config not found
+
+Ran 5 tests for test/BoundedTraversal.t.sol:BoundedTraversalTest
+[PASS] testFuzz_QuantityAndLimitBoundariesUseOnePath(uint256,bool) (runs: 256, μ: 12971392, ~: 13003626)
+[PASS] test_DifferentAskTickSplitsAboveUniformSubtreeWithoutWitnessDescent() (gas: 13704060)
+[PASS] test_DifferentBidTickSplitsAboveUniformSubtreeWithoutWitnessDescent() (gas: 13726612)
+[PASS] test_Full64LevelCombMatchInsertAndCancelStayBounded() (gas: 10281377)
+[PASS] test_WideSweep4096ExpandsNoBranchesAndAllMakersClaim() (gas: 3798)
+Suite result: ok. 5 passed; 0 failed; 0 skipped; finished in 3.32s (3.89s CPU time)
+
+Ran 1 test suite in 3.32s (3.32s CPU time): 5 tests passed, 0 failed, 0 skipped (5 total tests)

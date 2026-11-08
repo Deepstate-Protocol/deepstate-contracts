@@ -1,4 +1,4 @@
-.PHONY: fmt lint test invariant invariant-deep invariant-deep-shard invariant-deep-shards gas-runtime gas-access-list snapshot-runtime snapshot-runtime-check build-size tick-reference coverage coverage-check toolchain-lock-check slither formal-smt formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
+.PHONY: fmt lint test invariant invariant-deep invariant-deep-shard invariant-deep-shards gas-runtime gas-access-list snapshot-runtime snapshot-runtime-check build-solar test-solar invariant-solar snapshot-solar snapshot-solar-check verify-solar build-size tick-reference coverage coverage-check toolchain-lock-check slither formal-smt formal-halmos formal-kevm-build formal-kevm verify verify-deep verify-security
 
 INVARIANT_RUNS ?= 2048
 INVARIANT_DEPTH ?= 64
@@ -6,11 +6,12 @@ INVARIANT_SHARDS ?= 8
 INVARIANT_SHARD ?= 1
 INVARIANT_CONTRACTS ?= .*(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest|DeepstateV1NativeETHInvariantTest).*
 GAS_CONTRACTS ?= (RadixMatchingEngine(Gas|HookGas|FeeGas)Test|DeepstateV1IntegratorFeeGasTest)
+SOLAR_FORGE ?= forge
 COVERAGE_FILES ?= src/DeepstateV1.sol,src/libraries/TickMath32.sol
 COVERAGE_EXCLUSIONS ?= coverage.exclusions.json
 # Coverage runs every behavioral, routing, boundary, and math test. Formal proofs, stateful
 # invariants, and benchmarks retain dedicated targets because they do not add source coverage.
-COVERAGE_SKIP_ARGS ?= --skip RadixMatchingEngineInvariant.t.sol --skip DeepstateV1Invariant.t.sol --skip DeepstateV1NativeETHInvariant.t.sol --skip RadixMatchingEngineGas.t.sol --skip RadixMatchingEngineAccessList.t.sol --skip RadixMatchingEngineFormal.t.sol
+COVERAGE_SKIP_ARGS ?= --skip RadixMatchingEngineInvariant.t.sol --skip DeepstateV1Invariant.t.sol --skip DeepstateV1NativeETHInvariant.t.sol --skip RadixMatchingEngineGas.t.sol --skip BoundedTraversal.t.sol --skip BoundedTraversalGas.t.sol --skip RadixMatchingEngineAccessList.t.sol --skip RadixMatchingEngineFormal.t.sol
 COVERAGE_MIN_LINES ?= 100
 COVERAGE_MIN_STATEMENTS ?= 100
 COVERAGE_MIN_BRANCHES ?= 100
@@ -59,6 +60,23 @@ snapshot-runtime:
 
 snapshot-runtime-check:
 	forge snapshot --isolate --force --match-contract '$(GAS_CONTRACTS)' --check .gas-snapshot.runtime
+
+build-solar:
+	FOUNDRY_PROFILE=solar $(SOLAR_FORGE) build --no-dynamic-test-linking
+
+test-solar:
+	FOUNDRY_PROFILE=solar $(SOLAR_FORGE) test --no-dynamic-test-linking -vv --no-match-contract '$(INVARIANT_CONTRACTS)'
+
+invariant-solar:
+	FOUNDRY_PROFILE=solar $(SOLAR_FORGE) test --no-dynamic-test-linking --match-contract '$(INVARIANT_CONTRACTS)' --match-test 'invariant_.*'
+
+snapshot-solar:
+	FOUNDRY_PROFILE=solar $(SOLAR_FORGE) snapshot --no-dynamic-test-linking --isolate --match-contract '$(GAS_CONTRACTS)' --snap .gas-snapshot.solar
+
+snapshot-solar-check:
+	FOUNDRY_PROFILE=solar $(SOLAR_FORGE) snapshot --no-dynamic-test-linking --isolate --match-contract '$(GAS_CONTRACTS)' --check .gas-snapshot.solar
+
+verify-solar: build-solar test-solar invariant-solar snapshot-solar-check
 
 build-size:
 	forge build --sizes src/DeepstateV1.sol

@@ -1,0 +1,16 @@
+{
+  "baseline": "096eab28d87debdd472b4e22e65820e2b1b8d523",
+  "master": "bf18c54b13123de5ecc3e05dcff6822436e0cd27",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "selectedVariant": "uniform-difference",
+  "selectedSourceSha256": "45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+  "selectedRows": 400,
+  "intermediateRows": 1000,
+  "archivedRejectedRows": 200,
+  "totalCsvRows": 1600,
+  "outputs": {
+    "BOUNDED_GAS_DELTA_TABLES.md": "ab5605e42dcab36a7b8aef53d6af3a2521fe7c0f0ff3860e794b6b09aa18d9c0",
+    "bounded-gas-opportunities/rejected/ZERO_DELTA_GAS.md": "f7ce62e8b51e0b42b5dbc04e9cccb8c398f4b68d33267c65d1aba3210c92df13",
+    "BOUNDED_GAS_OPPORTUNITIES.csv": "d4b63d0867e0c579993244a4c1cd453db6d63e3a397b9ae3f0d38663295ae338"
+  }
+}

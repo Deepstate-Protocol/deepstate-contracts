@@ -1,0 +1,12 @@
+'forge clean' running (wd: /private/tmp/deepstate-solar-gas-20261107/contracts)
+'forge config --json' running
+'forge build --build-info src/DeepstateV1.sol' running (wd: /private/tmp/deepstate-solar-gas-20261107/contracts)
+
+Detector: uninitialized-local
+DeepstateV1._restBook(bytes32,DeepstateV1.Book,uint256,int32,uint160,bool,address,bool).quoteState (src/DeepstateV1.sol#540) is a local variable never initialized
+DeepstateV1._matchBook(bytes32,DeepstateV1.Book,bytes32,bool,bool,uint256).topState (src/DeepstateV1.sol#352) is a local variable never initialized
+DeepstateV1._matchBook(bytes32,DeepstateV1.Book,bytes32,bool,bool,uint256).oldTop (src/DeepstateV1.sol#360) is a local variable never initialized
+DeepstateV1._storeBranch(DeepstateV1.Book,bytes32,bytes32,uint64,uint64,bool,uint32,DeepstateV1.InsertQuoteState).correctionCode (src/DeepstateV1.sol#1149) is a local variable never initialized
+DeepstateV1._cancelBook(bytes32,DeepstateV1.Book,bytes32,address,uint256,uint256).quoteState (src/DeepstateV1.sol#423) is a local variable never initialized
+Reference: https://github.com/crytic/slither/wiki/Detector-Documentation#uninitialized-local-variables
+src/DeepstateV1.sol analyzed (6 contracts with 80 detectors), 5 result(s) found

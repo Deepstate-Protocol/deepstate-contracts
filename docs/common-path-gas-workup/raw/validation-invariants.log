@@ -1,0 +1,211 @@
+Compiling 3 files with Solar 0.8.28
+Solar 0.8.28 finished in 202.15ms
+Compiler run successful with warnings:
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/interfaces/IHook.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/libraries/TickMath32.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ src/DeepstateV1.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ test/QuoteMath.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ test/DeepstateV1Invariant.t.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ test/DeepstateV1NativeETHInvariant.t.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[5333]: source file requires different compiler version (current compiler is 0.8.38)
+  ╭▸ test/SinglePairEngineHarness.sol:2:1
+  │
+2 │ pragma solidity 0.8.28;
+  ╰╴━━━━━━━━━━━━━━━━━━━━━━━
+
+
+warning[2018]: function state mutability can be restricted to pure
+    ╭▸ src/DeepstateV1.sol:648:5
+    │
+648 │ ┏     function _matchAskLeaf(bytes32 root, int32 limitPrice, uint160 remaining, MatchTopState memory topState)
+649 │ ┃         private
+650 │ ┃         returns (bytes32 newRoot, uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
+    ‡ ┃
+676 │ ┃     }
+    ╰╴┗━━━━━┛
+
+
+warning[2018]: function state mutability can be restricted to pure
+    ╭▸ src/DeepstateV1.sol:686:5
+    │
+686 │ ┏     function _matchBidLeaf(bytes32 root, int32 limitPrice, uint160 remaining, MatchTopState memory topState)
+687 │ ┃         private
+688 │ ┃         returns (bytes32 newRoot, uint160 newRemaining, uint160 baseFilled, uint256 quoteAmount)
+    ‡ ┃
+714 │ ┃     }
+    ╰╴┗━━━━━┛
+
+
+
+Ran 1 test for test/DeepstateV1NativeETHInvariant.t.sol:DeepstateV1NativeETHInvariantTest
+[PASS]
+DeepstateV1NativeETHInvariantTest invariants:
+[PASS] invariant_NativeActorFeeAndSupplyAccounting
+[PASS] invariant_NativeCollateralEqualsOutstandingClaims
+[PASS] invariant_NativeOrdersMatchReferenceModel
+ DeepstateV1NativeETHInvariantTest invariants (runs: 256, calls: 16384, reverts: 0)
+
+╭-----------------------------+-------------------------+-------+---------+----------╮
+| Contract                    | Selector                | Calls | Reverts | Discards |
++====================================================================================+
+| DeepstateV1NativeETHHandler | cancel                  | 1666  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | configureFee            | 1627  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeAsk                | 1614  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeAskWithIntegrator  | 1612  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeBid                | 1652  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | placeBidWithIntegrator  | 1671  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsAsk               | 1663  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsAskWithIntegrator | 1547  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsBid               | 1623  | 0       | 0        |
+|-----------------------------+-------------------------+-------+---------+----------|
+| DeepstateV1NativeETHHandler | takeAsBidWithIntegrator | 1709  | 0       | 0        |
+╰-----------------------------+-------------------------+-------+---------+----------╯
+
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 10.83s (10.83s CPU time)
+
+Ran 1 test for test/DeepstateV1Invariant.t.sol:DeepstateV1MultiPoolInvariantTest
+[PASS]
+DeepstateV1MultiPoolInvariantTest invariants:
+[PASS] invariant_MultiPoolAccountingAndConservation
+[PASS] invariant_MultiPoolEpochFeeHookAndExecutionState
+[PASS] invariant_MultiPoolOrdersBooksAndPriority
+ DeepstateV1MultiPoolInvariantTest invariants (runs: 256, calls: 16384, reverts: 0)
+
+╭-----------------------------+----------------------------+-------+---------+----------╮
+| Contract                    | Selector                   | Calls | Reverts | Discards |
++=======================================================================================+
+| DeepstateV1MultiPoolHandler | cancel                     | 1333  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | configureFee               | 1386  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | configureHook              | 1333  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeAsk                   | 1383  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeAskWithIntegrator     | 1386  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeBid                   | 1373  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | placeBidWithIntegrator     | 1351  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | rotatePool                 | 1325  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeForward               | 1369  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeForwardWithIntegrator | 1348  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeReverse               | 1404  | 0       | 0        |
+|-----------------------------+----------------------------+-------+---------+----------|
+| DeepstateV1MultiPoolHandler | routeReverseWithIntegrator | 1393  | 0       | 0        |
+╰-----------------------------+----------------------------+-------+---------+----------╯
+
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 40.72s (40.72s CPU time)
+
+Ran 1 test for test/RadixMatchingEngineInvariant.t.sol:RadixMatchingEngineInvariantTest
+[PASS]
+RadixMatchingEngineInvariantTest invariants:
+[PASS] invariant_ActiveOrderBookStateMatchesRemainingQuantity
+[PASS] invariant_ActiveOrderSideKeysAreUnique
+[PASS] invariant_ActiveOrdersHaveExpectedCancelRouting
+[PASS] invariant_ActorBalancesMatchModel
+[PASS] invariant_AllActiveOrdersCanCancelAndClaimSequentially
+[PASS] invariant_BestOrdersMatchTrackedPriority
+[PASS] invariant_BestPricesMatchTrackedOrders
+[PASS] invariant_BidAskBranchesDoNotShareStorage
+[PASS] invariant_BooksAreNotCrossed
+[PASS] invariant_CollateralEqualsOutstandingClaims
+[PASS] invariant_EachActiveOrderClaimIsIndividuallyCollateralized
+[PASS] invariant_InactiveTrackedOrdersAreAbsentFromBooks
+[PASS] invariant_LiveBookNodesAreUnique
+[PASS] invariant_LiveBranchesAreReachableByContractRouting
+[PASS] invariant_LiveLeafSideKeysAreUnique
+[PASS] invariant_LiveLeavesAreBackedByActiveOrders
+[PASS] invariant_ModelRemainingQuantitiesMatchBook
+[PASS] invariant_NoUnexpectedHandlerReverts
+[PASS] invariant_NonceAccountingMatchesRestedOrders
+[PASS] invariant_OpenTrackedLeavesHaveNoBranchStorage
+[PASS] invariant_OrderSideMatchesTrackedOrders
+[PASS] invariant_OwnedLiveBranchesAreBackedByPartialOrders
+[PASS] invariant_OwnerMappingMatchesTrackedOrders
+[PASS] invariant_ReducedLiveLeafKeysAreNotOwnedOrders
+[PASS] invariant_RepresentativeActiveOrdersCanCancelAndClaim
+[PASS] invariant_RightSpineQuantitiesNeverUnderstateLiveLeaves
+[PASS] invariant_TotalTokenSupplyConserved
+[PASS] invariant_TrackedOrderNoncesAreStrictlyDecrementing
+[PASS] invariant_TrackedOrdersAppearOnlyOnExpectedSide
+[PASS] invariant_TreeAggregatesAndBranchShape
+[PASS] invariant_TreeQuantitiesMatchTrackedRemaining
+[PASS] invariant_ZeroQuantityKeysHaveNoBranchStorage
+ RadixMatchingEngineInvariantTest invariants (runs: 256, calls: 16384, reverts: 0)
+
+╭----------------------------+--------------------------+-------+---------+----------╮
+| Contract                   | Selector                 | Calls | Reverts | Discards |
++====================================================================================+
+| RadixMatchingEngineHandler | cancel                   | 1676  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidCancel            | 1632  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidFill              | 1575  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | invalidReducedLeafCancel | 1641  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeAsk                 | 1638  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeBid                 | 1637  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxAsk              | 1655  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeMaxBid              | 1648  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceAsk        | 1632  | 0       | 0        |
+|----------------------------+--------------------------+-------+---------+----------|
+| RadixMatchingEngineHandler | placeSamePriceBid        | 1650  | 0       | 0        |
+╰----------------------------+--------------------------+-------+---------+----------╯
+
+Suite result: ok. 1 passed; 0 failed; 0 skipped; finished in 405.38s (405.37s CPU time)
+
+Ran 3 test suites in 405.38s (456.92s CPU time): 3 tests passed, 0 failed, 0 skipped (3 total tests)

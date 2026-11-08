@@ -1,0 +1,45 @@
+{
+  "variant": "01-shared-rest-quote",
+  "compiler": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+  "settings": {
+    "remappings": [
+      "forge-std/=lib/forge-std/src/",
+      "solady/=lib/solady/src/"
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "compilationTarget": {
+      "src/DeepstateV1.sol": "DeepstateV1"
+    },
+    "evmVersion": "cancun",
+    "libraries": {}
+  },
+  "sourceSha256": "c5c04ee50e4b5a5332600f9aa00e9ecca10665fa96c3fc57426ce68a71e7628b",
+  "sourceKeccak256": "0x1dc30f4f734a0f45b4b6d712fafe46391559bd1d768e746413528c1b5ec43759",
+  "runtimeSha256": "2c4f4e44ddf5cf564671115111deae98500efd38b00962f20c2f5cfce1f2556c",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "baseline": "candidate-E:45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "01-shared-rest-quote-solar-release.log",
+      "snapshot": "01-shared-rest-quote-solar-release.snapshot",
+      "logSha256": "5c61626f27e69cc9487ba4ae056843e2a4e98a1fa20bd342e3ecec4b35036082",
+      "snapshotSha256": "f860d053e9f7c732050b3d97aa3f1e602e82b75db57179b4332e7428b787f9a8"
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "01-shared-rest-quote-solar-insertion.log",
+      "snapshot": "01-shared-rest-quote-solar-insertion.snapshot",
+      "logSha256": "5a6435650010698b28f26f8dfbe7435e4e66fbb5d6f80e99093db05310b8d7d1",
+      "snapshotSha256": "cd69100c72d2efc70d5b9baaf8ff7145487968940cd856e92db18dbeb09d8722"
+    }
+  ]
+}

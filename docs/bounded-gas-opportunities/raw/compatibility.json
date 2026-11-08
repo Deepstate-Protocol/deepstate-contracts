@@ -1,0 +1,360 @@
+{
+  "publicAbiEqual": true,
+  "storageLayoutEqual": true,
+  "before": {
+    "storage": [
+      {
+        "astId": 1197,
+        "contract": "src/DeepstateV1.sol:DeepstateV1",
+        "label": "books",
+        "offset": 0,
+        "slot": "0",
+        "type": "t_mapping(t_bytes32,t_struct(Book)1191_storage)"
+      },
+      {
+        "astId": 1203,
+        "contract": "src/DeepstateV1.sol:DeepstateV1",
+        "label": "orderOf",
+        "offset": 0,
+        "slot": "1",
+        "type": "t_mapping(t_bytes32,t_struct(OrderState)1182_storage)"
+      },
+      {
+        "astId": 5430,
+        "contract": "src/DeepstateV1.sol:DeepstateV1",
+        "label": "_poolEpochAndHookFlags",
+        "offset": 0,
+        "slot": "2",
+        "type": "t_mapping(t_bytes32,t_uint256)"
+      },
+      {
+        "astId": 5435,
+        "contract": "src/DeepstateV1.sol:DeepstateV1",
+        "label": "poolHook",
+        "offset": 0,
+        "slot": "3",
+        "type": "t_mapping(t_bytes32,t_address)"
+      },
+      {
+        "astId": 5438,
+        "contract": "src/DeepstateV1.sol:DeepstateV1",
+        "label": "_feeConfig",
+        "offset": 0,
+        "slot": "4",
+        "type": "t_uint256"
+      }
+    ],
+    "types": {
+      "t_address": {
+        "encoding": "inplace",
+        "label": "address",
+        "numberOfBytes": "20"
+      },
+      "t_bool": {
+        "encoding": "inplace",
+        "label": "bool",
+        "numberOfBytes": "1"
+      },
+      "t_bytes32": {
+        "encoding": "inplace",
+        "label": "bytes32",
+        "numberOfBytes": "32"
+      },
+      "t_mapping(t_bytes32,t_address)": {
+        "encoding": "mapping",
+        "key": "t_bytes32",
+        "label": "mapping(bytes32 => address)",
+        "numberOfBytes": "32",
+        "value": "t_address"
+      },
+      "t_mapping(t_bytes32,t_struct(Book)1191_storage)": {
+        "encoding": "mapping",
+        "key": "t_bytes32",
+        "label": "mapping(bytes32 => struct DeepstateV1.Book)",
+        "numberOfBytes": "32",
+        "value": "t_struct(Book)1191_storage"
+      },
+      "t_mapping(t_bytes32,t_struct(Branch)1176_storage)": {
+        "encoding": "mapping",
+        "key": "t_bytes32",
+        "label": "mapping(bytes32 => struct DeepstateV1.Branch)",
+        "numberOfBytes": "32",
+        "value": "t_struct(Branch)1176_storage"
+      },
+      "t_mapping(t_bytes32,t_struct(OrderState)1182_storage)": {
+        "encoding": "mapping",
+        "key": "t_bytes32",
+        "label": "mapping(bytes32 => struct DeepstateV1.OrderState)",
+        "numberOfBytes": "32",
+        "value": "t_struct(OrderState)1182_storage"
+      },
+      "t_mapping(t_bytes32,t_uint256)": {
+        "encoding": "mapping",
+        "key": "t_bytes32",
+        "label": "mapping(bytes32 => uint256)",
+        "numberOfBytes": "32",
+        "value": "t_uint256"
+      },
+      "t_struct(Book)1191_storage": {
+        "encoding": "inplace",
+        "label": "struct DeepstateV1.Book",
+        "numberOfBytes": "64",
+        "members": [
+          {
+            "astId": 1185,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "nonceAndFlags",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_uint256"
+          },
+          {
+            "astId": 1190,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "tree",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_mapping(t_bytes32,t_struct(Branch)1176_storage)"
+          }
+        ]
+      },
+      "t_struct(Branch)1176_storage": {
+        "encoding": "inplace",
+        "label": "struct DeepstateV1.Branch",
+        "numberOfBytes": "96",
+        "members": [
+          {
+            "astId": 1169,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "leftNode",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_bytes32"
+          },
+          {
+            "astId": 1172,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "rightNode",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_bytes32"
+          },
+          {
+            "astId": 1175,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "quoteTotal",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_uint256"
+          }
+        ]
+      },
+      "t_struct(OrderState)1182_storage": {
+        "encoding": "inplace",
+        "label": "struct DeepstateV1.OrderState",
+        "numberOfBytes": "32",
+        "members": [
+          {
+            "astId": 1179,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "owner",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_address"
+          },
+          {
+            "astId": 1181,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "isBid",
+            "offset": 20,
+            "slot": "0",
+            "type": "t_bool"
+          }
+        ]
+      },
+      "t_uint256": {
+        "encoding": "inplace",
+        "label": "uint256",
+        "numberOfBytes": "32"
+      }
+    }
+  },
+  "after": {
+    "storage": [
+      {
+        "astId": 1211,
+        "contract": "src/DeepstateV1.sol:DeepstateV1",
+        "label": "books",
+        "offset": 0,
+        "slot": "0",
+        "type": "t_mapping(t_bytes32,t_struct(Book)1205_storage)"
+      },
+      {
+        "astId": 1217,
+        "contract": "src/DeepstateV1.sol:DeepstateV1",
+        "label": "orderOf",
+        "offset": 0,
+        "slot": "1",
+        "type": "t_mapping(t_bytes32,t_struct(OrderState)1182_storage)"
+      },
+      {
+        "astId": 5943,
+        "contract": "src/DeepstateV1.sol:DeepstateV1",
+        "label": "_poolEpochAndHookFlags",
+        "offset": 0,
+        "slot": "2",
+        "type": "t_mapping(t_bytes32,t_uint256)"
+      },
+      {
+        "astId": 5948,
+        "contract": "src/DeepstateV1.sol:DeepstateV1",
+        "label": "poolHook",
+        "offset": 0,
+        "slot": "3",
+        "type": "t_mapping(t_bytes32,t_address)"
+      },
+      {
+        "astId": 5951,
+        "contract": "src/DeepstateV1.sol:DeepstateV1",
+        "label": "_feeConfig",
+        "offset": 0,
+        "slot": "4",
+        "type": "t_uint256"
+      }
+    ],
+    "types": {
+      "t_address": {
+        "encoding": "inplace",
+        "label": "address",
+        "numberOfBytes": "20"
+      },
+      "t_bool": {
+        "encoding": "inplace",
+        "label": "bool",
+        "numberOfBytes": "1"
+      },
+      "t_bytes32": {
+        "encoding": "inplace",
+        "label": "bytes32",
+        "numberOfBytes": "32"
+      },
+      "t_mapping(t_bytes32,t_address)": {
+        "encoding": "mapping",
+        "key": "t_bytes32",
+        "label": "mapping(bytes32 => address)",
+        "numberOfBytes": "32",
+        "value": "t_address"
+      },
+      "t_mapping(t_bytes32,t_struct(Book)1205_storage)": {
+        "encoding": "mapping",
+        "key": "t_bytes32",
+        "label": "mapping(bytes32 => struct DeepstateV1.Book)",
+        "numberOfBytes": "32",
+        "value": "t_struct(Book)1205_storage"
+      },
+      "t_mapping(t_bytes32,t_struct(Branch)1176_storage)": {
+        "encoding": "mapping",
+        "key": "t_bytes32",
+        "label": "mapping(bytes32 => struct DeepstateV1.Branch)",
+        "numberOfBytes": "32",
+        "value": "t_struct(Branch)1176_storage"
+      },
+      "t_mapping(t_bytes32,t_struct(OrderState)1182_storage)": {
+        "encoding": "mapping",
+        "key": "t_bytes32",
+        "label": "mapping(bytes32 => struct DeepstateV1.OrderState)",
+        "numberOfBytes": "32",
+        "value": "t_struct(OrderState)1182_storage"
+      },
+      "t_mapping(t_bytes32,t_uint256)": {
+        "encoding": "mapping",
+        "key": "t_bytes32",
+        "label": "mapping(bytes32 => uint256)",
+        "numberOfBytes": "32",
+        "value": "t_uint256"
+      },
+      "t_struct(Book)1205_storage": {
+        "encoding": "inplace",
+        "label": "struct DeepstateV1.Book",
+        "numberOfBytes": "64",
+        "members": [
+          {
+            "astId": 1199,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "nonceAndFlags",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_uint256"
+          },
+          {
+            "astId": 1204,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "tree",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_mapping(t_bytes32,t_struct(Branch)1176_storage)"
+          }
+        ]
+      },
+      "t_struct(Branch)1176_storage": {
+        "encoding": "inplace",
+        "label": "struct DeepstateV1.Branch",
+        "numberOfBytes": "96",
+        "members": [
+          {
+            "astId": 1169,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "leftNode",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_bytes32"
+          },
+          {
+            "astId": 1172,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "rightNode",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_bytes32"
+          },
+          {
+            "astId": 1175,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "quoteTotal",
+            "offset": 0,
+            "slot": "2",
+            "type": "t_uint256"
+          }
+        ]
+      },
+      "t_struct(OrderState)1182_storage": {
+        "encoding": "inplace",
+        "label": "struct DeepstateV1.OrderState",
+        "numberOfBytes": "32",
+        "members": [
+          {
+            "astId": 1179,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "owner",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_address"
+          },
+          {
+            "astId": 1181,
+            "contract": "src/DeepstateV1.sol:DeepstateV1",
+            "label": "isBid",
+            "offset": 20,
+            "slot": "0",
+            "type": "t_bool"
+          }
+        ]
+      },
+      "t_uint256": {
+        "encoding": "inplace",
+        "label": "uint256",
+        "numberOfBytes": "32"
+      }
+    }
+  }
+}

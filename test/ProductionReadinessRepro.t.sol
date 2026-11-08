@@ -320,7 +320,7 @@ contract ProductionReadinessReproTest is Test {
         engine.cancel(address(token0), address(token1), 0, lowBid);
 
         bytes32 bookSlot = keccak256(abi.encode(id, uint256(0)));
-        assertEq(uint256(vm.load(address(engine), bookSlot)) & BID_RIGHT_SPINE_DIRTY, BID_RIGHT_SPINE_DIRTY);
+        assertEq(uint256(vm.load(address(engine), bookSlot)) & BID_RIGHT_SPINE_DIRTY, 0);
 
         bytes32 dustAsk = engine.fill(_fill(0, _order(1000, 1, 0), false, false, false));
         vm.stopPrank();

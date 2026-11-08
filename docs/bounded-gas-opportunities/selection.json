@@ -1,0 +1,20 @@
+{
+  "baseline": "096eab28d87debdd472b4e22e65820e2b1b8d523",
+  "selected": {
+    "variant": "uniform-difference",
+    "stage": "E",
+    "patch": "raw/uniform-difference.patch",
+    "sourceSha256": "45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70"
+  },
+  "rejected": [
+    {
+      "variant": "zero-delta",
+      "stage": "F",
+      "patch": "rejected/zero-delta.patch",
+      "status": "archived; excluded from selected implementation"
+    }
+  ],
+  "historicalOnly": [
+    "rejected/dead-code-removed.patch"
+  ]
+}

@@ -1,0 +1,99 @@
+{
+  "baseline": "candidate-E:45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+  "stages": [
+    {
+      "name": "00-baseline",
+      "sourceSha256": "45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+      "runtimeSha256": "9b75787f4302cf3b807dc5d20451f48ad6d005d0e61df832bf972d58e276c0d0"
+    },
+    {
+      "name": "01-shared-rest-quote",
+      "sourceSha256": "c5c04ee50e4b5a5332600f9aa00e9ecca10665fa96c3fc57426ce68a71e7628b",
+      "runtimeSha256": "2c4f4e44ddf5cf564671115111deae98500efd38b00962f20c2f5cfce1f2556c"
+    },
+    {
+      "name": "02-known-hook-tops",
+      "sourceSha256": "a23f649263460e5819342f17877d20c2460816bfd6ad51706b65f48ea0ced6a4",
+      "runtimeSha256": "99f16ad9468da828503dc8fe7983ee803a4ac33c7c4c77698f8fce721696d251"
+    },
+    {
+      "name": "03-cached-classification",
+      "sourceSha256": "11b441f06da8a44b4e055f62f310766951724f32cf3c15b9106a55d31ed99da1",
+      "runtimeSha256": "60af1c3539a4c976dc8fd34959327304d52d2873ab2dd5f105c935825ff8172d"
+    },
+    {
+      "name": "04-reused-branch-metadata",
+      "sourceSha256": "8df3ab990f3fb15d547a3fbc1f271caefc674fff04365e984e6abcff3b45d7ac",
+      "runtimeSha256": "de989e2b086f04001a5da46db4f90beeccbbad54de8d6f4838baf3dd24ac0eed"
+    },
+    {
+      "name": "05-memory-match-buffer",
+      "sourceSha256": "ce755182dd007c3c578b860782ef3c9e45de2aae3287a3a4ef03fede6138b0c7",
+      "runtimeSha256": "868dec02e5065a5cafed60f3fa665bb0c862791116825cc4dcfefd7089795dcb"
+    }
+  ],
+  "casesPerStage": 200,
+  "comparisons": 1000,
+  "validation": {
+    "sourceSha256": "ce755182dd007c3c578b860782ef3c9e45de2aae3287a3a4ef03fede6138b0c7",
+    "publicAbiEqual": true,
+    "storageLayoutEqual": true
+  },
+  "fingerprints": {
+    "raw/00-baseline-solar-manifest.json": "a7e2f02dcf72968859445a526c3243dc7c42bddef09cb497e83ba50d60d5a436",
+    "raw/00-baseline.sol.txt": "45d978cb4e482bb2ad0d0a76e5e82eac26da8739b86e65f09fae1d6ba10d1f70",
+    "raw/00-baseline-solar-release.log": "51321d1687b67417815d862a76213f5a6c87fe05b0c930adf0e7720bd367a030",
+    "raw/00-baseline-solar-release.snapshot": "da2f9f02270cb5fa424c46077f5b2bd53a9ec240a5c354ace40a8769f2b0cc27",
+    "raw/00-baseline-solar-insertion.log": "5c02c76622e7c7b7a7f2ec047618308db11e000e9c463efd6427feb70c2cf0d9",
+    "raw/00-baseline-solar-insertion.snapshot": "c0956a0747479110dca864c3daff02dd128a2e8858fb403cb6e9689f3e0248de",
+    "raw/01-shared-rest-quote-solar-manifest.json": "59afa086aac23bc8b53414d4a7edc4ee1fca4dd88deab51fd636eaedb1f84a7d",
+    "raw/01-shared-rest-quote.sol.txt": "c5c04ee50e4b5a5332600f9aa00e9ecca10665fa96c3fc57426ce68a71e7628b",
+    "raw/01-shared-rest-quote-solar-release.log": "5c61626f27e69cc9487ba4ae056843e2a4e98a1fa20bd342e3ecec4b35036082",
+    "raw/01-shared-rest-quote-solar-release.snapshot": "f860d053e9f7c732050b3d97aa3f1e602e82b75db57179b4332e7428b787f9a8",
+    "raw/01-shared-rest-quote-solar-insertion.log": "5a6435650010698b28f26f8dfbe7435e4e66fbb5d6f80e99093db05310b8d7d1",
+    "raw/01-shared-rest-quote-solar-insertion.snapshot": "cd69100c72d2efc70d5b9baaf8ff7145487968940cd856e92db18dbeb09d8722",
+    "raw/02-known-hook-tops-solar-manifest.json": "14fa3366a6526b593785dcb038eb30f686f392315e99f4f5a59e9bc2ccd76a8f",
+    "raw/02-known-hook-tops.sol.txt": "a23f649263460e5819342f17877d20c2460816bfd6ad51706b65f48ea0ced6a4",
+    "raw/02-known-hook-tops-solar-release.log": "c9f13b6d8d545e3d58141220ea6c5a92683346159d34c2e6ee04785fdcec4dd8",
+    "raw/02-known-hook-tops-solar-release.snapshot": "26e38d79b9fe0f5875ebe2f5353ded762ede6ad366deb674da3d8116d0d50682",
+    "raw/02-known-hook-tops-solar-insertion.log": "b239e46d8ca1acc70f7f0ae236605d176a30a1a4f63e346797cba7f1755a8b50",
+    "raw/02-known-hook-tops-solar-insertion.snapshot": "1310e78ab4a5e8392f9d5d13f1e37eb489dec0fe3e4dcdf2d0b7aeebdd7981d7",
+    "raw/03-cached-classification-solar-manifest.json": "01921bb07a0c7c49e88971f0c3c2434f551bfb531ba675f2609546226837943a",
+    "raw/03-cached-classification.sol.txt": "11b441f06da8a44b4e055f62f310766951724f32cf3c15b9106a55d31ed99da1",
+    "raw/03-cached-classification-solar-release.log": "5ce643d4b0dbfc588023d21161a84632ba7bd11f7afcbbaae8c3b63080732e56",
+    "raw/03-cached-classification-solar-release.snapshot": "4ae913183722b0b35db04ad4b3eab48df73fa23c28949dd8abd45c159ed88e6b",
+    "raw/03-cached-classification-solar-insertion.log": "431ff7f133d8c28e0f8a45e2cdcd2b5b0f97bb124963c14d963e5458b1b305bd",
+    "raw/03-cached-classification-solar-insertion.snapshot": "67ab043c5c3d83cc49a97c436cb86b480a552f74d96c271351b84d151fcf84be",
+    "raw/04-reused-branch-metadata-solar-manifest.json": "eee743522435eded8a20262c2dc57492395cd471f6b9e89ae16c2f9126c5ce7a",
+    "raw/04-reused-branch-metadata.sol.txt": "8df3ab990f3fb15d547a3fbc1f271caefc674fff04365e984e6abcff3b45d7ac",
+    "raw/04-reused-branch-metadata-solar-release.log": "72f1959fe4ec9fcfb8886d471b29a11d6cb2909648c472c18862045b505437f0",
+    "raw/04-reused-branch-metadata-solar-release.snapshot": "f9bb20dc2f127bf69d96d7da8682cdf33ad28f21413839f31649028d4110026b",
+    "raw/04-reused-branch-metadata-solar-insertion.log": "1492a2d3db8cf00c7021b0fda4d68f40391a9c778977c91fab56d7f48f3a42ff",
+    "raw/04-reused-branch-metadata-solar-insertion.snapshot": "199022d36ec4c8037bd8a33c87b7bc0f5c51ea039ea84e4d14f3719bbf0317be",
+    "raw/05-memory-match-buffer-solar-manifest.json": "40add1db7ab787504bc7b35e7c3606cae28b3ec0ddac6a845759241b768ba8be",
+    "raw/05-memory-match-buffer.sol.txt": "ce755182dd007c3c578b860782ef3c9e45de2aae3287a3a4ef03fede6138b0c7",
+    "raw/05-memory-match-buffer-solar-release.log": "95c1cfe103428220751c430b76111cdbd7d434ae18f5d73fd3503f180d5f0177",
+    "raw/05-memory-match-buffer-solar-release.snapshot": "31bd4599cae570218665965afce968ee4114e6b1f90ff5e19274b2454efad689",
+    "raw/05-memory-match-buffer-solar-insertion.log": "ba8349c83e43df2d8a7d9cd82c60117f3227c225124dc40b8c2af66d8f36d568",
+    "raw/05-memory-match-buffer-solar-insertion.snapshot": "4deeff534904eb9c57d3c649a4d991b367b84f4cca2b231a5afc2af90a840c56",
+    "raw/validation-behavior.log": "a012502c0da397779ed2dc2372851bfc610c12b4987211fdcff5b59d96d791de",
+    "raw/validation-bounds.log": "c108efcc87c18db0537f8d8e486279d4a401187e35c7a464a35ceb57bedc1303",
+    "raw/validation-invariants.log": "00aa4a3e9430f04f73a33e5840ac61deeb56a53d7cfe501e280c3f7b4583be88",
+    "raw/validation-release-snapshot.log": "62f319c1224baad40fcff14eed77ec1b3b2fac91f92a656fdc4006dfbde5abe4",
+    "raw/validation-smt.log": "6d5f54cd8f73c950ca64e68f970a48c34712eab81c6c6ffcac0ea6f2d806eec3",
+    "raw/validation-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "raw/validation-manifest.json": "bb6c738ecf0c2023260027e49029f5ce59e06852b1e2f2e18ce1c9f343147d59",
+    "raw/release-solar.snapshot": "9ebf2a2e87244959a0a9881e7b403e3e4705d4595d28373fb471a7273d87c717",
+    "raw/prepush-slither-pinned.log": "f91f5afa719aaa4f87f44e2b3ab7e14115213f4c352563f12e8b389bb3a7e44f",
+    "raw/prepush-coverage.log": "1fa05742f958524e178f9618307979ff57ffeddf19676ae86dcb03958a5cd669",
+    "GAS_DELTAS.csv": "f787d600eaf0b76f63e0862ac78b2c00bc5ed60676ed636f8ec0965d5540d888",
+    "GAS_TABLES.md": "d54564fb4a09117fa815e1008f81eff62c0a69d6cd77836de2d3a369a0dbd9d9",
+    "summary.json": "3e5cae14f86cd74dac23cfb446a5b30ada438827667c25a3f13be93a32ae33c7",
+    "CHAT_TABLE.md": "497e18b614813920dccacf32859fd154129aeb5a6e452e699aa9ee15675e7f66",
+    "raw/01-shared-rest-quote.patch": "e1506e7b0feca26129f387596aac9e1f7304391ab76c41a5ba290f8feb32f32a",
+    "raw/02-known-hook-tops.patch": "b11934133aececed42941bb555069d2a5dbaea95027095d52fd8fc2c50cda3da",
+    "raw/03-cached-classification.patch": "a1b7804cde27d2a3767a8b41819fb425b54228629a51d69ebc8bab888d99827f",
+    "raw/04-reused-branch-metadata.patch": "d3e31e1b7b08497792406645cb106f3ee7ee54f34575563f9b0d57c94cc0d88b",
+    "raw/05-memory-match-buffer.patch": "9c9f88f611d9be443e3e4fb56c8b1fb15fe2ec58a9dc48894f859dbb72d00332"
+  }
+}

@@ -1,0 +1,181 @@
+--- a/src/DeepstateV1.sol
++++ b/src/DeepstateV1.sol
+@@ -103,8 +103,15 @@
+         uint256 factor;
+         uint16 shift;
+         uint256 addedQuote;
++        bool mayReplaceTop;
++        bytes32 outgoingTop;
+     }
+ 
++    struct MatchTopState {
++        bool trackTop;
++        uint32 survivingNonce;
++    }
++
+     /// @notice One isolated radix book for one token pair epoch.
+     /// @dev The low 32 bits of `nonceAndFlags` are the decrementing order nonce, bits 32-63 are
+     /// reserved, and bits 64-95 are the ascending branch serial. The zero
+@@ -348,15 +355,20 @@
+         if (root != bytes32(0)) {
+             bytes32 oldTop;
+             if (hookEnabled) oldTop = _rightmostLeaf(book, root);
++            MatchTopState memory topState;
++            topState.trackTop = hookEnabled;
+             bytes32 newRoot;
+-            (newRoot, baseFilled, quoteAmount) = _matchSubtree(id, book, root, limitPrice, remaining, restingIsBid);
++            (newRoot, baseFilled, quoteAmount) =
++                _matchSubtree(id, book, root, limitPrice, remaining, restingIsBid, topState);
+             remaining -= baseFilled;
+             if (newRoot != root) {
+                 if (restingIsBid) book.tree[_ROOT_NODE].rightNode = newRoot;
+                 else book.tree[_ROOT_NODE].leftNode = newRoot;
+             }
+             if (hookEnabled && baseFilled != 0) {
+-                _recordTopOrderChange(oldTop, _replacementTopNonce(book, newRoot));
++                uint32 incomingNonce = topState.survivingNonce;
++                if (incomingNonce == 0) incomingNonce = _replacementTopNonce(book, newRoot);
++                _recordTopOrderChange(oldTop, incomingNonce);
+             }
+         }
+ 
+@@ -594,8 +606,7 @@
+         uint32 newBranchSerial,
+         InsertQuoteState memory quoteState
+     ) private {
+-        bytes32 oldTop;
+-        if (insertFlags & _MATCH_HOOK != 0 && root != bytes32(0)) oldTop = _rightmostLeaf(book, root);
++        quoteState.mayReplaceTop = insertFlags & _MATCH_HOOK != 0;
+         bytes32 newRoot = restingOrder;
+         if (root != bytes32(0)) {
+             uint64 key = isBid ? _bidSortKey(restingOrder) : _askSortKey(restingOrder);
+@@ -609,8 +620,9 @@
+         if (isBid) book.tree[_ROOT_NODE].rightNode = newRoot;
+         else book.tree[_ROOT_NODE].leftNode = newRoot;
+         if (insertFlags & _MATCH_HOOK != 0) {
+-            uint32 newTop = _replacementTopNonce(book, newRoot);
+-            if (newTop != _nonce(oldTop)) _recordTopOrderChange(oldTop, newTop);
++            if (root == bytes32(0) || quoteState.outgoingTop != bytes32(0)) {
++                _recordTopOrderChange(quoteState.outgoingTop, _nonce(restingOrder));
++            }
+         }
+     }
+ 
+@@ -699,17 +711,19 @@
+         bytes32 node,
+         int32 limitPrice,
+         uint160 remaining,
+-        bool restingIsBid
++        bool restingIsBid,
++        MatchTopState memory topState
+     ) private returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount) {
+         uint32 correction = _correctionCode(node);
+         if (correction != 0) {
+             int32 tick = _price(node);
+             if (restingIsBid ? tick < limitPrice : tick > limitPrice) return (node, 0, 0);
+-            return _matchUniformSubtree(book, node, remaining, restingIsBid, tick);
++            return _matchUniformSubtree(book, node, remaining, restingIsBid, tick, topState);
+         }
+         if (_nonce(node) >= _nextBranchSerial(book.nonceAndFlags)) {
+             if (restingIsBid) (newNode,, fillQuantity, quoteAmount) = _matchBidLeaf(node, limitPrice, remaining);
+             else (newNode,, fillQuantity, quoteAmount) = _matchAskLeaf(node, limitPrice, remaining);
++            if (topState.trackTop && newNode != bytes32(0)) topState.survivingNonce = _nonce(newNode);
+             return (newNode, fillQuantity, quoteAmount);
+         }
+ 
+@@ -725,12 +739,13 @@
+         bytes32 rightNode = book.tree[_branchKey(node)].rightNode;
+         uint160 rightFill;
+         uint256 rightQuote;
+-        (rightNode, rightFill, rightQuote) = _matchSubtree(id, book, rightNode, limitPrice, remaining, restingIsBid);
++        (rightNode, rightFill, rightQuote) =
++            _matchSubtree(id, book, rightNode, limitPrice, remaining, restingIsBid, topState);
+         if (rightFill == 0) return (node, 0, 0);
+         remaining -= rightFill;
+         if (rightNode == bytes32(0) && remaining != 0) {
+             (leftNode, fillQuantity, quoteAmount) =
+-                _matchSubtree(id, book, leftNode, limitPrice, remaining, restingIsBid);
++                _matchSubtree(id, book, leftNode, limitPrice, remaining, restingIsBid, topState);
+         }
+         fillQuantity += rightFill;
+         quoteAmount += rightQuote;
+@@ -753,6 +768,7 @@
+             witness = isBid ? _bidSortKey(root) : _askSortKey(root);
+             split = _commonPrefix(nodeKey, witness);
+             if (split == 64) revert DuplicateOrder();
++            if (quoteState.mayReplaceTop && nodeKey > witness) quoteState.outgoingTop = root;
+             return (root, witness, split);
+         }
+         _observeTreeWalk(1);
+@@ -763,10 +779,14 @@
+             // Only tick bits are meaningful in a branch representative. A split before this
+             // subtree's depth can be placed without descending to a witness order nonce.
+             if (priceSplit < 32 && priceSplit < depth) {
++                if (quoteState.mayReplaceTop && _bit(nodeKey, priceSplit)) {
++                    quoteState.outgoingTop = _rightmostLeaf(book, root);
++                }
+                 return (_storeBranch(book, root, node, representative, nodeKey, isBid, serial, quoteState), 0, 255);
+             }
+         }
+         bool goRight = _bit(nodeKey, depth);
++        if (!goRight) quoteState.mayReplaceTop = false;
+         bytes32 child = goRight ? rightNode : leftNode;
+         (child, witness, split) = _insertPath(book, child, node, nodeKey, isBid, serial, quoteState);
+         if (split != 255) {
+@@ -940,12 +960,19 @@
+     /// @dev The nonzero correction code proves that every descendant has `tick`. Exact quote
+     /// deltas returned by child frames let each surviving ancestor update its correction without
+     /// independently repricing both children.
+-    function _matchUniformSubtree(Book storage book, bytes32 node, uint160 remaining, bool restingIsBid, int32 tick)
++    function _matchUniformSubtree(
++        Book storage book,
++        bytes32 node,
++        uint160 remaining,
++        bool restingIsBid,
++        int32 tick,
++        MatchTopState memory topState
++    )
+         private
+         returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount)
+     {
+         (uint256 factor, uint16 shift) = TickMath32.getPriceFactorAtTick(tick);
+-        return _matchUniformSubtreeAtFactor(book, node, remaining, restingIsBid, factor, shift);
++        return _matchUniformSubtreeAtFactor(book, node, remaining, restingIsBid, factor, shift, topState);
+     }
+ 
+     /// @dev Uniform-subtree recursion with the decoded price factor carried through every frame.
+@@ -955,7 +982,8 @@
+         uint160 remaining,
+         bool restingIsBid,
+         uint256 factor,
+-        uint16 shift
++        uint16 shift,
++        MatchTopState memory topState
+     ) private returns (bytes32 newNode, uint160 fillQuantity, uint256 quoteAmount) {
+         uint160 nodeQuantity = _quantity(node);
+         uint32 correctionCode = _correctionCode(node);
+@@ -972,6 +1000,7 @@
+         }
+ 
+         if (correctionCode == 0) {
++            if (topState.trackTop) topState.survivingNonce = _nonce(node);
+             uint160 newQuantity;
+             unchecked {
+                 newQuantity = nodeQuantity - remaining;
+@@ -990,14 +1019,14 @@
+         uint160 rightFillQuantity;
+         uint256 rightQuoteAmount;
+         (rightNode, rightFillQuantity, rightQuoteAmount) =
+-            _matchUniformSubtreeAtFactor(book, rightNode, remaining, restingIsBid, factor, shift);
++            _matchUniformSubtreeAtFactor(book, rightNode, remaining, restingIsBid, factor, shift, topState);
+ 
+         unchecked {
+             remaining -= rightFillQuantity;
+         }
+         if (remaining != 0) {
+             (leftNode, fillQuantity, quoteAmount) =
+-                _matchUniformSubtreeAtFactor(book, leftNode, remaining, restingIsBid, factor, shift);
++                _matchUniformSubtreeAtFactor(book, leftNode, remaining, restingIsBid, factor, shift, topState);
+         }
+ 
+         unchecked {

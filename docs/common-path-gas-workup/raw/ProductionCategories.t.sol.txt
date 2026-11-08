@@ -1,0 +1,278 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity 0.8.28;
+
+import {DeepstateV1} from "../src/DeepstateV1.sol";
+import {RadixMatchingEngineGasTest, GasTestERC20} from "./RadixMatchingEngineGas.t.sol";
+
+contract ProductionActor {
+    struct Action {
+        bool cancelOrder;
+        bool bid;
+        bytes32 order;
+    }
+
+    function approve(GasTestERC20 token, address engine) external {
+        token.approve(engine, type(uint256).max);
+    }
+
+    function run(DeepstateV1 engine, address token0, address token1, Action[] memory actions)
+        external
+        returns (bytes32[] memory orders)
+    {
+        orders = new bytes32[](actions.length);
+        for (uint256 i; i < actions.length; ++i) {
+            Action memory action = actions[i];
+            if (action.cancelOrder) engine.cancel(token0, token1, 0, action.order);
+            else {
+                orders[i] = engine.fill(DeepstateV1.FillParams({token0: token0, token1: token1, epoch: 0,
+                    order: action.order, isBid: action.bid, noRest: false, fillOrKill: false}));
+            }
+        }
+    }
+}
+
+contract ProductionCountingHook {
+    uint256 public calls;
+
+    function execute(bytes32, bytes32, address, uint160, uint32) external {
+        ++calls;
+    }
+}
+
+contract ProductionCategoriesTest is RadixMatchingEngineGasTest {
+    uint160 private constant Q = 1_000_000;
+    ProductionActor private maker;
+    ProductionActor private taker;
+    ProductionCountingHook private hook;
+    bytes32 private makerBid;
+    bytes32 private makerAsk;
+    int32 private bidTick;
+    int32 private askTick;
+    int32 private backgroundAskTick;
+
+    function _afterSetUp() internal override {
+        maker = new ProductionActor();
+        taker = new ProductionActor();
+        hook = new ProductionCountingHook();
+        _fundLargeAndApprove(alice);
+        for (uint256 i; i < 2; ++i) {
+            ProductionActor actor = i == 0 ? maker : taker;
+            base.mint(address(actor), uint256(1) << 220);
+            quote.mint(address(actor), uint256(1) << 220);
+            actor.approve(base, address(engine));
+            actor.approve(quote, address(engine));
+        }
+        engine.setPoolHookConfig(address(base), address(quote), address(hook), true, true);
+        engine.setFeeConfig(address(0xFEE), 10);
+        this.seedObservedBook();
+    }
+
+    function seedObservedBook() external {
+        require(msg.sender == address(this));
+        (int32[] memory ticks, uint160[] memory quantities, uint32[] memory nonces, bool[] memory bids) =
+            abi.decode(vm.envBytes("PRODUCTION_SNAPSHOT"), (int32[], uint160[], uint32[], bool[]));
+        int32 bestBid = type(int32).min;
+        int32 bestAsk = type(int32).max;
+        for (uint256 i; i < ticks.length; ++i) {
+            _forceNextOrderNonce(nonces[i]);
+            vm.prank(alice);
+            bytes32 order = _fill(_order(ticks[i], quantities[i], 0), bids[i]);
+            assertEq(uint32(uint256(order)), nonces[i], "snapshot order must rest with its observed nonce");
+            assertEq(_quantity(order), quantities[i]);
+            if (bids[i] && ticks[i] > bestBid) bestBid = ticks[i];
+            if (!bids[i] && ticks[i] < bestAsk) bestAsk = ticks[i];
+        }
+        assertGt(int256(bestAsk) - int256(bestBid), 10);
+        bidTick = bestBid + 1;
+        askTick = bestAsk - 1;
+        backgroundAskTick = bestAsk;
+        ProductionActor.Action[] memory actions = new ProductionActor.Action[](2);
+        actions[0] = _rest(true, bidTick, Q);
+        actions[1] = _rest(false, askTick, Q);
+        bytes32[] memory orders = _run(maker, actions);
+        makerBid = orders[0];
+        makerAsk = orders[1];
+        assertEq(_quantity(makerBid), Q);
+        assertEq(_quantity(makerAsk), Q);
+    }
+
+    function testProduction_RestBidAtBest() public { _restCase(true, false); }
+    function testProduction_RestAskAtBest() public { _restCase(false, false); }
+    function testProduction_RestBidImproved() public { _restCase(true, true); }
+    function testProduction_RestAskImproved() public { _restCase(false, true); }
+    function testProduction_CancelUnfilledBid() public { _cancelCase(true, false, false); }
+    function testProduction_CancelUnfilledAsk() public { _cancelCase(false, false, false); }
+    function testProduction_CancelPartialBid() public { _cancelCase(true, true, false); }
+    function testProduction_CancelPartialAsk() public { _cancelCase(false, true, false); }
+    function testProduction_ClaimFilledBid() public { _cancelCase(true, true, true); }
+    function testProduction_ClaimFilledAsk() public { _cancelCase(false, true, true); }
+    function testProduction_MatchFullBid() public { _matchCase(true, Q); }
+    function testProduction_MatchFullAsk() public { _matchCase(false, Q); }
+    function testProduction_MatchPartialBid() public { _matchCase(true, Q / 2); }
+    function testProduction_MatchPartialAsk() public { _matchCase(false, Q / 2); }
+    function testProduction_MatchAndRestBid() public { _matchCase(false, Q + 3); }
+    function testProduction_MatchAndRestAsk() public { _matchCase(true, Q + 3); }
+    function testProduction_ReplaceBid() public { _replaceCase(true, false); }
+    function testProduction_ReplaceAsk() public { _replaceCase(false, false); }
+    function testProduction_PartialCancelReplaceBid() public { _replaceCase(true, true); }
+    function testProduction_PartialCancelReplaceAsk() public { _replaceCase(false, true); }
+
+    function testProduction_ReplacePair() public {
+        vm.pauseGasMetering();
+        ProductionActor.Action[] memory actions = _replacementPair();
+        uint256 beforeHook = hook.calls();
+        vm.resumeGasMetering();
+        bytes32[] memory orders = _run(maker, actions);
+        vm.pauseGasMetering();
+        assertEq(_ownerOfOrder(makerBid), address(0));
+        assertEq(_ownerOfOrder(makerAsk), address(0));
+        assertEq(_ownerOfOrder(orders[2]), address(maker));
+        assertEq(_ownerOfOrder(orders[3]), address(maker));
+        assertEq(hook.calls() - beforeHook, 4);
+        _economicState();
+        vm.resumeGasMetering();
+    }
+
+    function testProduction_ClaimAndCancelPair() public {
+        vm.pauseGasMetering();
+        _take(false, Q);
+        ProductionActor.Action[] memory actions = new ProductionActor.Action[](2);
+        actions[0] = _cancel(true);
+        actions[1] = _cancel(false);
+        uint256 beforeHook = hook.calls();
+        vm.resumeGasMetering();
+        _run(maker, actions);
+        vm.pauseGasMetering();
+        assertEq(_ownerOfOrder(makerBid), address(0));
+        assertEq(_ownerOfOrder(makerAsk), address(0));
+        assertEq(hook.calls() - beforeHook, 1);
+        _economicState();
+        vm.resumeGasMetering();
+    }
+
+    function testProduction_MatchCancelReplacePair() public {
+        vm.pauseGasMetering();
+        ProductionActor.Action[] memory actions = new ProductionActor.Action[](5);
+        actions[0] = _cancel(true);
+        actions[1] = _cancel(false);
+        actions[2] = _rest(true, backgroundAskTick, 1000);
+        actions[3] = _rest(true, bidTick + 1, Q);
+        actions[4] = _rest(false, askTick - 1, Q);
+        uint256 beforeHook = hook.calls();
+        vm.resumeGasMetering();
+        bytes32[] memory orders = _run(maker, actions);
+        vm.pauseGasMetering();
+        assertEq(orders[2], bytes32(0), "background trade must fill");
+        assertEq(_ownerOfOrder(makerBid), address(0));
+        assertEq(_ownerOfOrder(makerAsk), address(0));
+        assertEq(_ownerOfOrder(orders[3]), address(maker));
+        assertEq(_ownerOfOrder(orders[4]), address(maker));
+        assertEq(hook.calls() - beforeHook, 5);
+        _economicState();
+        vm.resumeGasMetering();
+    }
+
+    function _restCase(bool bid, bool improved) private {
+        vm.pauseGasMetering();
+        int32 tick = bid ? bidTick : askTick;
+        if (improved) tick = bid ? tick + 1 : tick - 1;
+        ProductionActor.Action[] memory actions = new ProductionActor.Action[](1);
+        actions[0] = _rest(bid, tick, Q);
+        uint256 beforeHook = hook.calls();
+        vm.resumeGasMetering();
+        bytes32[] memory orders = _run(maker, actions);
+        vm.pauseGasMetering();
+        assertEq(_ownerOfOrder(orders[0]), address(maker));
+        assertEq(_quantity(orders[0]), Q);
+        assertEq(hook.calls() - beforeHook, improved ? 1 : 0);
+        _economicState();
+        vm.resumeGasMetering();
+    }
+
+    function _cancelCase(bool bid, bool matched, bool fullyFilled) private {
+        vm.pauseGasMetering();
+        if (matched) _take(bid, fullyFilled ? Q : Q / 2);
+        ProductionActor.Action[] memory actions = new ProductionActor.Action[](1);
+        actions[0] = _cancel(bid);
+        uint256 beforeHook = hook.calls();
+        vm.resumeGasMetering();
+        _run(maker, actions);
+        vm.pauseGasMetering();
+        assertEq(_ownerOfOrder(bid ? makerBid : makerAsk), address(0));
+        assertEq(hook.calls() - beforeHook, fullyFilled ? 0 : 1);
+        _economicState();
+        vm.resumeGasMetering();
+    }
+
+    function _matchCase(bool restingBid, uint160 quantity) private {
+        vm.pauseGasMetering();
+        ProductionActor.Action[] memory actions = new ProductionActor.Action[](1);
+        actions[0] = _rest(!restingBid, restingBid ? bidTick : askTick, quantity);
+        uint256 beforeHook = hook.calls();
+        vm.resumeGasMetering();
+        bytes32[] memory orders = _run(taker, actions);
+        vm.pauseGasMetering();
+        if (quantity > Q) {
+            assertEq(_quantity(orders[0]), quantity - Q);
+            assertEq(_ownerOfOrder(orders[0]), address(taker));
+        } else assertEq(orders[0], bytes32(0));
+        assertEq(hook.calls() - beforeHook, quantity > Q ? 2 : 1);
+        _economicState();
+        vm.resumeGasMetering();
+    }
+
+    function _replaceCase(bool bid, bool partiallyFilled) private {
+        vm.pauseGasMetering();
+        if (partiallyFilled) _take(bid, Q / 2);
+        ProductionActor.Action[] memory actions = new ProductionActor.Action[](2);
+        actions[0] = _cancel(bid);
+        actions[1] = _rest(bid, bid ? bidTick + 1 : askTick - 1, Q);
+        uint256 beforeHook = hook.calls();
+        vm.resumeGasMetering();
+        bytes32[] memory orders = _run(maker, actions);
+        vm.pauseGasMetering();
+        assertEq(_ownerOfOrder(bid ? makerBid : makerAsk), address(0));
+        assertEq(_ownerOfOrder(orders[1]), address(maker));
+        assertEq(_quantity(orders[1]), Q);
+        assertEq(hook.calls() - beforeHook, 2);
+        _economicState();
+        vm.resumeGasMetering();
+    }
+
+    function _replacementPair() private view returns (ProductionActor.Action[] memory actions) {
+        actions = new ProductionActor.Action[](4);
+        actions[0] = _cancel(true);
+        actions[1] = _cancel(false);
+        actions[2] = _rest(true, bidTick + 1, Q);
+        actions[3] = _rest(false, askTick - 1, Q);
+    }
+
+    function _economicState() private {
+        address[5] memory accounts = [address(maker), address(taker), alice, address(engine), address(0xFEE)];
+        uint256[10] memory balances;
+        for (uint256 i; i < accounts.length; ++i) {
+            balances[i * 2] = base.balanceOf(accounts[i]);
+            balances[i * 2 + 1] = quote.balanceOf(accounts[i]);
+        }
+        emit log_named_bytes32("economic state", keccak256(abi.encode(balances, hook.calls(),
+            _ownerOfOrder(makerBid), _ownerOfOrder(makerAsk))));
+    }
+
+    function _take(bool restingBid, uint160 quantity) private {
+        ProductionActor.Action[] memory actions = new ProductionActor.Action[](1);
+        actions[0] = _rest(!restingBid, restingBid ? bidTick : askTick, quantity);
+        _run(taker, actions);
+    }
+
+    function _rest(bool bid, int32 tick, uint160 quantity) private pure returns (ProductionActor.Action memory) {
+        return ProductionActor.Action(false, bid, _order(tick, quantity, 0));
+    }
+
+    function _cancel(bool bid) private view returns (ProductionActor.Action memory) {
+        return ProductionActor.Action(true, bid, bid ? makerBid : makerAsk);
+    }
+
+    function _run(ProductionActor actor, ProductionActor.Action[] memory actions) private returns (bytes32[] memory) {
+        return actor.run(engine, address(base), address(quote), actions);
+    }
+}

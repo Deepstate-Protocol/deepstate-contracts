@@ -33,8 +33,6 @@ contract RadixMatchingEngineGasTest is Test {
     int32 internal constant LARGE_ASK_BASE_PRICE = 2_000_000;
     int32 internal constant LARGE_REST_BID_PRICE = 1_750_000;
     int32 internal constant LARGE_REST_ASK_PRICE = 1_750_001;
-    uint256 internal constant BOOK_HOOK_TOKEN0_ACTIVE = uint256(1) << 34;
-    uint256 internal constant BOOK_HOOK_TOKEN1_ACTIVE = uint256(1) << 35;
 
     struct LargeRandomBook {
         bytes32 bestBid;
@@ -63,7 +61,7 @@ contract RadixMatchingEngineGasTest is Test {
             base = tokenB;
             quote = tokenA;
         }
-        engine = new DeepstateV1();
+        engine = DeepstateV1(payable(deployCode("DeepstateV1.sol:DeepstateV1")));
 
         _fundAndApprove(alice);
         _fundAndApprove(bob);
@@ -159,6 +157,40 @@ contract RadixMatchingEngineGasTest is Test {
         assertEq(restingAsk, bytes32(0));
         assertEq(_bidRoot(), _order(100, 3, type(uint32).max));
         assertEq(_ownerOfOrder(restingBid), bob);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_FillBidPartiallyMatchesOffSpineAskBranch() public {
+        vm.pauseGasMetering();
+        for (uint256 i; i < 4; ++i) {
+            vm.prank(bob);
+            _fill(_order(90, 10, 0), false);
+        }
+
+        vm.prank(alice);
+        vm.resumeGasMetering();
+        bytes32 restingBid = _fill(_order(90, 25, 0), true);
+        vm.pauseGasMetering();
+
+        assertEq(restingBid, bytes32(0));
+        assertEq(_quantity(_askRoot()), 15);
+        vm.resumeGasMetering();
+    }
+
+    function testGas_FillAskPartiallyMatchesOffSpineBidBranch() public {
+        vm.pauseGasMetering();
+        for (uint256 i; i < 4; ++i) {
+            vm.prank(bob);
+            _fill(_order(90, 10, 0), true);
+        }
+
+        vm.prank(alice);
+        vm.resumeGasMetering();
+        bytes32 restingAsk = _fill(_order(90, 25, 0), false);
+        vm.pauseGasMetering();
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(_quantity(_bidRoot()), 15);
         vm.resumeGasMetering();
     }
 
@@ -367,6 +399,23 @@ contract RadixMatchingEngineGasTest is Test {
         vm.resumeGasMetering();
     }
 
+    function testGas_PathologicalOffSpinePartialFillBidComb() public {
+        vm.pauseGasMetering();
+        _buildOffSpineBidNonceComb();
+
+        address seller = address(0x5E11E2);
+        _fundAndApprove(seller);
+
+        vm.prank(seller);
+        vm.resumeGasMetering();
+        bytes32 restingAsk = _fill(_order(type(int32).min, 2, 0), false);
+        vm.pauseGasMetering();
+
+        assertEq(restingAsk, bytes32(0));
+        assertEq(_subtreeQuantity(_bidRoot()), 135);
+        vm.resumeGasMetering();
+    }
+
     function testGas_CancelFullDepthBidCombRightmost() public {
         vm.pauseGasMetering();
         bytes32 targetBid = _buildFullDepthBidNonceComb();
@@ -509,6 +558,124 @@ contract RadixMatchingEngineGasTest is Test {
         vm.stopPrank();
     }
 
+    function testGas_DirtyBidSmallFill16Orders() public {
+        _measureDirtySamePriceFill(true, 16, false, 1);
+    }
+
+    function testGas_DirtyAskSmallFill16Orders() public {
+        _measureDirtySamePriceFill(false, 16, false, 1);
+    }
+
+    function testGas_DirtyBidSmallFill64Orders() public {
+        _measureDirtySamePriceFill(true, 64, false, 1);
+    }
+
+    function testGas_DirtyAskSmallFill64Orders() public {
+        _measureDirtySamePriceFill(false, 64, false, 1);
+    }
+
+    function testGas_DirtyBidSmallFillNonceComb() public {
+        _measureDirtySamePriceFill(true, 33, true, 1);
+    }
+
+    function testGas_DirtyAskSmallFillNonceComb() public {
+        _measureDirtySamePriceFill(false, 33, true, 1);
+    }
+
+    function testGas_DirtyBidCrossLeafNonceComb() public {
+        _measureDirtySamePriceFill(true, 33, true, 12);
+    }
+
+    function testGas_DirtyAskCrossLeafNonceComb() public {
+        _measureDirtySamePriceFill(false, 33, true, 12);
+    }
+
+    function testGas_DirtyBidWholeNonceComb() public {
+        _measureDirtySamePriceFill(true, 33, true, 329);
+    }
+
+    function testGas_DirtyAskWholeNonceComb() public {
+        _measureDirtySamePriceFill(false, 33, true, 329);
+    }
+
+    function testGas_DirtyBidHalfNonceComb() public {
+        _measureDirtySamePriceFill(true, 33, true, 160);
+    }
+
+    function testGas_DirtyAskHalfNonceComb() public {
+        _measureDirtySamePriceFill(false, 33, true, 160);
+    }
+
+    function testGas_DirtyBidNearlyWholeNonceComb() public {
+        _measureDirtySamePriceFill(true, 33, true, 320);
+    }
+
+    function testGas_DirtyAskNearlyWholeNonceComb() public {
+        _measureDirtySamePriceFill(false, 33, true, 320);
+    }
+
+    function _measureDirtySamePriceFill(bool restingIsBid, uint256 count, bool comb, uint160 take) private {
+        vm.pauseGasMetering();
+        for (uint256 i; i < count; ++i) {
+            if (comb && i != 0) {
+                uint32 nonce = MAX_ORDER_NONCE ^ uint32(uint256(1) << (32 - i));
+                _forceNextOrderNonce(nonce);
+            }
+            vm.prank(alice);
+            _fill(_order(50, 10, 0), restingIsBid);
+        }
+        vm.prank(carol);
+        _fill(_order(50, 1, 0), !restingIsBid);
+        uint256 beforeBase = base.balanceOf(carol);
+        uint256 beforeQuote = quote.balanceOf(carol);
+        uint160 remainder = take;
+        uint256 expectedQuote;
+        for (uint256 i; i < count && remainder != 0; ++i) {
+            uint160 liveQuantity = i == 0 ? 9 : 10;
+            uint160 fill = remainder < liveQuantity ? remainder : liveQuantity;
+            expectedQuote += _quoteValue(50, liveQuantity, restingIsBid)
+            - _quoteValue(50, liveQuantity - fill, restingIsBid);
+            remainder -= fill;
+        }
+        assertEq(remainder, 0);
+        (, uint16 feeBps) = engine.feeConfig();
+        uint256 netBase = restingIsBid ? take : take - (uint256(take) * feeBps) / 10_000;
+        uint256 netQuote = restingIsBid ? expectedQuote - (expectedQuote * feeBps) / 10_000 : expectedQuote;
+
+        vm.prank(carol);
+        vm.resumeGasMetering();
+        bytes32 rested = _fill(_order(50, take, 0), !restingIsBid);
+        vm.pauseGasMetering();
+
+        assertEq(rested, bytes32(0));
+        assertEq(base.balanceOf(carol), restingIsBid ? beforeBase - take : beforeBase + netBase);
+        assertEq(quote.balanceOf(carol), restingIsBid ? beforeQuote + netQuote : beforeQuote - expectedQuote);
+        bytes32 top = restingIsBid ? _bidRoot() : _askRoot();
+        while (top != bytes32(0)) {
+            (, bytes32 right) = _tree(top);
+            if (right == bytes32(0)) break;
+            top = right;
+        }
+        if (take == count * 10 - 1) {
+            assertEq(top, bytes32(0));
+        } else {
+            uint256 index;
+            uint160 liveQuantity = 9;
+            remainder = take;
+            while (remainder >= liveQuantity) {
+                remainder -= liveQuantity;
+                ++index;
+                liveQuantity = 10;
+            }
+            uint32 topNonce = comb && index != 0
+                ? MAX_ORDER_NONCE - uint32(uint256(1) << (index - 1))
+                : MAX_ORDER_NONCE - uint32(index);
+            assertEq(_quantity(top), liveQuantity - remainder);
+            assertEq(uint32(uint256(top)), topNonce);
+        }
+        vm.resumeGasMetering();
+    }
+
     function _fill(bytes32 order, bool isBid) internal returns (bytes32 restingOrder) {
         restingOrder = engine.fill(
             DeepstateV1.FillParams({
@@ -608,7 +775,7 @@ contract RadixMatchingEngineGasTest is Test {
         uint64 targetKey = type(uint64).max;
         quote.mint(alice, uint256(1) << 200);
 
-        vm.store(address(engine), _nextNonceSlot(), bytes32(_nonceAndFlags(MAX_ORDER_NONCE)));
+        _forceNextOrderNonce(MAX_ORDER_NONCE);
         vm.prank(alice);
         targetOrder = _fill(_order(type(int32).max, 1, 0), true);
 
@@ -616,10 +783,13 @@ contract RadixMatchingEngineGasTest is Test {
             uint64 siblingKey = targetKey ^ uint64(uint256(1) << (63 - depth));
             // forge-lint: disable-next-line(unsafe-typecast)
             int32 price = int32(uint32(siblingKey >> 32) ^ 0x80000000);
+            // Price bits determine splits above depth 32, so those fixtures can use separate low
+            // nonces without changing the requested split. Nonce-bit splits already produce
+            // distinct nonces through depth 63.
             // forge-lint: disable-next-line(unsafe-typecast)
-            uint32 nonce = uint32(siblingKey);
+            uint32 nonce = depth < 32 ? MAX_ORDER_NONCE - uint32(depth) - 1 : uint32(siblingKey);
 
-            vm.store(address(engine), _nextNonceSlot(), bytes32(_nonceAndFlags(nonce)));
+            _forceNextOrderNonce(nonce);
             vm.prank(alice);
             _fill(_order(price, 1, 0), true);
         }
@@ -628,7 +798,7 @@ contract RadixMatchingEngineGasTest is Test {
     function _buildMaxValidDepthAskNonceComb() internal returns (bytes32 targetOrder) {
         uint64 targetSortKey = type(uint64).max;
 
-        vm.store(address(engine), _nextNonceSlot(), bytes32(_nonceAndFlags(MAX_ORDER_NONCE)));
+        _forceNextOrderNonce(MAX_ORDER_NONCE);
         vm.prank(alice);
         targetOrder = _fill(_order(type(int32).min, 1, 0), false);
 
@@ -637,9 +807,9 @@ contract RadixMatchingEngineGasTest is Test {
             uint32 sortableTick = type(uint32).max - uint32(sortKey >> 32);
             int32 price = int32(sortableTick ^ 0x80000000);
             // forge-lint: disable-next-line(unsafe-typecast)
-            uint32 nonce = uint32(sortKey);
+            uint32 nonce = depth < 32 ? MAX_ORDER_NONCE - uint32(depth) - 1 : uint32(sortKey);
 
-            vm.store(address(engine), _nextNonceSlot(), bytes32(_nonceAndFlags(nonce)));
+            _forceNextOrderNonce(nonce);
             vm.prank(alice);
             _fill(_order(price, 1, 0), false);
         }
@@ -649,7 +819,7 @@ contract RadixMatchingEngineGasTest is Test {
         uint64 targetKey = (uint64(uint32(price) ^ 0x80000000) << 32) | uint64(MAX_ORDER_NONCE);
         quote.mint(alice, 2_000_000_000);
 
-        vm.store(address(engine), _nextNonceSlot(), bytes32(_nonceAndFlags(MAX_ORDER_NONCE)));
+        _forceNextOrderNonce(MAX_ORDER_NONCE);
         vm.prank(alice);
         targetOrder = _fill(_order(price, 1, 0), true);
 
@@ -658,10 +828,37 @@ contract RadixMatchingEngineGasTest is Test {
             // forge-lint: disable-next-line(unsafe-typecast)
             uint32 nonce = uint32(siblingKey);
 
-            vm.store(address(engine), _nextNonceSlot(), bytes32(_nonceAndFlags(nonce)));
+            _forceNextOrderNonce(nonce);
             vm.prank(alice);
             _fill(_order(price, 1, 0), true);
         }
+    }
+
+    function _buildOffSpineBidNonceComb() internal {
+        uint64 targetKey = type(uint64).max >> 1;
+        quote.mint(alice, uint256(1) << 200);
+
+        _forceNextOrderNonce(MAX_ORDER_NONCE);
+        vm.prank(alice);
+        _fill(_order(-1, 10, 0), true);
+
+        for (uint256 depth = 1; depth < 64; ++depth) {
+            uint64 siblingKey = targetKey ^ uint64(uint256(1) << (63 - depth));
+            // forge-lint: disable-next-line(unsafe-typecast)
+            int32 price = int32(uint32(siblingKey >> 32) ^ 0x80000000);
+            // forge-lint: disable-next-line(unsafe-typecast)
+            uint32 nonce = depth < 32 ? MAX_ORDER_NONCE - uint32(depth) - 1 : uint32(siblingKey);
+
+            _forceNextOrderNonce(nonce);
+            vm.prank(alice);
+            _fill(_order(price, 2, 0), true);
+        }
+
+        // Add one globally better leaf so matching it first moves execution into the deep comb via
+        // `_matchBidSubtree`, where the following partial fill must rewrite every surviving branch.
+        _forceNextOrderNonce(MAX_ORDER_NONCE - 100);
+        vm.prank(alice);
+        _fill(_order(type(int32).max, 1, 0), true);
     }
 
     function _order(int32 price, uint160 quantity, uint32 nonce) internal pure returns (bytes32) {
@@ -736,8 +933,10 @@ contract RadixMatchingEngineGasTest is Test {
         return keccak256(abi.encode(_bookId(), uint256(0)));
     }
 
-    function _nonceAndFlags(uint256 nonce) internal pure virtual returns (uint256) {
-        return nonce;
+    function _forceNextOrderNonce(uint32 nonce) internal {
+        bytes32 slot = _nextNonceSlot();
+        uint256 nonceAndFlags = uint256(vm.load(address(engine), slot));
+        vm.store(address(engine), slot, bytes32((nonceAndFlags & ~uint256(type(uint32).max)) | nonce));
     }
 }
 
@@ -770,7 +969,7 @@ contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
 
     function setUp() public {
         usdc = new GasTestERC20();
-        engine = new DeepstateV1();
+        engine = DeepstateV1(payable(deployCode("DeepstateV1.sol:DeepstateV1")));
 
         usdc.mint(HOT_WALLET, uint256(1) << 220);
         usdc.mint(LIQUIDITY_PROVIDER, uint256(1) << 220);
@@ -911,7 +1110,7 @@ contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
 
             uint64 siblingKey = targetKey ^ bit;
             int32 siblingTick = int32(uint32(siblingKey >> 32) ^ 0x80000000);
-            uint32 siblingNonce = uint32(siblingKey);
+            uint32 siblingNonce = cursor >= 32 ? MAX_ORDER_NONCE - uint32(branches) - 1 : uint32(siblingKey);
             _setNextNonce(siblingNonce, false);
             vm.prank(LIQUIDITY_PROVIDER);
             _fillBid(siblingTick, 1);
@@ -925,7 +1124,7 @@ contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
 
         vm.prank(TAKER);
         _fillAskNoRest(targetTick, 1);
-        assertTrue(_nonceAndFlags() & BID_RIGHT_SPINE_DIRTY != 0, "bid spine was not marked dirty");
+        assertEq(_nonceAndFlags() & BID_RIGHT_SPINE_DIRTY, 0, "summaries remain exact");
     }
 
     function _fillObservedOrderThreeTimes() internal {
@@ -965,9 +1164,11 @@ contract RadixMatchingEngineGasTestNativeDirtySpine is Test {
     }
 
     function _setNextNonce(uint32 nonce, bool dirty) internal {
-        uint256 nonceAndFlags = uint256(nonce);
+        bytes32 slot = _nextNonceSlot();
+        uint256 nonceAndFlags = uint256(vm.load(address(engine), slot));
+        nonceAndFlags = (nonceAndFlags & ~(uint256(MAX_ORDER_NONCE) | BID_RIGHT_SPINE_DIRTY)) | nonce;
         if (dirty) nonceAndFlags |= BID_RIGHT_SPINE_DIRTY;
-        vm.store(address(engine), _nextNonceSlot(), bytes32(nonceAndFlags));
+        vm.store(address(engine), slot, bytes32(nonceAndFlags));
     }
 
     function _nonceAndFlags() internal view returns (uint256) {
@@ -1021,10 +1222,6 @@ contract RadixMatchingEngineHookGasTest is RadixMatchingEngineGasTest {
         hook = new MockHook();
         engine.setPoolHookConfig(address(base), address(quote), address(hook), true, true);
     }
-
-    function _nonceAndFlags(uint256 nonce) internal pure override returns (uint256) {
-        return nonce | BOOK_HOOK_TOKEN0_ACTIVE | BOOK_HOOK_TOKEN1_ACTIVE;
-    }
 }
 
 contract RadixMatchingEngineFeeGasTest is RadixMatchingEngineGasTest {
@@ -1046,7 +1243,7 @@ contract DeepstateV1IntegratorFeeGasTest is Test {
         GasTestERC20 tokenA = new GasTestERC20();
         GasTestERC20 tokenB = new GasTestERC20();
         (token0, token1) = address(tokenA) < address(tokenB) ? (tokenA, tokenB) : (tokenB, tokenA);
-        engine = new DeepstateV1();
+        engine = DeepstateV1(payable(deployCode("DeepstateV1.sol:DeepstateV1")));
         _fundAndApprove(MAKER);
         _fundAndApprove(TAKER);
     }

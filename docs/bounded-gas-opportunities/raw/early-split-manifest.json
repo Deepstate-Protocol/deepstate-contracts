@@ -1,0 +1,46 @@
+{
+  "variant": "early-split",
+  "compiler": "0.8.28+commit.7893614a",
+  "settings": {
+    "remappings": [
+      "forge-std/=/private/tmp/deepstate-solar-gas-20261107/contracts/lib/forge-std/src/",
+      "solady/=/private/tmp/deepstate-solar-gas-20261107/contracts/lib/solady/src/"
+    ],
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "metadata": {
+      "bytecodeHash": "ipfs"
+    },
+    "compilationTarget": {
+      "src/DeepstateV1.sol": "DeepstateV1"
+    },
+    "evmVersion": "cancun",
+    "libraries": {},
+    "viaIR": true
+  },
+  "sourceSha256": "270a3775fd5063e94562cfe7f3d359bd657b93d51b7017eaa37ebc26390fe024",
+  "sourceKeccak256": "0x5e75c554269a5f2cc1f46861bb0410c0e7f26d69dbb7569395e219ca3a7670e6",
+  "runtimeSha256": "0b9e53710b5c13bf0adab9795ecc42706bc51a8ef0afb7514671ad7cb11fb22b",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "baseline": "096eab28d87debdd472b4e22e65820e2b1b8d523",
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "early-split-release.log",
+      "snapshot": "early-split-release.snapshot",
+      "logSha256": "c5816ba1c4f5f8836c7614f3a0f64b4c0a8dd4bba7e2ddac57e06ac6e6d91965",
+      "snapshotSha256": "cf41aaa7e6b396c4f3c70c1c533fb1f5fbba2627348818b868defcc5d79f846b"
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "early-split-insertion.log",
+      "snapshot": "early-split-insertion.snapshot",
+      "logSha256": "388c1e9f682b9399514ad394aa03ac20512edeeeb4dbb7c14d24924d09f88459",
+      "snapshotSha256": "491de8f6721eddf762139ff8ebfb4198621750c31b6429960f9d50a5c4b4e8d8"
+    }
+  ]
+}

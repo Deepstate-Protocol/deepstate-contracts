@@ -1,0 +1,34 @@
+{
+  "variant": "02-cancel-successor",
+  "sourceSha256": "b0aefaca2ec79252222720e1472297800affce1c804cdcaf6beb5d5b0b051550",
+  "runtimeSha256": "64296c92c77ec4292af4c983f005a4663b39930907d8d75d98f0e3153f124b11",
+  "fixtureSha256": "62066e98fe58b2fb9e539e3efab721706f76fa89f8f7732786acd8721bd16ec7",
+  "compiler": "0.8.38+commit.e7a91fc7.solar.0.3.0",
+  "executor": "d3167db683c001c196126c912027437a9cb0bfb9",
+  "runs": [
+    {
+      "group": "release",
+      "count": 188,
+      "log": "02-cancel-successor-release.log",
+      "snapshot": "02-cancel-successor-release.snapshot",
+      "logSha256": "944f6a31b073f8cbf6adb13ca5805ebbd12ef6eb23d6d173116c8faae7589279",
+      "snapshotSha256": "786e198eabbf87f848d96e6e1fe01f8b045027563729e1640e81c0c92b4dd865"
+    },
+    {
+      "group": "insertion",
+      "count": 12,
+      "log": "02-cancel-successor-insertion.log",
+      "snapshot": "02-cancel-successor-insertion.snapshot",
+      "logSha256": "914966a7a496225f7de0e52b0e643df53332dbbabdd14e31823501bcd29127af",
+      "snapshotSha256": "309985fa14e0c121daebc86559f16d0d0b2d571d75e7f1ec5b33fe6fe489c974"
+    },
+    {
+      "group": "production",
+      "count": 23,
+      "log": "02-cancel-successor-production.log",
+      "snapshot": "02-cancel-successor-production.snapshot",
+      "logSha256": "0637c1ceec59d966d686db50c59d4cb030f63b881a6d2fd44dcbe2faf54dbc0a",
+      "snapshotSha256": "407f5b35d93b9e9602b175d97b2f4665b42320e31bb8a4baf5e9ab528e5a52ba"
+    }
+  ]
+}

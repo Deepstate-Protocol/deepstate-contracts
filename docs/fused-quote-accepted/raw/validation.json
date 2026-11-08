@@ -1,0 +1,328 @@
+{
+  "hashes": {
+    "src/DeepstateV1.sol": "b85ad09b308c69cb9ba2b309ce0f15dbaee8b0e5d51087650f7cff0a918e796f",
+    "src/libraries/TickMath32.sol": "c5402a448c54e8f63314c40ff9e394abac34bd51ba6f098306842c53077f874f",
+    "src/interfaces/IHook.sol": "f8b398822f45bf4dbcf270df93a4215e5a28cb031ea5ec62bd1b08e7ff713691",
+    "test/FusedQuote.t.sol": "397588d92201b56acf054e922867786425f4756a2ab9a4fea00cea7cd4540d2e",
+    "test/QuoteMath.sol": "82a0dc7acd912466c57e91a4ecb4bf970e8a2275f131ef24a327b434f03d59fa",
+    "script/prove_protocol.py": "5552f3ff876aed13d352a683fb1fc6b3c0b37166843a64c18bddf2c0263fca04"
+  },
+  "runs": [
+    {
+      "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+      "args": [
+        "test",
+        "--no-dynamic-test-linking",
+        "--out",
+        "out-fused-check",
+        "--cache-path",
+        "cache-fused-check",
+        "--threads",
+        "4",
+        "--match-contract",
+        "^FusedQuoteTest$",
+        "--fuzz-runs",
+        "4096"
+      ],
+      "log": "validation-focused.log",
+      "sha256": "aec23ff019f10a8238fa10264483090e16eddc4773ca4044eccfd8fbbdf454c8",
+      "status": 0,
+      "group": "focused"
+    },
+    {
+      "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+      "args": [
+        "test",
+        "--no-dynamic-test-linking",
+        "--out",
+        "out-fused-check",
+        "--cache-path",
+        "cache-fused-check",
+        "--threads",
+        "4",
+        "--no-match-contract",
+        "(Invariant|Gas|AccessList|BoundedTraversal)",
+        "--fuzz-runs",
+        "256"
+      ],
+      "log": "validation-behavior.log",
+      "sha256": "a13b8421c794cdd2ed3811ad2cc20e0a4475218aa358cf258c1095459d4fb4e2",
+      "status": 0,
+      "group": "behavior"
+    },
+    {
+      "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+      "args": [
+        "test",
+        "--no-dynamic-test-linking",
+        "--out",
+        "out-fused-check",
+        "--cache-path",
+        "cache-fused-check",
+        "--threads",
+        "4",
+        "--match-contract",
+        "^BoundedTraversalTest$",
+        "--match-test",
+        "^(test_|testFuzz_)",
+        "--fuzz-runs",
+        "256"
+      ],
+      "log": "validation-bounds.log",
+      "sha256": "4ed3f6cab31b0406769e76bd44653443e2bdeb6043c66e34b8921152fa1560b4",
+      "status": 0,
+      "group": "bounds"
+    },
+    {
+      "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+      "args": [
+        "test",
+        "--no-dynamic-test-linking",
+        "--out",
+        "out-fused-check",
+        "--cache-path",
+        "cache-fused-check",
+        "--threads",
+        "4",
+        "--match-contract",
+        "(RadixMatchingEngineInvariantTest|DeepstateV1MultiPoolInvariantTest|DeepstateV1NativeETHInvariantTest)",
+        "--match-test",
+        "invariant_.*"
+      ],
+      "log": "validation-invariants.log",
+      "sha256": "722cba87fb56340c43a1f11eefda99db1fc82b2f16cd202a361b055dfa721544",
+      "status": 0,
+      "group": "invariants"
+    },
+    {
+      "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+      "args": [
+        "snapshot",
+        "--no-dynamic-test-linking",
+        "--out",
+        "out-fused-check",
+        "--cache-path",
+        "cache-fused-check",
+        "--threads",
+        "4",
+        "--isolate",
+        "--match-contract",
+        "(RadixMatchingEngine(Gas|HookGas|FeeGas)Test|DeepstateV1IntegratorFeeGasTest)",
+        "--snap",
+        ".gas-snapshot.solar"
+      ],
+      "log": "validation-release-snapshot.log",
+      "sha256": "ec93949dd467d211861fa2c21cfa559a3957300d9cea7eb7ff5acac7d10a6123",
+      "status": 0,
+      "group": "release-snapshot"
+    },
+    {
+      "command": "python3",
+      "args": [
+        "script/prove_protocol.py"
+      ],
+      "log": "validation-smt.log",
+      "sha256": "9d5987115f7a016129a54f102bd6cff7658aad4092b86bf92b92a3b5667a7a69",
+      "status": 0,
+      "group": "smt"
+    },
+    {
+      "command": "/tmp/deepstate-solar-gas-20261107/toolchain/forge",
+      "args": [
+        "fmt",
+        "--check",
+        "src/DeepstateV1.sol",
+        "src/libraries/TickMath32.sol",
+        "src/interfaces/IHook.sol",
+        "test/FusedQuote.t.sol",
+        "test/QuoteMath.sol"
+      ],
+      "log": "validation-format.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "status": 0,
+      "group": "format"
+    }
+  ],
+  "compatibility": {
+    "publicAbiEqual": true,
+    "persistentStorageLayoutEqual": true,
+    "layout": {
+      "storage": [
+        {
+          "astId": 227,
+          "contract": "src/DeepstateV1.sol:DeepstateV1",
+          "label": "books",
+          "offset": 0,
+          "slot": "0",
+          "type": "t_mapping(t_bytes32,t_struct(Book)1480_storage)"
+        },
+        {
+          "astId": 228,
+          "contract": "src/DeepstateV1.sol:DeepstateV1",
+          "label": "orderOf",
+          "offset": 0,
+          "slot": "1",
+          "type": "t_mapping(t_bytes32,t_struct(OrderState)1476_storage)"
+        },
+        {
+          "astId": 258,
+          "contract": "src/DeepstateV1.sol:DeepstateV1",
+          "label": "_poolEpochAndHookFlags",
+          "offset": 0,
+          "slot": "2",
+          "type": "t_mapping(t_bytes32,t_uint256)"
+        },
+        {
+          "astId": 259,
+          "contract": "src/DeepstateV1.sol:DeepstateV1",
+          "label": "poolHook",
+          "offset": 0,
+          "slot": "3",
+          "type": "t_mapping(t_bytes32,t_address)"
+        },
+        {
+          "astId": 260,
+          "contract": "src/DeepstateV1.sol:DeepstateV1",
+          "label": "_feeConfig",
+          "offset": 0,
+          "slot": "4",
+          "type": "t_uint256"
+        }
+      ],
+      "types": {
+        "t_address": {
+          "encoding": "inplace",
+          "label": "address",
+          "numberOfBytes": "20"
+        },
+        "t_bool": {
+          "encoding": "inplace",
+          "label": "bool",
+          "numberOfBytes": "1"
+        },
+        "t_bytes32": {
+          "encoding": "inplace",
+          "label": "bytes32",
+          "numberOfBytes": "32"
+        },
+        "t_mapping(t_bytes32,t_address)": {
+          "encoding": "mapping",
+          "key": "t_bytes32",
+          "label": "mapping(bytes32 => address)",
+          "numberOfBytes": "32",
+          "value": "t_address"
+        },
+        "t_mapping(t_bytes32,t_struct(Book)1480_storage)": {
+          "encoding": "mapping",
+          "key": "t_bytes32",
+          "label": "mapping(bytes32 => struct DeepstateV1.Book)",
+          "numberOfBytes": "32",
+          "value": "t_struct(Book)1480_storage"
+        },
+        "t_mapping(t_bytes32,t_struct(Branch)1475_storage)": {
+          "encoding": "mapping",
+          "key": "t_bytes32",
+          "label": "mapping(bytes32 => struct DeepstateV1.Branch)",
+          "numberOfBytes": "32",
+          "value": "t_struct(Branch)1475_storage"
+        },
+        "t_mapping(t_bytes32,t_struct(OrderState)1476_storage)": {
+          "encoding": "mapping",
+          "key": "t_bytes32",
+          "label": "mapping(bytes32 => struct DeepstateV1.OrderState)",
+          "numberOfBytes": "32",
+          "value": "t_struct(OrderState)1476_storage"
+        },
+        "t_mapping(t_bytes32,t_uint256)": {
+          "encoding": "mapping",
+          "key": "t_bytes32",
+          "label": "mapping(bytes32 => uint256)",
+          "numberOfBytes": "32",
+          "value": "t_uint256"
+        },
+        "t_struct(Book)1480_storage": {
+          "encoding": "inplace",
+          "label": "struct DeepstateV1.Book",
+          "numberOfBytes": "64",
+          "members": [
+            {
+              "astId": 281,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "nonceAndFlags",
+              "offset": 0,
+              "slot": "0",
+              "type": "t_uint256"
+            },
+            {
+              "astId": 282,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "tree",
+              "offset": 0,
+              "slot": "1",
+              "type": "t_mapping(t_bytes32,t_struct(Branch)1475_storage)"
+            }
+          ]
+        },
+        "t_struct(Branch)1475_storage": {
+          "encoding": "inplace",
+          "label": "struct DeepstateV1.Branch",
+          "numberOfBytes": "96",
+          "members": [
+            {
+              "astId": 261,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "leftNode",
+              "offset": 0,
+              "slot": "0",
+              "type": "t_bytes32"
+            },
+            {
+              "astId": 262,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "rightNode",
+              "offset": 0,
+              "slot": "1",
+              "type": "t_bytes32"
+            },
+            {
+              "astId": 263,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "quoteTotal",
+              "offset": 0,
+              "slot": "2",
+              "type": "t_uint256"
+            }
+          ]
+        },
+        "t_struct(OrderState)1476_storage": {
+          "encoding": "inplace",
+          "label": "struct DeepstateV1.OrderState",
+          "numberOfBytes": "32",
+          "members": [
+            {
+              "astId": 264,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "owner",
+              "offset": 0,
+              "slot": "0",
+              "type": "t_address"
+            },
+            {
+              "astId": 265,
+              "contract": "src/DeepstateV1.sol:DeepstateV1",
+              "label": "isBid",
+              "offset": 20,
+              "slot": "0",
+              "type": "t_bool"
+            }
+          ]
+        },
+        "t_uint256": {
+          "encoding": "inplace",
+          "label": "uint256",
+          "numberOfBytes": "32"
+        }
+      }
+    }
+  }
+}
